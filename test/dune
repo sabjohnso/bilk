@@ -1,2 +1,3 @@
-(test
- (name wile))
+(tests
+ (names test_char_type test_datum test_readtable)
+ (libraries wile alcotest qcheck-core qcheck-alcotest))
