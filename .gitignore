@@ -1,0 +1,26 @@
+# OCaml / Dune
+_build/
+_opam/
+*.byte
+*.native
+*.install
+*.merlin
+.merlin
+
+# Editor
+*~
+\#*\#
+.\#*
+*.swp
+*.swo
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Scheme
+*.so
+*.fasl
+*.slfasl
