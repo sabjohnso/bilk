@@ -16,14 +16,14 @@ format provides reliable serialization of compiled code across releases.
       │
       ▼
   ┌────────┐
-  │ Reader │  readtable-driven, produces Datum
+  │ Reader │  readtable-driven, produces Syntax.t (datum + source location)
   └───┬────┘
-      │  Datum (s-expressions)
+      │  Syntax.t (s-expressions with source locations)
       ▼
   ┌────────────┐
   │  Expander  │  hygienic macro expansion (syntax-rules)
   └───┬────────┘
-      │  Core forms only
+      │  Syntax.t (core forms only)
       ▼
   ┌────────────┐
   │  Compiler  │  CPS transform → closure conversion → bytecode emission
@@ -31,9 +31,23 @@ format provides reliable serialization of compiled code across releases.
       │  Bytecode (Code_object.t)
       ▼
   ┌────────┐
-  │   VM   │  stack-based bytecode interpreter
+  │   VM   │  stack-based bytecode interpreter, values are Datum.t
   └────────┘
 ```
+
+**Two value representations:**
+
+- **`Syntax.t`** — compile-time representation. A recursive tree where every
+  node (pair, vector element, atom) carries a `Loc.t` source location. Used
+  by the reader, expander, and compiler. Mirrors the structure of `Datum.t`
+  but is a separate type.
+- **`Datum.t`** — runtime representation. Plain values with no source
+  location. Used by the VM, the garbage collector, and the embedding API.
+  `Syntax.to_datum` strips locations.
+
+The reader's primary entry point is `read_syntax` (produces `Syntax.t`).
+The `read` entry point is a thin wrapper that calls `read_syntax` then
+`Syntax.to_datum`.
 
 ### Key architectural decisions
 
@@ -81,14 +95,16 @@ What exists today:
 
 ### Milestone 1 — Reader
 
-Parse source text into `Datum` values using the readtable.
+Parse source text into syntax objects using the readtable.
 
 **Modules:**
 
 | Module | Responsibility |
 |---|---|
-| `Port` | Input/output port abstraction (string ports first, file ports later) |
-| `Reader` | Readtable-driven recursive-descent parser producing `Datum` |
+| `Loc` | Source location type: file, line, column (and optionally span end) |
+| `Syntax` | Recursive syntax tree — mirrors `Datum.t` structure but every node carries a `Loc.t`. Includes `Syntax.to_datum` for stripping locations. |
+| `Port` | Input/output port abstraction (string ports first, file ports later). Tracks current line/column. |
+| `Reader` | Readtable-driven recursive-descent parser. Primary entry point `read_syntax` produces `Syntax.t`; `read` wraps it via `Syntax.to_datum`. |
 
 **Reader must handle (R7RS §2, §7.1):**
 
@@ -105,9 +121,31 @@ Parse source text into `Datum` values using the readtable.
 - Datum labels: `#0=datum`, `#0#`
 - `#!fold-case`, `#!no-fold-case` directives
 
-**Approach:** Build incrementally — start with symbols and lists, then
-booleans, numbers, strings, characters, vectors, etc. Each form gets tests
-before implementation.
+**Approach:** Build incrementally — start with `Loc`, `Syntax`, and `Port`,
+then the reader proper: symbols and lists, then booleans, numbers, strings,
+characters, vectors, etc. Each form gets tests before implementation.
+
+**`Syntax.t` sketch:**
+
+```ocaml
+(* Loc *)
+type t = { file : string; line : int; col : int }
+
+(* Syntax *)
+type t = { loc : Loc.t; datum : datum }
+and datum =
+  | Bool of bool
+  | Fixnum of int
+  | Flonum of float
+  | Char of Uchar.t
+  | Str of string
+  | Symbol of string
+  | Pair of t * t
+  | Vector of t array
+  | Bytevector of bytes
+  | Nil
+  | Eof
+```
 
 **Number representation note:** `Datum.t` currently has only `Fixnum of int`.
 This milestone adds `Flonum of float` and stubs the full numeric tower.
@@ -153,7 +191,7 @@ Define the instruction set and get a minimal compile-and-run loop working.
 |---|---|
 | `Opcode` | Bytecode instruction set (variant type) |
 | `Code_object` | Compiled unit: bytecode array + constant pool + metadata |
-| `Compiler` | Datum → bytecode (initially direct, CPS transform comes in M5) |
+| `Compiler` | Syntax.t → bytecode (initially direct, CPS transform comes in M5) |
 | `Vm` | Stack-based bytecode interpreter |
 
 **Initial instruction set (grows over time):**
@@ -232,11 +270,11 @@ recursion.
 **Compiler pipeline becomes:**
 
 ```
-Datum (core forms)
+Syntax.t (core forms, with source locations)
   → CPS conversion       (every subexpression gets an explicit continuation)
   → CPS optimization     (beta reduction, eta reduction, dead code elimination)
   → Closure conversion   (free variable analysis, closure records)
-  → Bytecode emission
+  → Bytecode emission    (source locations preserved in debug info table)
 ```
 
 **New/modified VM support:**
@@ -301,8 +339,10 @@ Implement the R7RS macro system.
 - `define-syntax`, `let-syntax`, `letrec-syntax`
 - Hygiene via renaming (marks + substitutions, à la Dybvig)
 
-**Expander module:** Sits between the reader and compiler. Expands macros
-in a pre-pass, producing core forms only. Tracks scopes for hygiene.
+**Expander module:** Sits between the reader and compiler. Operates on
+`Syntax.t`, expands macros in a pre-pass, producing core forms only
+(still as `Syntax.t` with source locations preserved). Tracks scopes for
+hygiene.
 
 This milestone also implements `define-record-type` (§5.5) as a macro that
 expands to `define` forms.
@@ -523,10 +563,14 @@ my-package/
 
 ### Error reporting
 
-Every datum produced by the reader carries source location (file, line,
-column). The compiler propagates locations into bytecode via a debug info
-table (PC → source location). Error messages at every level (read, expand,
-compile, runtime) include source locations.
+The reader produces `Syntax.t` where every node carries a `Loc.t` (file,
+line, column). The expander and compiler work on `Syntax.t`, so source
+locations are available at every stage of processing. The compiler emits a
+debug info table mapping bytecode PCs to source locations. Error messages at
+every level (read, expand, compile, runtime) include source locations.
+
+`Datum.t` (runtime values) does not carry locations — source tracking is
+strictly a compile-time concern.
 
 ### Testing strategy
 

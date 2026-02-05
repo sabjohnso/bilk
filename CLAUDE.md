@@ -18,9 +18,14 @@ The full development plan is in `PLAN.md`.
 
 ```
 Source text → Reader → Expander → Compiler → VM
-                                    (CPS → closure conv → bytecode)
+              Syntax.t  Syntax.t              Datum.t
+                          (CPS → closure conv → bytecode)
 ```
 
+- **Two value representations.** `Syntax.t` is the compile-time tree — every
+  node carries a `Loc.t` source location. `Datum.t` is the runtime value —
+  no locations. The reader produces `Syntax.t`; the expander and compiler
+  consume it; the VM operates on `Datum.t`.
 - **Bytecode VM, not tree-walker.** No interpreter mode.
 - **CPS transformation** for `call/cc` and proper tail recursion.
 - **Instance-local state.** All mutable state lives in `Instance.t`. No
@@ -65,7 +70,9 @@ _opam/        # Local opam switch (gitignored)
 | `Datum` | Core Scheme value type (10 variants, structural equality, printer) |
 | `Readtable` | Immutable readtable with functional updates, R7RS default table |
 
-**Next: Milestone 1 (Reader)** — readtable-driven parser, source text → Datum.
+**Next: Milestone 1 (Reader)** — `Loc`, `Syntax`, `Port`, and readtable-driven
+parser. Primary entry point `read_syntax` produces `Syntax.t`; `read` wraps
+it via `Syntax.to_datum`.
 
 ## Development Workflow
 
