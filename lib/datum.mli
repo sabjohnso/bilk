@@ -20,7 +20,7 @@ type t =
 
 val equal : t -> t -> bool
 (** [equal a b] is recursive structural equality.  [Flonum] uses
-    {!Float.equal} (so [nan = nan] is [true]).  Vectors and bytevectors are
+    [Float.equal] (so [nan = nan] is [true]).  Vectors and bytevectors are
     compared element‐wise. *)
 
 val pp : Format.formatter -> t -> unit
@@ -28,7 +28,7 @@ val pp : Format.formatter -> t -> unit
     Uses dotted‐pair notation for improper lists and the standard [#t],
     [#f], [+inf.0], [-inf.0], [+nan.0] forms.
 
-    Suitable for use with {!Format.asprintf} and Alcotest's [testable]. *)
+    Suitable for use with [Format.asprintf] and Alcotest's [testable]. *)
 
 val to_string : t -> string
 (** [to_string d] is [Format.asprintf "%a" pp d]. *)
