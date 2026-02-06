@@ -1,6 +1,7 @@
 type t =
   | Bool of bool
   | Fixnum of int
+  | Flonum of float
   | Char of Uchar.t
   | Str of string
   | Symbol of string
@@ -14,6 +15,7 @@ let rec equal a b =
   match (a, b) with
   | Bool x, Bool y -> x = y
   | Fixnum x, Fixnum y -> x = y
+  | Flonum x, Flonum y -> Float.equal x y
   | Char x, Char y -> Uchar.equal x y
   | Str x, Str y -> String.equal x y
   | Symbol x, Symbol y -> String.equal x y
@@ -30,6 +32,14 @@ let rec pp fmt = function
   | Bool true -> Format.fprintf fmt "#t"
   | Bool false -> Format.fprintf fmt "#f"
   | Fixnum n -> Format.fprintf fmt "%d" n
+  | Flonum f ->
+    if Float.is_nan f then Format.fprintf fmt "+nan.0"
+    else if Float.is_infinite f then
+      if f > 0.0 then Format.fprintf fmt "+inf.0"
+      else Format.fprintf fmt "-inf.0"
+    else
+      let s = string_of_float f in
+      Format.fprintf fmt "%s" s
   | Char c -> Format.fprintf fmt "#\\x%04X" (Uchar.to_int c)
   | Str s -> Format.fprintf fmt "%S" s
   | Symbol s -> Format.fprintf fmt "%s" s

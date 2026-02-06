@@ -59,16 +59,28 @@ let test_datum_bytevector () =
   check_datum "bv eq" b1 b2;
   Alcotest.(check bool) "bv neq" false (Datum.equal b1 b3)
 
+let test_datum_flonum () =
+  check_datum "3.14" (Datum.Flonum 3.14) (Datum.Flonum 3.14);
+  check_datum "nan = nan" (Datum.Flonum Float.nan) (Datum.Flonum Float.nan);
+  Alcotest.(check bool) "1.0 != 2.0" false
+    (Datum.equal (Datum.Flonum 1.0) (Datum.Flonum 2.0))
+
 let test_datum_cross_type () =
   Alcotest.(check bool) "bool != fixnum" false
     (Datum.equal (Datum.Bool true) (Datum.Fixnum 1));
   Alcotest.(check bool) "nil != symbol" false
-    (Datum.equal Datum.Nil (Datum.Symbol "nil"))
+    (Datum.equal Datum.Nil (Datum.Symbol "nil"));
+  Alcotest.(check bool) "fixnum != flonum" false
+    (Datum.equal (Datum.Fixnum 1) (Datum.Flonum 1.0))
 
 let test_datum_pp () =
   Alcotest.(check string) "#t" "#t" (Datum.to_string (Bool true));
   Alcotest.(check string) "#f" "#f" (Datum.to_string (Bool false));
   Alcotest.(check string) "42" "42" (Datum.to_string (Fixnum 42));
+  Alcotest.(check string) "3.14" "3.14" (Datum.to_string (Flonum 3.14));
+  Alcotest.(check string) "+inf.0" "+inf.0" (Datum.to_string (Flonum infinity));
+  Alcotest.(check string) "-inf.0" "-inf.0" (Datum.to_string (Flonum neg_infinity));
+  Alcotest.(check string) "+nan.0" "+nan.0" (Datum.to_string (Flonum Float.nan));
   Alcotest.(check string) "sym" "foo" (Datum.to_string (Symbol "foo"));
   Alcotest.(check string) "nil" "()" (Datum.to_string Nil);
   Alcotest.(check string) "eof" "#<eof>" (Datum.to_string Eof);
@@ -88,6 +100,7 @@ let () =
     [ ("Datum",
        [ Alcotest.test_case "bool" `Quick test_datum_bool
        ; Alcotest.test_case "fixnum" `Quick test_datum_fixnum
+       ; Alcotest.test_case "flonum" `Quick test_datum_flonum
        ; Alcotest.test_case "symbol" `Quick test_datum_symbol
        ; Alcotest.test_case "nil and eof" `Quick test_datum_nil_eof
        ; Alcotest.test_case "pair" `Quick test_datum_pair
