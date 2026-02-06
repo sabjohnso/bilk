@@ -83,11 +83,11 @@ of frames.
 
 What exists today:
 
-| Module | Purpose |
-|---|---|
-| `Char_type` | Character classification for the readtable (6 variants) |
-| `Datum` | Core Scheme value type (10 variants, structural equality, printer) |
-| `Readtable` | Immutable readtable with functional updates, R7RS default table |
+| Module      | Purpose                                                            |
+|-------------|--------------------------------------------------------------------|
+| `Char_type` | Character classification for the readtable (6 variants)            |
+| `Datum`     | Core Scheme value type (10 variants, structural equality, printer) |
+| `Readtable` | Immutable readtable with functional updates, R7RS default table    |
 
 39 tests across 3 test files. TDD workflow established.
 
@@ -99,12 +99,12 @@ Parse source text into syntax objects using the readtable.
 
 **Modules:**
 
-| Module | Responsibility |
-|---|---|
-| `Loc` | Source location type: file, line, column (and optionally span end) |
+| Module   | Responsibility                                                                                                                            |
+|----------|-------------------------------------------------------------------------------------------------------------------------------------------|
+| `Loc`    | Source location type: file, line, column (and optionally span end)                                                                        |
 | `Syntax` | Recursive syntax tree — mirrors `Datum.t` structure but every node carries a `Loc.t`. Includes `Syntax.to_datum` for stripping locations. |
-| `Port` | Input/output port abstraction (string ports first, file ports later). Tracks current line/column. |
-| `Reader` | Readtable-driven recursive-descent parser. Primary entry point `read_syntax` produces `Syntax.t`; `read` wraps it via `Syntax.to_datum`. |
+| `Port`   | Input/output port abstraction (string ports first, file ports later). Tracks current line/column.                                         |
+| `Reader` | Readtable-driven recursive-descent parser. Primary entry point `read_syntax` produces `Syntax.t`; `read` wraps it via `Syntax.to_datum`.  |
 
 **Reader must handle (R7RS §2, §7.1):**
 
@@ -159,11 +159,11 @@ The runtime's variable binding infrastructure.
 
 **Modules:**
 
-| Module | Responsibility |
-|---|---|
-| `Symbol` | Interned symbols with unique integer ids; global intern table per instance |
-| `Env` | Lexical environment: chain of frames, each frame a mapping from Symbol.t to value slots |
-| `Instance` | Top-level record holding all per-instance state |
+| Module     | Responsibility                                                                          |
+|------------|-----------------------------------------------------------------------------------------|
+| `Symbol`   | Interned symbols with unique integer ids; global intern table per instance              |
+| `Env`      | Lexical environment: chain of frames, each frame a mapping from Symbol.t to value slots |
+| `Instance` | Top-level record holding all per-instance state                                         |
 
 **`Instance.t` sketch:**
 
@@ -187,12 +187,12 @@ Define the instruction set and get a minimal compile-and-run loop working.
 
 **Modules:**
 
-| Module | Responsibility |
-|---|---|
-| `Opcode` | Bytecode instruction set (variant type) |
-| `Code_object` | Compiled unit: bytecode array + constant pool + metadata |
-| `Compiler` | Syntax.t → bytecode (initially direct, CPS transform comes in M5) |
-| `Vm` | Stack-based bytecode interpreter |
+| Module        | Responsibility                                                    |
+|---------------|-------------------------------------------------------------------|
+| `Opcode`      | Bytecode instruction set (variant type)                           |
+| `Code_object` | Compiled unit: bytecode array + constant pool + metadata          |
+| `Compiler`    | Syntax.t → bytecode (initially direct, CPS transform comes in M5) |
+| `Vm`          | Stack-based bytecode interpreter                                  |
 
 **Initial instruction set (grows over time):**
 
@@ -295,22 +295,22 @@ Property tests: deeply recursive tail calls don't overflow.
 Implement the built-in procedures from the R7RS base library. Organized by
 section:
 
-| Section | Topic | Key procedures |
-|---|---|---|
-| §6.1 | Equivalence | `eq?`, `eqv?`, `equal?` |
-| §6.2 | Numbers | Full numeric tower: exact integers (arbitrary precision via Zarith), rationals, flonums, complex. Arithmetic, comparison, conversion. |
-| §6.3 | Booleans | `boolean?`, `not`, `boolean=?` |
-| §6.4 | Pairs & lists | `cons`, `car`, `cdr`, `list`, `append`, `map`, `for-each`, `assoc`, etc. |
-| §6.5 | Symbols | `symbol?`, `symbol->string`, `string->symbol` |
-| §6.6 | Characters | `char?`, `char->integer`, Unicode support |
-| §6.7 | Strings | String operations, UTF-8 |
-| §6.8 | Vectors | `vector`, `vector-ref`, `vector-set!`, `vector-map`, `vector-for-each` |
-| §6.9 | Bytevectors | `bytevector`, UTF-8 conversion |
-| §6.10 | Control | `apply`, `map`, `for-each`, `call/cc`, `values`, `dynamic-wind` (wired in M5) |
-| §6.11 | Exceptions | `raise`, `guard`, `with-exception-handler`, `error` |
-| §6.12 | Eval | `eval`, `environment` |
-| §6.13 | I/O | Ports, `read`, `write`, `display`, file I/O |
-| §6.14 | System | `command-line`, `exit`, `features` |
+| Section | Topic         | Key procedures                                                                                                                        |
+|---------|---------------|---------------------------------------------------------------------------------------------------------------------------------------|
+| §6.1    | Equivalence   | `eq?`, `eqv?`, `equal?`                                                                                                               |
+| §6.2    | Numbers       | Full numeric tower: exact integers (arbitrary precision via Zarith), rationals, flonums, complex. Arithmetic, comparison, conversion. |
+| §6.3    | Booleans      | `boolean?`, `not`, `boolean=?`                                                                                                        |
+| §6.4    | Pairs & lists | `cons`, `car`, `cdr`, `list`, `append`, `map`, `for-each`, `assoc`, etc.                                                              |
+| §6.5    | Symbols       | `symbol?`, `symbol->string`, `string->symbol`                                                                                         |
+| §6.6    | Characters    | `char?`, `char->integer`, Unicode support                                                                                             |
+| §6.7    | Strings       | String operations, UTF-8                                                                                                              |
+| §6.8    | Vectors       | `vector`, `vector-ref`, `vector-set!`, `vector-map`, `vector-for-each`                                                                |
+| §6.9    | Bytevectors   | `bytevector`, UTF-8 conversion                                                                                                        |
+| §6.10   | Control       | `apply`, `map`, `for-each`, `call/cc`, `values`, `dynamic-wind` (wired in M5)                                                         |
+| §6.11   | Exceptions    | `raise`, `guard`, `with-exception-handler`, `error`                                                                                   |
+| §6.12   | Eval          | `eval`, `environment`                                                                                                                 |
+| §6.13   | I/O           | Ports, `read`, `write`, `display`, file I/O                                                                                           |
+| §6.14   | System        | `command-line`, `exit`, `features`                                                                                                    |
 
 **Numeric tower design:** Add to `Datum.t`:
 
@@ -405,11 +405,11 @@ METADATA section:
 
 **Modules:**
 
-| Module | Responsibility |
-|---|---|
-| `Fasl_write` | Serialize `Code_object.t` → bytes |
-| `Fasl_read` | Deserialize bytes → `Code_object.t`, version checking |
-| `Fasl` | High-level load/save, caching, path resolution |
+| Module       | Responsibility                                        |
+|--------------|-------------------------------------------------------|
+| `Fasl_write` | Serialize `Code_object.t` → bytes                     |
+| `Fasl_read`  | Deserialize bytes → `Code_object.t`, version checking |
+| `Fasl`       | High-level load/save, caching, path resolution        |
 
 **Compile-and-cache workflow:**
 
@@ -594,11 +594,11 @@ should not preclude good performance:
 
 ### Dependencies
 
-| Dependency | Purpose | When |
-|---|---|---|
-| `zarith` | Arbitrary-precision integers and rationals | M6 (numbers) |
-| `linenoise` or similar | REPL line editing | M10 |
-| `checkseum` or `digestif` | FASL/package checksums | M9, M13 |
+| Dependency                | Purpose                                    | When         |
+|---------------------------|--------------------------------------------|--------------|
+| `zarith`                  | Arbitrary-precision integers and rationals | M6 (numbers) |
+| `linenoise` or similar    | REPL line editing                          | M10          |
+| `checkseum` or `digestif` | FASL/package checksums                     | M9, M13      |
 
 MetaOCaml is available in the switch but is not required by the current
 architecture. It remains an option for future native compilation or
