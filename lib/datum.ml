@@ -112,3 +112,37 @@ and pp_tail fmt = function
 
 let to_string d =
   Format.asprintf "%a" pp d
+
+let rec pp_display fmt = function
+  | Str s -> Format.pp_print_string fmt s
+  | Char c ->
+    let buf = Buffer.create 4 in
+    Buffer.add_utf_8_uchar buf c;
+    Format.pp_print_string fmt (Buffer.contents buf)
+  | Pair (car, cdr) ->
+    Format.fprintf fmt "(";
+    pp_display fmt car;
+    pp_display_tail fmt cdr;
+    Format.fprintf fmt ")"
+  | Vector elts ->
+    Format.fprintf fmt "#(";
+    Array.iteri
+      (fun i e ->
+        if i > 0 then Format.fprintf fmt " ";
+        pp_display fmt e)
+      elts;
+    Format.fprintf fmt ")"
+  | other -> pp fmt other
+
+and pp_display_tail fmt = function
+  | Nil -> ()
+  | Pair (car, cdr) ->
+    Format.fprintf fmt " ";
+    pp_display fmt car;
+    pp_display_tail fmt cdr
+  | other ->
+    Format.fprintf fmt " . ";
+    pp_display fmt other
+
+let to_display_string d =
+  Format.asprintf "%a" pp_display d

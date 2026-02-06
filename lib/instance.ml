@@ -30,8 +30,10 @@ let make_prim name fn : Datum.t =
 (* --- Arithmetic primitives --- *)
 
 let prim_add args =
-  if args = [] then Datum.Fixnum 0
-  else if has_flonum args then
+  match args with
+  | [] -> Datum.Fixnum 0
+  | _ ->
+  if has_flonum args then
     Datum.Flonum (List.fold_left (fun acc x -> acc +. as_flonum "+" x) 0.0 args)
   else
     Datum.Fixnum (List.fold_left (fun acc x -> acc + as_fixnum "+" x) 0 args)
@@ -49,8 +51,10 @@ let prim_sub args =
       Datum.Fixnum (List.fold_left (fun acc x -> acc - as_fixnum "-" x) (as_fixnum "-" first) rest)
 
 let prim_mul args =
-  if args = [] then Datum.Fixnum 1
-  else if has_flonum args then
+  match args with
+  | [] -> Datum.Fixnum 1
+  | _ ->
+  if has_flonum args then
     Datum.Flonum (List.fold_left (fun acc x -> acc *. as_flonum "*" x) 1.0 args)
   else
     Datum.Fixnum (List.fold_left (fun acc x -> acc * as_fixnum "*" x) 1 args)
@@ -120,8 +124,7 @@ let prim_not args =
 
 let prim_display args =
   match args with
-  | [Datum.Str s] -> print_string s; Datum.Void
-  | [v] -> print_string (Datum.to_string v); Datum.Void
+  | [v] -> print_string (Datum.to_display_string v); Datum.Void
   | _ -> runtime_error (Printf.sprintf "display: expected 1 argument, got %d" (List.length args))
 
 let prim_newline args =
