@@ -306,46 +306,6 @@ let parse_atom state prefix token =
     else
       Syntax.Symbol token
 
-(* Read #-prefixes for numbers, returns (prefix, remaining_token) *)
-let read_number_prefixes state =
-  let rec loop prefix count =
-    if count >= 2 then (prefix, None)  (* Max 2 prefixes *)
-    else
-      match Port.peek_char state.port with
-      | Some '#' ->
-        ignore (Port.read_char state.port);
-        (match Port.peek_char state.port with
-         | Some ('b' | 'B') ->
-           ignore (Port.read_char state.port);
-           if prefix.radix <> None then error state "duplicate radix prefix";
-           loop { prefix with radix = Some 2 } (count + 1)
-         | Some ('o' | 'O') ->
-           ignore (Port.read_char state.port);
-           if prefix.radix <> None then error state "duplicate radix prefix";
-           loop { prefix with radix = Some 8 } (count + 1)
-         | Some ('d' | 'D') ->
-           ignore (Port.read_char state.port);
-           if prefix.radix <> None then error state "duplicate radix prefix";
-           loop { prefix with radix = Some 10 } (count + 1)
-         | Some ('x' | 'X') ->
-           ignore (Port.read_char state.port);
-           if prefix.radix <> None then error state "duplicate radix prefix";
-           loop { prefix with radix = Some 16 } (count + 1)
-         | Some ('e' | 'E') ->
-           ignore (Port.read_char state.port);
-           if prefix.exact <> None then error state "duplicate exactness prefix";
-           loop { prefix with exact = Some true } (count + 1)
-         | Some ('i' | 'I') ->
-           ignore (Port.read_char state.port);
-           if prefix.exact <> None then error state "duplicate exactness prefix";
-           loop { prefix with exact = Some false } (count + 1)
-         | _ ->
-           (* Not a number prefix, return with marker *)
-           (prefix, Some '#'))
-      | _ -> (prefix, None)
-  in
-  loop { radix = None; exact = None } 0
-
 (* Internal read result type for compound parsing *)
 type read_result =
   | Datum of Syntax.t

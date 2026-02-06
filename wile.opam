@@ -12,10 +12,10 @@ bug-reports: "https://github.com/username/reponame/issues"
 depends: [
   "ocaml"
   "dune" {>= "3.6"}
+  "odoc" {with-doc}
   "alcotest" {with-test}
   "qcheck-core" {with-test}
   "qcheck-alcotest" {with-test}
-  "odoc" {with-doc}
 ]
 build: [
   ["dune" "subst"] {dev}

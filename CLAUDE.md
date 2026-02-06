@@ -67,12 +67,20 @@ _opam/        # Local opam switch (gitignored)
 | Module | Purpose |
 |---|---|
 | `Char_type` | Character classification for the readtable (6 variants) |
-| `Datum` | Core Scheme value type (10 variants, structural equality, printer) |
+| `Datum` | Core Scheme value type (11 variants, structural equality, printer) |
 | `Readtable` | Immutable readtable with functional updates, R7RS default table |
 
-**Next: Milestone 1 (Reader)** — `Loc`, `Syntax`, `Port`, and readtable-driven
-parser. Primary entry point `read_syntax` produces `Syntax.t`; `read` wraps
-it via `Syntax.to_datum`.
+**Milestone 1 (Reader)** — complete.
+
+| Module | Purpose |
+|---|---|
+| `Loc` | Source location type: file, line, column |
+| `Syntax` | Compile-time syntax tree mirroring `Datum.t`, every node carries `Loc.t` |
+| `Port` | Input port abstraction (string ports), tracks line/column |
+| `Reader` | Readtable-driven recursive-descent parser |
+
+**Next: Milestone 2 (Environments & Symbol Table)** — `Symbol`, `Env`,
+`Instance`.
 
 ## Development Workflow
 
@@ -101,8 +109,12 @@ Tests live in `test/` as per-topic files and are run via `dune test`.
 | File | Scope |
 |---|---|
 | `test/test_char_type.ml` | Char_type (4 tests) |
-| `test/test_datum.ml` | Datum (11 tests) |
+| `test/test_datum.ml` | Datum (12 tests) |
 | `test/test_readtable.ml` | Readtable (24 tests: 20 unit + 4 QCheck) |
+| `test/test_loc.ml` | Loc (4 tests) |
+| `test/test_syntax.ml` | Syntax (8 tests) |
+| `test/test_port.ml` | Port (10 tests: 9 unit + 1 QCheck) |
+| `test/test_reader.ml` | Reader (31 tests: 30 unit + 1 QCheck) |
 
 Test dependencies:
 - **alcotest** — unit test framework with readable output
@@ -119,3 +131,35 @@ file and add its name to the `(names ...)` list in `test/dune`.
 - Use descriptive names that reflect Scheme R7RS terminology where appropriate
 - Prefer pattern matching over conditional chains
 - No module-level mutable globals — all state belongs in `Instance.t`
+
+### Modularity
+
+- Every module in `lib/` **must** have a corresponding `.mli` interface file
+  that defines its public API. Use the interface to hide internal helpers,
+  intermediate types, and implementation details.
+- Prefer abstract types in `.mli` files where the representation should not
+  leak to clients. Expose concrete types only when pattern matching by
+  callers is intended (e.g. `Datum.t`, `Char_type.t`).
+- Keep interfaces minimal — export only what other modules need.
+
+### Documentation
+
+- All public values, types, and modules exposed in `.mli` files **must** have
+  odoc documentation comments (`(** ... *)`).
+- Use `(** ... *)` before the item it documents (the odoc convention).
+- Include `@param`, `@return`, and `@raise` tags where they add clarity.
+- Document invariants and non-obvious design decisions in module-level doc
+  comments at the top of `.mli` files.
+
+Generate documentation with:
+
+```sh
+dune build @doc
+```
+
+Output is in `_build/default/_doc/_html/`.
+
+## Documentation Dependencies
+
+- **odoc** — documentation generator for OCaml (`(odoc :with-doc)` in
+  `dune-project`)
