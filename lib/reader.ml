@@ -67,6 +67,14 @@ let hex_digit c =
   | 'A'..'F' -> Some (Char.code c - Char.code 'A' + 10)
   | _ -> None
 
+let validate_scalar_value state cp =
+  if cp > 0x10FFFF then
+    error state "character out of Unicode range"
+  else if cp >= 0xD800 && cp <= 0xDFFF then
+    error state "surrogate codepoint not allowed"
+  else
+    Uchar.of_int cp
+
 (* Parse \x<hex>; escape sequence, returns codepoint *)
 let read_hex_escape state =
   let rec loop acc count =
@@ -79,7 +87,10 @@ let read_hex_escape state =
       (match hex_digit c with
        | Some d ->
          ignore (Port.read_char state.port);
-         loop (acc * 16 + d) (count + 1)
+         let acc' = acc * 16 + d in
+         if acc' > 0x10FFFF then
+           error state "hex escape out of Unicode range";
+         loop acc' (count + 1)
        | None -> error state "invalid hex escape")
     | None -> error state "unterminated hex escape"
   in
@@ -136,8 +147,9 @@ let read_string state =
          Buffer.add_char buf '\008'; loop ()
        | Some 'x' -> ignore (Port.read_char state.port);
          let cp = read_hex_escape state in
+         let u = validate_scalar_value state cp in
          if cp <= 0x7F then Buffer.add_char buf (Char.chr cp)
-         else Buffer.add_utf_8_uchar buf (Uchar.of_int cp);
+         else Buffer.add_utf_8_uchar buf u;
          loop ()
        | Some ('\n' | '\r') ->
          (* \<line-ending> line continuation *)
@@ -177,8 +189,9 @@ let read_escaped_identifier state =
        | Some 'b' -> Buffer.add_char buf '\008'; loop ()
        | Some 'x' ->
          let cp = read_hex_escape state in
+         let u = validate_scalar_value state cp in
          if cp <= 0x7F then Buffer.add_char buf (Char.chr cp)
-         else Buffer.add_utf_8_uchar buf (Uchar.of_int cp);
+         else Buffer.add_utf_8_uchar buf u;
          loop ()
        | Some c -> error state (Printf.sprintf "unknown escape \\%c in identifier" c))
     | Some c -> Buffer.add_char buf c; loop ()
@@ -234,11 +247,8 @@ let read_character state =
           let hex = String.sub s 1 (String.length s - 1) in
           try
             let cp = int_of_string ("0x" ^ hex) in
-            if cp < 0 || cp > 0x10FFFF then
-              error state "character out of range"
-            else
-              Uchar.of_int cp
-          with _ -> error state "invalid hex character"
+            validate_scalar_value state cp
+          with Failure _ -> error state "invalid hex character"
         end else
           match named_char s with
           | Some u -> u
@@ -275,7 +285,10 @@ let parse_integer radix s =
             | _ -> radix (* invalid *)
           in
           if digit >= radix then None
-          else loop (acc * radix + digit) (i + 1)
+          else
+            let acc' = acc * radix + digit in
+            if acc' < acc then None
+            else loop acc' (i + 1)
       in
       loop 0 start
 
@@ -283,9 +296,9 @@ let parse_float s =
   (* Check for special values first *)
   let s_lower = String.lowercase_ascii s in
   match s_lower with
-  | "+inf.0" | "inf.0" -> Some Float.infinity
+  | "+inf.0" -> Some Float.infinity
   | "-inf.0" -> Some Float.neg_infinity
-  | "+nan.0" | "nan.0" | "-nan.0" -> Some Float.nan
+  | "+nan.0" | "-nan.0" -> Some Float.nan
   | _ ->
     try Some (float_of_string s)
     with _ -> None
@@ -315,17 +328,24 @@ let parse_number prefix token =
   let token_lower = String.lowercase_ascii token in
   (* Check for special infinity/nan *)
   match token_lower with
-  | "+inf.0" | "-inf.0" | "+nan.0" | "-nan.0" | "inf.0" | "nan.0" ->
-    (match parse_float token_lower with
-     | Some f -> Some (Syntax.Flonum f)
-     | None -> None)
+  | "+inf.0" | "-inf.0" | "+nan.0" | "-nan.0" ->
+    if prefix.exact = Some true then None
+    else
+      (match parse_float token_lower with
+       | Some f -> Some (Syntax.Flonum f)
+       | None -> None)
   | _ ->
     if radix = 10 && is_float_syntax token then begin
       let normalized = normalize_exponent token in
       match parse_float normalized with
       | Some f ->
         (match prefix.exact with
-         | Some true -> Some (Syntax.Fixnum (int_of_float f))
+         | Some true ->
+           if Float.is_integer f
+              && f >= Float.of_int min_int
+              && f <= Float.of_int max_int then
+             Some (Syntax.Fixnum (Float.to_int f))
+           else None
          | _ -> Some (Syntax.Flonum f))
       | None -> None
     end else begin
@@ -346,6 +366,8 @@ let parse_atom state prefix token =
   | None ->
     (* Must be a symbol *)
     if prefix.radix <> None || prefix.exact <> None then
+      error state (Printf.sprintf "invalid number: %s" token)
+    else if String.length token > 0 && token.[0] >= '0' && token.[0] <= '9' then
       error state (Printf.sprintf "invalid number: %s" token)
     else
       Syntax.Symbol token

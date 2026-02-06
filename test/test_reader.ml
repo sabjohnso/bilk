@@ -51,7 +51,7 @@ let test_reader_radix () =
 let test_reader_exactness () =
   check_datum "#e42" (Datum.Fixnum 42) (read_one "#e42");
   check_datum "#i42" (Datum.Flonum 42.0) (read_one "#i42");
-  check_datum "#e3.14" (Datum.Fixnum 3) (read_one "#e3.14");
+  check_datum "#e1.0" (Datum.Fixnum 1) (read_one "#e1.0");
   (* Combined prefixes *)
   check_datum "#x#e10" (Datum.Fixnum 16) (read_one "#x#e10");
   check_datum "#e#x10" (Datum.Fixnum 16) (read_one "#e#x10");
@@ -82,7 +82,9 @@ let test_reader_symbols () =
   check_datum "+soup+" (Datum.Symbol "+soup+") (read_one "+soup+");
   check_datum "<=?" (Datum.Symbol "<=?") (read_one "<=?");
   check_datum "$caml" (Datum.Symbol "$caml") (read_one "$caml");
-  check_datum "@prefix" (Datum.Symbol "@prefix") (read_one "@prefix")
+  check_datum "@prefix" (Datum.Symbol "@prefix") (read_one "@prefix");
+  check_datum "inf.0" (Datum.Symbol "inf.0") (read_one "inf.0");
+  check_datum "nan.0" (Datum.Symbol "nan.0") (read_one "nan.0")
 
 let test_reader_symbols_escaped () =
   check_datum "|hello world|" (Datum.Symbol "hello world") (read_one "|hello world|");
@@ -269,7 +271,16 @@ let test_reader_errors () =
   check_error "unterminated block comment" "#| oops";
   check_error "bytevector range" "#u8(256)";
   check_error "undefined label" "#99#";
-  check_error "empty hex escape" "\"\\x;\""
+  check_error "empty hex escape" "\"\\x;\"";
+  check_error "surrogate char" "#\\xD800";
+  check_error "surrogate in string" "\"\\xD800;\"";
+  check_error "surrogate in ident" "|\\xDFFF;|";
+  check_error "hex escape too large" "\"\\x110000;\"";
+  check_error "digit-leading token" "123abc";
+  check_error "large integer" "99999999999999999999";
+  check_error "exact float" "#e3.14";
+  check_error "exact infinity" "#e+inf.0";
+  check_error "exact nan" "#e+nan.0"
 
 (* Location tracking *)
 
