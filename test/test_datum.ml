@@ -73,6 +73,36 @@ let test_datum_cross_type () =
   Alcotest.(check bool) "fixnum != flonum" false
     (Datum.equal (Datum.Fixnum 1) (Datum.Flonum 1.0))
 
+let test_datum_void () =
+  let datum_testable = Alcotest.testable Datum.pp Datum.equal in
+  Alcotest.check datum_testable "void = void" Datum.Void Datum.Void;
+  Alcotest.(check bool) "void != nil" false
+    (Datum.equal Datum.Void Datum.Nil);
+  Alcotest.(check string) "void pp" "#<void>" (Datum.to_string Datum.Void)
+
+let test_datum_primitive () =
+  let p = Datum.Primitive { prim_name = "add"; prim_fn = (fun _ -> Datum.Void) } in
+  Alcotest.(check string) "primitive pp" "#<primitive add>" (Datum.to_string p);
+  let p2 = Datum.Primitive { prim_name = "add"; prim_fn = (fun _ -> Datum.Nil) } in
+  Alcotest.(check bool) "same name = equal" true (Datum.equal p p2);
+  let p3 = Datum.Primitive { prim_name = "sub"; prim_fn = (fun _ -> Datum.Void) } in
+  Alcotest.(check bool) "diff name = not equal" false (Datum.equal p p3)
+
+let test_datum_closure () =
+  let dummy_code : Datum.code = {
+    instructions = [| Opcode.Halt |];
+    constants = [||];
+    symbols = [||];
+    children = [||];
+    params = [||];
+    variadic = false;
+    name = "test";
+  } in
+  let c1 = Datum.Closure { clos_name = "f"; clos_code = dummy_code; clos_env = [] } in
+  let c2 = Datum.Closure { clos_name = "f"; clos_code = dummy_code; clos_env = [] } in
+  Alcotest.(check string) "closure pp" "#<closure f>" (Datum.to_string c1);
+  Alcotest.(check bool) "closures never equal" false (Datum.equal c1 c2)
+
 let test_datum_pp () =
   Alcotest.(check string) "#t" "#t" (Datum.to_string (Bool true));
   Alcotest.(check string) "#f" "#f" (Datum.to_string (Bool false));
@@ -110,5 +140,8 @@ let () =
        ; Alcotest.test_case "bytevector" `Quick test_datum_bytevector
        ; Alcotest.test_case "cross-type inequality" `Quick test_datum_cross_type
        ; Alcotest.test_case "pp" `Quick test_datum_pp
+       ; Alcotest.test_case "void" `Quick test_datum_void
+       ; Alcotest.test_case "primitive" `Quick test_datum_primitive
+       ; Alcotest.test_case "closure" `Quick test_datum_closure
        ])
     ]

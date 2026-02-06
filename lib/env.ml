@@ -1,13 +1,11 @@
 exception Unbound_variable of Symbol.t
 
-type frame = (int, Datum.t ref) Hashtbl.t
+type t = Datum.env
 
-type t = frame list
-
-let empty () = [ Hashtbl.create 16 ]
+let empty () : t = [ Hashtbl.create 16 ]
 
 let extend env bindings =
-  let frame = Hashtbl.create (max 16 (List.length bindings)) in
+  let frame : Datum.frame = Hashtbl.create (max 16 (List.length bindings)) in
   List.iter (fun (sym, value) ->
     Hashtbl.replace frame (Symbol.id sym) (ref value)
   ) bindings;

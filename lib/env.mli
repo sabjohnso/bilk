@@ -6,12 +6,15 @@
 
     The chain is extended by {!extend}, which prepends a new frame.
     {!define} always targets the top (innermost) frame.  {!set} walks the
-    chain to find and mutate an existing binding. *)
+    chain to find and mutate an existing binding.
+
+    The type is an alias for {!Datum.env} so that the VM can work directly
+    with environments stored in closures. *)
 
 (** {1 Types} *)
 
-(** An environment (chain of frames).  Opaque. *)
-type t
+(** An environment (chain of frames). *)
+type t = Datum.env
 
 (** Raised by {!set} when the symbol has no binding in any frame. *)
 exception Unbound_variable of Symbol.t

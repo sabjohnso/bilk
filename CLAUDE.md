@@ -67,7 +67,7 @@ _opam/        # Local opam switch (gitignored)
 | Module | Purpose |
 |---|---|
 | `Char_type` | Character classification for the readtable (6 variants) |
-| `Datum` | Core Scheme value type (11 variants, structural equality, printer) |
+| `Datum` | Core Scheme value type (14 variants + code/env/closure types, structural equality, printer) |
 | `Readtable` | Immutable readtable with functional updates, R7RS default table |
 
 **Milestone 1 (Reader)** — complete.
@@ -84,10 +84,23 @@ _opam/        # Local opam switch (gitignored)
 | Module | Purpose |
 |---|---|
 | `Symbol` | Interned symbols with integer ids for fast equality |
-| `Env` | Lexical environments: chain of mutable frames keyed by symbol id |
-| `Instance` | Per-instance state: symbol table, global env, readtable |
+| `Env` | Lexical environments: chain of mutable frames (type alias for `Datum.env`) |
+| `Instance` | Per-instance state: symbol table, global env, readtable, eval |
 
-**Next: Milestone 3 (Expander & Compiler)** — TBD.
+**Milestone 3 (Bytecode & VM)** — complete.
+
+| Module   | Purpose                                                          |
+|----------|------------------------------------------------------------------|
+| `Opcode` | Bytecode instruction set (12 variants, accumulator machine)      |
+| `Compiler` | Syntax.t → Datum.code compiler with tail-position tracking     |
+| `Vm`     | Bytecode virtual machine with value stack and call stack         |
+
+Changes to existing modules:
+- `Datum`: Added `Void`, `Primitive`, `Closure` variants; `code`, `env`, `frame`, `primitive`, `closure` types
+- `Env`: `type t = Datum.env` (no longer opaque)
+- `Instance`: Added `eval_string`, `eval_syntax`; 14 primitives registered at creation
+
+**Next: Milestone 4** — TBD.
 
 ## Development Workflow
 
@@ -116,7 +129,7 @@ Tests live in `test/` as per-topic files and are run via `dune test`.
 | File | Scope |
 |---|---|
 | `test/test_char_type.ml` | Char_type (4 tests) |
-| `test/test_datum.ml` | Datum (12 tests) |
+| `test/test_datum.ml` | Datum (15 tests) |
 | `test/test_readtable.ml` | Readtable (24 tests: 20 unit + 4 QCheck) |
 | `test/test_loc.ml` | Loc (4 tests) |
 | `test/test_syntax.ml` | Syntax (8 tests) |
@@ -124,7 +137,10 @@ Tests live in `test/` as per-topic files and are run via `dune test`.
 | `test/test_reader.ml` | Reader (31 tests: 30 unit + 1 QCheck) |
 | `test/test_symbol.ml` | Symbol (8 tests: 6 unit + 2 QCheck) |
 | `test/test_env.ml` | Env (10 tests) |
-| `test/test_instance.ml` | Instance (5 tests) |
+| `test/test_instance.ml` | Instance (8 tests) |
+| `test/test_opcode.ml`   | Opcode (4 tests) |
+| `test/test_compiler.ml` | Compiler (9 tests) |
+| `test/test_vm.ml`       | VM (36 tests: end-to-end via Instance.eval_string) |
 
 Test dependencies:
 - **alcotest** — unit test framework with readable output

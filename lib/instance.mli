@@ -22,10 +22,24 @@ type t = {
 
 val create : ?readtable:Readtable.t -> unit -> t
 (** [create ?readtable ()] returns a fresh instance with an empty symbol table,
-    an empty global environment, and the given [readtable] (defaults to
-    {!Readtable.default}). *)
+    a global environment pre-populated with standard primitives, and the given
+    [readtable] (defaults to {!Readtable.default}). *)
 
 (** {1 Convenience} *)
 
 val intern : t -> string -> Symbol.t
 (** [intern inst name] is [Symbol.intern inst.symbols name]. *)
+
+(** {1 Evaluation} *)
+
+val eval_syntax : t -> Syntax.t -> Datum.t
+(** [eval_syntax inst expr] compiles and executes a syntax object.
+    @raise Compiler.Compile_error on malformed syntax.
+    @raise Vm.Runtime_error on runtime errors. *)
+
+val eval_string : t -> string -> Datum.t
+(** [eval_string inst src] reads one expression from [src], compiles, and
+    executes it.  Returns the result.
+    @raise Reader.Read_error on malformed input.
+    @raise Compiler.Compile_error on malformed syntax.
+    @raise Vm.Runtime_error on runtime errors. *)

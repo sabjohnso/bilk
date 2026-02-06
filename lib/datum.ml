@@ -10,6 +10,33 @@ type t =
   | Bytevector of bytes
   | Nil
   | Eof
+  | Void
+  | Primitive of primitive
+  | Closure of closure
+
+and primitive = {
+  prim_name : string;
+  prim_fn : t list -> t;
+}
+
+and closure = {
+  clos_name : string;
+  clos_code : code;
+  clos_env : env;
+}
+
+and code = {
+  instructions : Opcode.t array;
+  constants : t array;
+  symbols : Symbol.t array;
+  children : code array;
+  params : Symbol.t array;
+  variadic : bool;
+  name : string;
+}
+
+and env = frame list
+and frame = (int, t ref) Hashtbl.t
 
 let rec equal a b =
   match (a, b) with
@@ -26,6 +53,9 @@ let rec equal a b =
   | Bytevector x, Bytevector y -> Bytes.equal x y
   | Nil, Nil -> true
   | Eof, Eof -> true
+  | Void, Void -> true
+  | Primitive a, Primitive b -> String.equal a.prim_name b.prim_name
+  | Closure _, Closure _ -> false
   | _ -> false
 
 let rec pp fmt = function
@@ -66,6 +96,9 @@ let rec pp fmt = function
     Format.fprintf fmt ")"
   | Nil -> Format.fprintf fmt "()"
   | Eof -> Format.fprintf fmt "#<eof>"
+  | Void -> Format.fprintf fmt "#<void>"
+  | Primitive p -> Format.fprintf fmt "#<primitive %s>" p.prim_name
+  | Closure c -> Format.fprintf fmt "#<closure %s>" c.clos_name
 
 and pp_tail fmt = function
   | Nil -> ()

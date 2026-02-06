@@ -19,9 +19,8 @@ let test_independent_tables () =
   let s1 = Instance.intern i1 "x" in
   let s2 = Instance.intern i2 "x" in
   Alcotest.(check string) "same name" (Symbol.name s1) (Symbol.name s2);
-  (* Different tables — ids are independent, both start at 0 *)
-  Alcotest.(check int) "id from i1" 0 (Symbol.id s1);
-  Alcotest.(check int) "id from i2" 0 (Symbol.id s2)
+  (* Different tables — ids are independent, both get the same id for "x" *)
+  Alcotest.(check int) "same id in both tables" (Symbol.id s1) (Symbol.id s2)
 
 let test_default_readtable () =
   let inst = Instance.create () in
@@ -37,6 +36,32 @@ let test_custom_readtable () =
   Alcotest.(check bool) "fold_case on" true
     (Readtable.fold_case inst.readtable)
 
+let datum_testable =
+  Alcotest.testable Datum.pp Datum.equal
+
+let check_datum = Alcotest.check datum_testable
+
+let test_eval_string () =
+  let inst = Instance.create () in
+  check_datum "eval fixnum" (Datum.Fixnum 42) (Instance.eval_string inst "42");
+  check_datum "eval add" (Datum.Fixnum 3) (Instance.eval_string inst "(+ 1 2)")
+
+let test_eval_syntax () =
+  let inst = Instance.create () in
+  let port = Port.of_string "42" in
+  let expr = Reader.read_syntax inst.readtable port in
+  check_datum "eval syntax" (Datum.Fixnum 42) (Instance.eval_syntax inst expr)
+
+let test_primitives_registered () =
+  let inst = Instance.create () in
+  let plus_sym = Instance.intern inst "+" in
+  let v = Env.lookup inst.global_env plus_sym in
+  Alcotest.(check bool) "plus is bound" true (Option.is_some v);
+  match v with
+  | Some (Datum.Primitive p) ->
+    Alcotest.(check string) "plus name" "+" p.prim_name
+  | _ -> Alcotest.fail "expected primitive"
+
 let () =
   Alcotest.run "Instance"
     [ ("Instance",
@@ -45,5 +70,8 @@ let () =
        ; Alcotest.test_case "independent tables" `Quick test_independent_tables
        ; Alcotest.test_case "default readtable" `Quick test_default_readtable
        ; Alcotest.test_case "custom readtable" `Quick test_custom_readtable
+       ; Alcotest.test_case "eval_string" `Quick test_eval_string
+       ; Alcotest.test_case "eval_syntax" `Quick test_eval_syntax
+       ; Alcotest.test_case "primitives registered" `Quick test_primitives_registered
        ])
     ]
