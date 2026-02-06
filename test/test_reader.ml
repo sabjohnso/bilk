@@ -133,8 +133,15 @@ let test_reader_strings () =
   check_datum "\\b" (Datum.Str "a\008b") (read_one "\"a\\bb\"");
   check_datum "\\x41;" (Datum.Str "A") (read_one "\"\\x41;\"");
   check_datum "\\x3BB;" (Datum.Str "\xCE\xBB") (read_one "\"\\x3BB;\"");
-  (* Line continuation *)
-  check_datum "line cont" (Datum.Str "ab") (read_one "\"a\\\n   b\"")
+  (* Line continuation: \<intraline-ws>*<line-ending><intraline-ws>* *)
+  check_datum "line cont \\<LF>" (Datum.Str "ab") (read_one "\"a\\\n   b\"");
+  check_datum "line cont \\<sp><LF>" (Datum.Str "ab") (read_one "\"a\\  \n   b\"");
+  check_datum "line cont \\<tab><LF>" (Datum.Str "ab") (read_one "\"a\\\t\n   b\"");
+  check_datum "line cont \\<CR><LF>" (Datum.Str "ab") (read_one "\"a\\\r\n   b\"");
+  check_datum "line cont \\<sp><CR><LF>" (Datum.Str "ab") (read_one "\"a\\  \r\n   b\"");
+  (* Bare line endings normalize to \n *)
+  check_datum "bare CR" (Datum.Str "a\nb") (read_one "\"a\rb\"");
+  check_datum "bare CRLF" (Datum.Str "a\nb") (read_one "\"a\r\nb\"")
 
 (* Compound data *)
 
@@ -261,7 +268,8 @@ let test_reader_errors () =
   check_error "empty char" "#\\";
   check_error "unterminated block comment" "#| oops";
   check_error "bytevector range" "#u8(256)";
-  check_error "undefined label" "#99#"
+  check_error "undefined label" "#99#";
+  check_error "empty hex escape" "\"\\x;\""
 
 (* Location tracking *)
 

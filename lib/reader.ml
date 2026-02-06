@@ -69,20 +69,21 @@ let hex_digit c =
 
 (* Parse \x<hex>; escape sequence, returns codepoint *)
 let read_hex_escape state =
-  let rec loop acc =
+  let rec loop acc count =
     match Port.peek_char state.port with
     | Some ';' ->
+      if count = 0 then error state "empty hex escape";
       ignore (Port.read_char state.port);
       acc
     | Some c ->
       (match hex_digit c with
        | Some d ->
          ignore (Port.read_char state.port);
-         loop (acc * 16 + d)
+         loop (acc * 16 + d) (count + 1)
        | None -> error state "invalid hex escape")
     | None -> error state "unterminated hex escape"
   in
-  loop 0
+  loop 0 0
 
 let skip_intraline_ws state =
   let rec loop () =
@@ -94,6 +95,19 @@ let skip_intraline_ws state =
   in
   loop ()
 
+(* Skip a line ending: \n, \r\n, or \r *)
+let skip_line_ending state =
+  match Port.peek_char state.port with
+  | Some '\n' -> ignore (Port.read_char state.port); true
+  | Some '\r' ->
+    ignore (Port.read_char state.port);
+    (* Consume \n after \r if present *)
+    (match Port.peek_char state.port with
+     | Some '\n' -> ignore (Port.read_char state.port)
+     | _ -> ());
+    true
+  | _ -> false
+
 (* Read a string literal *)
 let read_string state =
   let buf = Buffer.create 64 in
@@ -102,30 +116,44 @@ let read_string state =
     | None -> error state "unterminated string"
     | Some '"' -> Buffer.contents buf
     | Some '\\' ->
-      (match Port.read_char state.port with
+      (match Port.peek_char state.port with
        | None -> error state "unterminated string"
-       | Some 'n' -> Buffer.add_char buf '\n'; loop ()
-       | Some 't' -> Buffer.add_char buf '\t'; loop ()
-       | Some 'r' -> Buffer.add_char buf '\r'; loop ()
-       | Some '"' -> Buffer.add_char buf '"'; loop ()
-       | Some '\\' -> Buffer.add_char buf '\\'; loop ()
-       | Some '|' -> Buffer.add_char buf '|'; loop ()
-       | Some 'a' -> Buffer.add_char buf '\007'; loop ()
-       | Some 'b' -> Buffer.add_char buf '\008'; loop ()
-       | Some 'x' ->
+       | Some 'n' -> ignore (Port.read_char state.port);
+         Buffer.add_char buf '\n'; loop ()
+       | Some 't' -> ignore (Port.read_char state.port);
+         Buffer.add_char buf '\t'; loop ()
+       | Some 'r' -> ignore (Port.read_char state.port);
+         Buffer.add_char buf '\r'; loop ()
+       | Some '"' -> ignore (Port.read_char state.port);
+         Buffer.add_char buf '"'; loop ()
+       | Some '\\' -> ignore (Port.read_char state.port);
+         Buffer.add_char buf '\\'; loop ()
+       | Some '|' -> ignore (Port.read_char state.port);
+         Buffer.add_char buf '|'; loop ()
+       | Some 'a' -> ignore (Port.read_char state.port);
+         Buffer.add_char buf '\007'; loop ()
+       | Some 'b' -> ignore (Port.read_char state.port);
+         Buffer.add_char buf '\008'; loop ()
+       | Some 'x' -> ignore (Port.read_char state.port);
          let cp = read_hex_escape state in
          if cp <= 0x7F then Buffer.add_char buf (Char.chr cp)
          else Buffer.add_utf_8_uchar buf (Uchar.of_int cp);
          loop ()
-       | Some '\n' -> skip_intraline_ws state; loop ()
-       | Some '\r' ->
-         (* \<CR> or \<CR><LF> = line continuation *)
-         (match Port.peek_char state.port with
-          | Some '\n' -> ignore (Port.read_char state.port)
-          | _ -> ());
+       | Some ('\n' | '\r') ->
+         (* \<line-ending> line continuation *)
+         ignore (skip_line_ending state);
+         skip_intraline_ws state; loop ()
+       | Some (' ' | '\t') ->
+         (* \<intraline-ws>+<line-ending> line continuation *)
          skip_intraline_ws state;
-         loop ()
-       | Some c -> error state (Printf.sprintf "unknown escape \\%c" c))
+         if skip_line_ending state then begin
+           skip_intraline_ws state; loop ()
+         end else
+           error state "expected line ending after \\ in string"
+       | Some c -> ignore (Port.read_char state.port);
+         error state (Printf.sprintf "unknown escape \\%c" c))
+    (* Bare line endings in strings normalize to \n (R7RS §7.1.1) *)
+    | Some '\r' -> Buffer.add_char buf '\n'; loop ()
     | Some c -> Buffer.add_char buf c; loop ()
   in
   loop ()
