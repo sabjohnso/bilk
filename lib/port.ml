@@ -4,10 +4,15 @@ type t = {
   mutable line : int;
   mutable col : int;
   file : string;
+  mutable readtable : Readtable.t option;
 }
 
 let of_string ?(file = "<string>") content =
-  { content; pos = 0; line = 1; col = 1; file }
+  { content; pos = 0; line = 1; col = 1; file; readtable = None }
+
+let readtable t = t.readtable
+
+let set_readtable t rt = t.readtable <- Some rt
 
 let peek_char t =
   if t.pos >= String.length t.content then None

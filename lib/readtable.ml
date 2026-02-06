@@ -55,7 +55,8 @@ let is_whitespace t c =
 
 let is_delimiter t c =
   match char_type_of t c with
-  | Char_type.Whitespace | Char_type.Terminating_macro -> true
+  | Char_type.Whitespace | Char_type.Terminating_macro
+  | Char_type.Multiple_escape -> true
   | _ -> false
 
 let stub_macro _c = Datum.Nil

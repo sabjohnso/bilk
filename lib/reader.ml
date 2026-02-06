@@ -7,7 +7,12 @@ type state = {
 }
 
 let make_state readtable port =
-  { port; readtable; labels = Hashtbl.create 16 }
+  (* Use port's stored readtable if available (persists #!fold-case) *)
+  let rt = match Port.readtable port with
+    | Some rt -> rt
+    | None -> readtable
+  in
+  { port; readtable = rt; labels = Hashtbl.create 16 }
 
 let error state msg =
   raise (Read_error (Port.current_loc state.port, msg))
@@ -168,37 +173,48 @@ let named_char name =
 
 (* Read #\... character literal *)
 let read_character state =
-  (* Collect the character name/value *)
-  let buf = Buffer.create 16 in
-  let rec loop () =
-    match Port.peek_char state.port with
-    | None -> ()
-    | Some c when is_delimiter state c -> ()
-    | Some c ->
-      ignore (Port.read_char state.port);
-      Buffer.add_char buf c;
-      loop ()
-  in
-  loop ();
-  let s = Buffer.contents buf in
-  if String.length s = 0 then
-    error state "empty character literal"
-  else if String.length s = 1 then
-    Uchar.of_char s.[0]
-  else if s.[0] = 'x' || s.[0] = 'X' then begin
-    (* Hex character: #\xNNNN *)
-    let hex = String.sub s 1 (String.length s - 1) in
-    try
-      let cp = int_of_string ("0x" ^ hex) in
-      if cp < 0 || cp > 0x10FFFF then
-        error state "character out of range"
-      else
-        Uchar.of_int cp
-    with _ -> error state "invalid hex character"
-  end else
-    match named_char s with
-    | Some u -> u
-    | None -> error state (Printf.sprintf "unknown character name: %s" s)
+  (* The first char after #\ must always be consumed, even if delimiter *)
+  match Port.read_char state.port with
+  | None -> error state "empty character literal"
+  | Some first ->
+    (* If the next char is a delimiter or EOF, this is a single-char literal *)
+    if is_delimiter state first then
+      Uchar.of_char first
+    else
+      match Port.peek_char state.port with
+      | None -> Uchar.of_char first
+      | Some next when is_delimiter state next ->
+        (* Single constituent char followed by delimiter *)
+        Uchar.of_char first
+      | _ ->
+        (* Multi-char: read rest of token *)
+        let buf = Buffer.create 16 in
+        Buffer.add_char buf first;
+        let rec loop () =
+          match Port.peek_char state.port with
+          | None -> ()
+          | Some c when is_delimiter state c -> ()
+          | Some c ->
+            ignore (Port.read_char state.port);
+            Buffer.add_char buf c;
+            loop ()
+        in
+        loop ();
+        let s = Buffer.contents buf in
+        if s.[0] = 'x' || s.[0] = 'X' then begin
+          (* Hex character: #\xNNNN *)
+          let hex = String.sub s 1 (String.length s - 1) in
+          try
+            let cp = int_of_string ("0x" ^ hex) in
+            if cp < 0 || cp > 0x10FFFF then
+              error state "character out of range"
+            else
+              Uchar.of_int cp
+          with _ -> error state "invalid hex character"
+        end else
+          match named_char s with
+          | Some u -> u
+          | None -> error state (Printf.sprintf "unknown character name: %s" s)
 
 (* Number parsing *)
 
@@ -502,34 +518,31 @@ and read_number_with_prefix state loc =
   Datum (Syntax.make loc (parse_atom state prefix token))
 
 and read_list state start_loc =
+  let build_list items tail =
+    List.fold_left (fun cdr item ->
+      Syntax.make start_loc (Syntax.Pair (item, cdr))
+    ) tail items
+  in
   let rec loop acc =
     skip_atmosphere state;
     match read_raw state with
     | Close_paren ->
-      (* Build proper list from accumulated items *)
-      List.fold_right (fun item tail ->
-        Syntax.make start_loc (Syntax.Pair (item, tail))
-      ) acc (Syntax.make start_loc Syntax.Nil)
-      |> fun result -> Datum result
+      let nil = Syntax.make start_loc Syntax.Nil in
+      Datum (build_list acc nil)
     | Dot ->
-      if acc = [] then error state "unexpected dot"
-      else begin
-        (* Read final cdr *)
-        skip_atmosphere state;
-        match read_raw state with
-        | Datum final_cdr ->
-          skip_atmosphere state;
-          (match read_raw state with
-           | Close_paren ->
-             List.fold_right (fun item tail ->
-               Syntax.make start_loc (Syntax.Pair (item, tail))
-             ) acc final_cdr
-             |> fun result -> Datum result
-           | _ -> error state "expected ) after dotted tail")
-        | _ -> error state "expected datum after dot"
-      end
+      (match acc with
+       | [] -> error state "unexpected dot"
+       | _ ->
+         skip_atmosphere state;
+         (match read_raw state with
+          | Datum final_cdr ->
+            skip_atmosphere state;
+            (match read_raw state with
+             | Close_paren -> Datum (build_list acc final_cdr)
+             | _ -> error state "expected ) after dotted tail")
+          | _ -> error state "expected datum after dot"))
     | Eof_signal -> error state "unterminated list"
-    | Datum item -> loop (acc @ [item])
+    | Datum item -> loop (item :: acc)
   in
   loop []
 
@@ -538,10 +551,11 @@ and read_vector state start_loc =
     skip_atmosphere state;
     match read_raw state with
     | Close_paren ->
-      Datum (Syntax.make start_loc (Syntax.Vector (Array.of_list acc)))
+      let elts = Array.of_list (List.rev acc) in
+      Datum (Syntax.make start_loc (Syntax.Vector elts))
     | Dot -> error state "unexpected dot in vector"
     | Eof_signal -> error state "unterminated vector"
-    | Datum item -> loop (acc @ [item])
+    | Datum item -> loop (item :: acc)
   in
   loop []
 
@@ -550,15 +564,16 @@ and read_bytevector state start_loc =
     skip_atmosphere state;
     match read_raw state with
     | Close_paren ->
-      let bytes = Bytes.create (List.length acc) in
-      List.iteri (fun i b -> Bytes.set bytes i (Char.chr b)) acc;
+      let items = List.rev acc in
+      let bytes = Bytes.create (List.length items) in
+      List.iteri (fun i b -> Bytes.set bytes i (Char.chr b)) items;
       Datum (Syntax.make start_loc (Syntax.Bytevector bytes))
     | Dot -> error state "unexpected dot in bytevector"
     | Eof_signal -> error state "unterminated bytevector"
     | Datum item ->
       (match item.datum with
        | Syntax.Fixnum n when n >= 0 && n <= 255 ->
-         loop (acc @ [n])
+         loop (n :: acc)
        | Syntax.Fixnum _ -> error state "bytevector element out of range (0-255)"
        | _ -> error state "bytevector elements must be integers")
   in
@@ -612,9 +627,13 @@ and read_directive state =
   let directive = String.lowercase_ascii (Buffer.contents buf) in
   match directive with
   | "fold-case" ->
-    state.readtable <- Readtable.with_fold_case true state.readtable
+    let rt = Readtable.with_fold_case true state.readtable in
+    state.readtable <- rt;
+    Port.set_readtable state.port rt
   | "no-fold-case" ->
-    state.readtable <- Readtable.with_fold_case false state.readtable
+    let rt = Readtable.with_fold_case false state.readtable in
+    state.readtable <- rt;
+    Port.set_readtable state.port rt
   | _ ->
     error state (Printf.sprintf "unknown directive: #!%s" directive)
 

@@ -170,12 +170,12 @@ let test_default_is_delimiter () =
     (fun c ->
       Alcotest.(check bool) (Printf.sprintf "%C is delimiter" c) true
         (Readtable.is_delimiter rt_default c))
-    [' '; '\t'; '\n'; '\r'; '('; ')'; '"'; ';'];
+    [' '; '\t'; '\n'; '\r'; '('; ')'; '"'; ';'; '|'];
   List.iter
     (fun c ->
       Alcotest.(check bool) (Printf.sprintf "%C is not delimiter" c) false
         (Readtable.is_delimiter rt_default c))
-    ['a'; '1'; '+'; '#'; '|']
+    ['a'; '1'; '+'; '#']
 
 let test_default_is_whitespace () =
   List.iter
@@ -191,7 +191,7 @@ let test_default_is_whitespace () =
 
 let qcheck_delimiter_consistency =
   QCheck2.Test.make
-    ~name:"is_delimiter iff whitespace or terminating-macro"
+    ~name:"is_delimiter iff whitespace or terminating-macro or multiple-escape"
     ~count:200
     gen_printable_char
     (fun c ->
@@ -200,6 +200,7 @@ let qcheck_delimiter_consistency =
       let expected =
         Char_type.equal ct Char_type.Whitespace
         || Char_type.equal ct Char_type.Terminating_macro
+        || Char_type.equal ct Char_type.Multiple_escape
       in
       is_del = expected)
 

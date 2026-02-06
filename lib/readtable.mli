@@ -52,8 +52,10 @@ val is_whitespace : t -> char -> bool
     in [rt]. *)
 
 val is_delimiter : t -> char -> bool
-(** [is_delimiter rt c] is [true] when [c] is whitespace or a terminating
-    macro — i.e. it terminates the current token. *)
+(** [is_delimiter rt c] is [true] when [c] is whitespace, a terminating
+    macro, or a multiple-escape character — i.e. it terminates the current
+    token.  Per R7RS §7.1.1, delimiters are whitespace, vertical line,
+    parentheses, double-quote, and semicolon. *)
 
 (** {1 Functional Updates} *)
 

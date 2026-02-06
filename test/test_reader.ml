@@ -88,7 +88,12 @@ let test_reader_symbols_escaped () =
   check_datum "|hello world|" (Datum.Symbol "hello world") (read_one "|hello world|");
   check_datum "|a\\nb|" (Datum.Symbol "a\nb") (read_one "|a\\nb|");
   check_datum "|\\x41;|" (Datum.Symbol "A") (read_one "|\\x41;|");
-  check_datum "||" (Datum.Symbol "") (read_one "||")
+  check_datum "||" (Datum.Symbol "") (read_one "||");
+  (* | acts as delimiter: foo|bar| is two tokens *)
+  let p = Port.of_string "foo|bar|" in
+  let rt = Readtable.default in
+  check_datum "foo before |" (Datum.Symbol "foo") (Reader.read rt p);
+  check_datum "bar in |...|" (Datum.Symbol "bar") (Reader.read rt p)
 
 let test_reader_fold_case () =
   let rt = Readtable.with_fold_case true Readtable.default in
@@ -109,7 +114,11 @@ let test_reader_characters () =
   check_datum "#\\null" (Datum.Char (Uchar.of_int 0x00)) (read_one "#\\null");
   check_datum "#\\return" (Datum.Char (Uchar.of_int 0x0D)) (read_one "#\\return");
   check_datum "#\\x41" (Datum.Char (Uchar.of_char 'A')) (read_one "#\\x41");
-  check_datum "#\\x03BB" (Datum.Char (Uchar.of_int 0x03BB)) (read_one "#\\x03BB")
+  check_datum "#\\x03BB" (Datum.Char (Uchar.of_int 0x03BB)) (read_one "#\\x03BB");
+  (* Delimiter characters after #\ *)
+  check_datum "#\\ (space)" (Datum.Char (Uchar.of_char ' ')) (read_one "#\\ ");
+  check_datum "#\\( (lparen)" (Datum.Char (Uchar.of_char '(')) (read_one "#\\(");
+  check_datum "#\\) (rparen)" (Datum.Char (Uchar.of_char ')')) (read_one "#\\)")
 
 let test_reader_strings () =
   check_datum "simple" (Datum.Str "hello") (read_one "\"hello\"");
@@ -212,7 +221,15 @@ let test_reader_fold_case_directive () =
   let d1 = Reader.read rt p in
   let d2 = Reader.read rt p in
   check_datum "FOO -> foo" (Datum.Symbol "foo") d1;
-  check_datum "BAR stays BAR" (Datum.Symbol "BAR") d2
+  check_datum "BAR stays BAR" (Datum.Symbol "BAR") d2;
+  (* fold-case persists across multiple read calls on same port *)
+  let p2 = Port.of_string "#!fold-case FOO BAR BAZ" in
+  let d3 = Reader.read rt p2 in
+  let d4 = Reader.read rt p2 in
+  let d5 = Reader.read rt p2 in
+  check_datum "FOO -> foo (persist)" (Datum.Symbol "foo") d3;
+  check_datum "BAR -> bar (persist)" (Datum.Symbol "bar") d4;
+  check_datum "BAZ -> baz (persist)" (Datum.Symbol "baz") d5
 
 (* Datum labels *)
 

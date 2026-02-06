@@ -28,3 +28,12 @@ val current_loc : t -> Loc.t
 (** [current_loc p] returns the source location of the next character to
     be read (i.e. the position {i after} the most recently consumed
     character). *)
+
+val readtable : t -> Readtable.t option
+(** [readtable p] returns the readtable stored on this port, if any.
+    Used by the reader to persist [#!fold-case] / [#!no-fold-case]
+    directives across multiple [read] calls on the same port. *)
+
+val set_readtable : t -> Readtable.t -> unit
+(** [set_readtable p rt] stores readtable [rt] on the port.  Subsequent
+    [read] calls on [p] will pick up this readtable. *)
