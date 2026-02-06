@@ -79,8 +79,15 @@ _opam/        # Local opam switch (gitignored)
 | `Port` | Input port abstraction (string ports), tracks line/column |
 | `Reader` | Readtable-driven recursive-descent parser |
 
-**Next: Milestone 2 (Environments & Symbol Table)** — `Symbol`, `Env`,
-`Instance`.
+**Milestone 2 (Environments & Symbol Table)** — complete.
+
+| Module | Purpose |
+|---|---|
+| `Symbol` | Interned symbols with integer ids for fast equality |
+| `Env` | Lexical environments: chain of mutable frames keyed by symbol id |
+| `Instance` | Per-instance state: symbol table, global env, readtable |
+
+**Next: Milestone 3 (Expander & Compiler)** — TBD.
 
 ## Development Workflow
 
@@ -115,6 +122,9 @@ Tests live in `test/` as per-topic files and are run via `dune test`.
 | `test/test_syntax.ml` | Syntax (8 tests) |
 | `test/test_port.ml` | Port (10 tests: 9 unit + 1 QCheck) |
 | `test/test_reader.ml` | Reader (31 tests: 30 unit + 1 QCheck) |
+| `test/test_symbol.ml` | Symbol (8 tests: 6 unit + 2 QCheck) |
+| `test/test_env.ml` | Env (10 tests) |
+| `test/test_instance.ml` | Instance (5 tests) |
 
 Test dependencies:
 - **alcotest** — unit test framework with readable output
