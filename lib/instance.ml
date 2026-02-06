@@ -2,6 +2,7 @@ type t = {
   symbols : Symbol.table;
   global_env : Env.t;
   readtable : Readtable.t;
+  winds : Datum.wind list ref;
 }
 
 (* --- Primitive helpers --- *)
@@ -25,7 +26,7 @@ let has_flonum args =
   List.exists (function Datum.Flonum _ -> true | _ -> false) args
 
 let make_prim name fn : Datum.t =
-  Datum.Primitive { prim_name = name; prim_fn = fn }
+  Datum.Primitive { prim_name = name; prim_fn = fn; prim_intrinsic = None }
 
 (* --- Arithmetic primitives --- *)
 
@@ -170,12 +171,31 @@ let prim_newline args =
   | [] -> print_newline (); Datum.Void
   | _ -> runtime_error (Printf.sprintf "newline: expected 0 arguments, got %d" (List.length args))
 
+(* --- Intrinsic dummy --- *)
+
+let intrinsic_dummy _ =
+  runtime_error "intrinsic: must be called via VM"
+
+let make_intrinsic name id : Datum.t =
+  Datum.Primitive { prim_name = name; prim_fn = intrinsic_dummy; prim_intrinsic = Some id }
+
+(* --- values primitive --- *)
+
+let prim_values args =
+  match args with
+  | [v] -> v
+  | _ -> Datum.Values args
+
 (* --- Primitive registration --- *)
 
 let register_primitives symbols env =
   let register name fn =
     let sym = Symbol.intern symbols name in
     Env.define env sym (make_prim name fn)
+  in
+  let register_intrinsic name id =
+    let sym = Symbol.intern symbols name in
+    Env.define env sym (make_intrinsic name id)
   in
   register "+" prim_add;
   register "-" prim_sub;
@@ -195,7 +215,13 @@ let register_primitives symbols env =
   register "eq?" prim_eq;
   register "list" prim_list;
   register "<=" prim_le;
-  register ">=" prim_ge
+  register ">=" prim_ge;
+  register_intrinsic "apply" Datum.Intrinsic_apply;
+  register_intrinsic "call/cc" Datum.Intrinsic_call_cc;
+  register_intrinsic "call-with-current-continuation" Datum.Intrinsic_call_cc;
+  register_intrinsic "call-with-values" Datum.Intrinsic_call_with_values;
+  register_intrinsic "dynamic-wind" Datum.Intrinsic_dynamic_wind;
+  register "values" prim_values
 
 (* --- Instance creation --- *)
 
@@ -203,7 +229,7 @@ let create ?(readtable = Readtable.default) () =
   let symbols = Symbol.create_table () in
   let global_env = Env.empty () in
   register_primitives symbols global_env;
-  { symbols; global_env; readtable }
+  { symbols; global_env; readtable; winds = ref [] }
 
 let intern inst name = Symbol.intern inst.symbols name
 
@@ -211,7 +237,7 @@ let intern inst name = Symbol.intern inst.symbols name
 
 let eval_syntax inst expr =
   let code = Compiler.compile inst.symbols expr in
-  Vm.execute inst.global_env code
+  Vm.execute ~winds:inst.winds inst.global_env code
 
 let eval_string inst src =
   let port = Port.of_string src in

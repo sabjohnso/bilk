@@ -14,7 +14,10 @@ exception Runtime_error of string
 
 (** {1 Execution} *)
 
-val execute : Datum.env -> Datum.code -> Datum.t
-(** [execute env code] runs bytecode [code] in environment [env] and
+val execute : ?winds:Datum.wind list ref -> Datum.env -> Datum.code -> Datum.t
+(** [execute ?winds env code] runs bytecode [code] in environment [env] and
     returns the final value (the accumulator when [Halt] is reached).
+    @param winds  Shared mutable wind stack for [dynamic-wind] and
+                  continuation invocation.  If omitted, a fresh empty
+                  wind stack is created.
     @raise Runtime_error on runtime errors. *)

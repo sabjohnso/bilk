@@ -1,3 +1,9 @@
+type intrinsic_id =
+  | Intrinsic_call_cc
+  | Intrinsic_apply
+  | Intrinsic_call_with_values
+  | Intrinsic_dynamic_wind
+
 type t =
   | Bool of bool
   | Fixnum of int
@@ -13,10 +19,13 @@ type t =
   | Void
   | Primitive of primitive
   | Closure of closure
+  | Continuation of continuation
+  | Values of t list
 
 and primitive = {
   prim_name : string;
   prim_fn : t list -> t;
+  prim_intrinsic : intrinsic_id option;
 }
 
 and closure = {
@@ -38,6 +47,28 @@ and code = {
 and env = frame list
 and frame = (int, t ref) Hashtbl.t
 
+and call_frame = {
+  saved_code : code;
+  saved_pc : int;
+  saved_env : env;
+  saved_sp : int;
+}
+
+and wind = {
+  wind_before : t;
+  wind_after : t;
+}
+
+and continuation = {
+  cont_stack : t array;
+  cont_sp : int;
+  cont_frames : call_frame list;
+  cont_code : code;
+  cont_pc : int;
+  cont_env : env;
+  cont_winds : wind list;
+}
+
 let rec equal a b =
   match (a, b) with
   | Bool x, Bool y -> x = y
@@ -56,6 +87,10 @@ let rec equal a b =
   | Void, Void -> true
   | Primitive a, Primitive b -> String.equal a.prim_name b.prim_name
   | Closure _, Closure _ -> false
+  | Continuation _, Continuation _ -> false
+  | Values xs, Values ys ->
+    List.length xs = List.length ys
+    && List.for_all2 equal xs ys
   | _ -> false
 
 let rec pp fmt = function
@@ -99,6 +134,8 @@ let rec pp fmt = function
   | Void -> Format.fprintf fmt "#<void>"
   | Primitive p -> Format.fprintf fmt "#<primitive %s>" p.prim_name
   | Closure c -> Format.fprintf fmt "#<closure %s>" c.clos_name
+  | Continuation _ -> Format.fprintf fmt "#<continuation>"
+  | Values vs -> Format.fprintf fmt "#<values %d>" (List.length vs)
 
 and pp_tail fmt = function
   | Nil -> ()

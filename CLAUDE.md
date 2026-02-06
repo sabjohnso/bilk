@@ -67,7 +67,7 @@ _opam/        # Local opam switch (gitignored)
 | Module | Purpose |
 |---|---|
 | `Char_type` | Character classification for the readtable (6 variants) |
-| `Datum` | Core Scheme value type (14 variants + code/env/closure types, structural equality, printer) |
+| `Datum` | Core Scheme value type (16 variants + code/env/closure/continuation types, structural equality, printer) |
 | `Readtable` | Immutable readtable with functional updates, R7RS default table |
 
 **Milestone 1 (Reader)** — complete.
@@ -106,7 +106,17 @@ Compiler-only changes (no new opcodes or VM modifications):
 - `Compiler`: Added `and`, `or`, `when`, `unless`, `let`, `let*`, `letrec`, `letrec*`, named `let`, `cond`, `case`, `do`, internal `define`
 - `Instance`: Added 5 primitives: `eqv?`, `eq?`, `list`, `>=`, `<=` (19 total)
 
-**Next: Milestone 5** — TBD.
+**Milestone 5 (Continuations, Apply & Multiple Values)** — complete.
+
+No new opcodes or compiler changes. All features are runtime values handled by
+the VM's existing Call/TailCall dispatch via intrinsic dispatch.
+
+Changes to existing modules:
+- `Datum`: Added `Continuation`, `Values` variants; `intrinsic_id`, `call_frame`, `wind`, `continuation` types; `prim_intrinsic` field on `primitive`
+- `Vm`: Stack-copying `call/cc`, intrinsic dispatch for `apply`/`call-with-values`/`dynamic-wind`, internal `vm_frame` type for multi-step operations, wind stack for continuation invocation
+- `Instance`: Added `winds` field; registered 6 new primitives/intrinsics: `apply`, `call/cc`, `call-with-current-continuation`, `values`, `call-with-values`, `dynamic-wind` (25 total)
+
+**Next: Milestone 6** — TBD.
 
 ## Development Workflow
 
@@ -135,7 +145,7 @@ Tests live in `test/` as per-topic files and are run via `dune test`.
 | File | Scope |
 |---|---|
 | `test/test_char_type.ml` | Char_type (4 tests) |
-| `test/test_datum.ml` | Datum (15 tests) |
+| `test/test_datum.ml` | Datum (17 tests) |
 | `test/test_readtable.ml` | Readtable (24 tests: 20 unit + 4 QCheck) |
 | `test/test_loc.ml` | Loc (4 tests) |
 | `test/test_syntax.ml` | Syntax (8 tests) |
@@ -146,7 +156,7 @@ Tests live in `test/` as per-topic files and are run via `dune test`.
 | `test/test_instance.ml` | Instance (8 tests) |
 | `test/test_opcode.ml`   | Opcode (4 tests) |
 | `test/test_compiler.ml` | Compiler (14 tests) |
-| `test/test_vm.ml`       | VM (89 tests: end-to-end via Instance.eval_string) |
+| `test/test_vm.ml`       | VM (122 tests: end-to-end via Instance.eval_string) |
 
 Test dependencies:
 - **alcotest** — unit test framework with readable output

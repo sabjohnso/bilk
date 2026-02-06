@@ -16,6 +16,8 @@ type t = {
   (** The global (top-level) environment. *)
   readtable : Readtable.t;
   (** The readtable used by the reader. *)
+  winds : Datum.wind list ref;
+  (** The dynamic-wind stack, shared across evaluations. *)
 }
 
 (** {1 Constructors} *)
@@ -24,8 +26,10 @@ val create : ?readtable:Readtable.t -> unit -> t
 (** [create ?readtable ()] returns a fresh instance with an empty symbol table,
     a global environment pre-populated with standard primitives ([+], [-], [*],
     [<], [=], [>], [<=], [>=], [cons], [car], [cdr], [null?], [pair?], [not],
-    [display], [newline], [eqv?], [eq?], [list]), and the given [readtable]
-    (defaults to {!Readtable.default}). *)
+    [display], [newline], [eqv?], [eq?], [list], [values]) and intrinsics
+    ([apply], [call/cc], [call-with-current-continuation], [call-with-values],
+    [dynamic-wind]), and the given [readtable] (defaults to
+    {!Readtable.default}). *)
 
 (** {1 Convenience} *)
 

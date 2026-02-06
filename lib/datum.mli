@@ -9,6 +9,13 @@
 
 (** {1 Types} *)
 
+(** Identifies built-in procedures that require special VM handling. *)
+type intrinsic_id =
+  | Intrinsic_call_cc           (** [call/cc] / [call-with-current-continuation] *)
+  | Intrinsic_apply             (** [apply] *)
+  | Intrinsic_call_with_values  (** [call-with-values] *)
+  | Intrinsic_dynamic_wind      (** [dynamic-wind] *)
+
 (** The Scheme value type.  Exposed so callers can pattern‐match on values. *)
 type t =
   | Bool of bool               (** [#t] / [#f] *)
@@ -25,11 +32,16 @@ type t =
   | Void                       (** Result of [define], [set!], [display], etc. *)
   | Primitive of primitive     (** Built-in OCaml function *)
   | Closure of closure         (** User-defined procedure *)
+  | Continuation of continuation (** First-class continuation *)
+  | Values of t list           (** Multiple return values *)
 
 (** A built-in primitive function. *)
 and primitive = {
   prim_name : string;          (** Name for error messages / display *)
   prim_fn : t list -> t;       (** Implementation *)
+  prim_intrinsic : intrinsic_id option;
+  (** [Some id] for intrinsics that require special VM dispatch;
+      [None] for regular primitives. *)
 }
 
 (** A user-defined closure (compiled procedure + captured environment). *)
@@ -56,13 +68,39 @@ and env = frame list
 (** A single environment frame mapping symbol ids to mutable value slots. *)
 and frame = (int, t ref) Hashtbl.t
 
+(** A saved call frame for the VM call stack. *)
+and call_frame = {
+  saved_code : code;    (** Code object of the caller *)
+  saved_pc : int;       (** Program counter to resume at *)
+  saved_env : env;      (** Environment of the caller *)
+  saved_sp : int;       (** Stack pointer of the caller *)
+}
+
+(** A dynamic-wind entry pairing before and after thunks. *)
+and wind = {
+  wind_before : t;      (** Thunk called on entry *)
+  wind_after : t;       (** Thunk called on exit *)
+}
+
+(** A captured first-class continuation. *)
+and continuation = {
+  cont_stack : t array;          (** Snapshot of the value stack *)
+  cont_sp : int;                 (** Stack pointer at capture time *)
+  cont_frames : call_frame list; (** Saved call frames *)
+  cont_code : code;              (** Code at capture site *)
+  cont_pc : int;                 (** Program counter at capture site *)
+  cont_env : env;                (** Environment at capture site *)
+  cont_winds : wind list;        (** Dynamic-wind stack at capture time *)
+}
+
 (** {1 Equality} *)
 
 val equal : t -> t -> bool
 (** [equal a b] is recursive structural equality.  [Flonum] uses
     [Float.equal] (so [nan = nan] is [true]).  Vectors and bytevectors are
     compared element‐wise.  [Void = Void] is [true].  [Primitive] compares
-    by name.  [Closure] always returns [false] (identity semantics). *)
+    by name.  [Closure] and [Continuation] always return [false]
+    (identity semantics).  [Values] compares element-wise. *)
 
 (** {1 Printing} *)
 

@@ -81,11 +81,11 @@ let test_datum_void () =
   Alcotest.(check string) "void pp" "#<void>" (Datum.to_string Datum.Void)
 
 let test_datum_primitive () =
-  let p = Datum.Primitive { prim_name = "add"; prim_fn = (fun _ -> Datum.Void) } in
+  let p = Datum.Primitive { prim_name = "add"; prim_fn = (fun _ -> Datum.Void); prim_intrinsic = None } in
   Alcotest.(check string) "primitive pp" "#<primitive add>" (Datum.to_string p);
-  let p2 = Datum.Primitive { prim_name = "add"; prim_fn = (fun _ -> Datum.Nil) } in
+  let p2 = Datum.Primitive { prim_name = "add"; prim_fn = (fun _ -> Datum.Nil); prim_intrinsic = None } in
   Alcotest.(check bool) "same name = equal" true (Datum.equal p p2);
-  let p3 = Datum.Primitive { prim_name = "sub"; prim_fn = (fun _ -> Datum.Void) } in
+  let p3 = Datum.Primitive { prim_name = "sub"; prim_fn = (fun _ -> Datum.Void); prim_intrinsic = None } in
   Alcotest.(check bool) "diff name = not equal" false (Datum.equal p p3)
 
 let test_datum_closure () =
@@ -102,6 +102,39 @@ let test_datum_closure () =
   let c2 = Datum.Closure { clos_name = "f"; clos_code = dummy_code; clos_env = [] } in
   Alcotest.(check string) "closure pp" "#<closure f>" (Datum.to_string c1);
   Alcotest.(check bool) "closures never equal" false (Datum.equal c1 c2)
+
+let test_datum_continuation () =
+  let dummy_code : Datum.code = {
+    instructions = [| Opcode.Halt |];
+    constants = [||];
+    symbols = [||];
+    children = [||];
+    params = [||];
+    variadic = false;
+    name = "test";
+  } in
+  let c1 = Datum.Continuation {
+    cont_stack = [||]; cont_sp = 0; cont_frames = [];
+    cont_code = dummy_code; cont_pc = 0; cont_env = [];
+    cont_winds = [];
+  } in
+  let c2 = Datum.Continuation {
+    cont_stack = [||]; cont_sp = 0; cont_frames = [];
+    cont_code = dummy_code; cont_pc = 0; cont_env = [];
+    cont_winds = [];
+  } in
+  Alcotest.(check string) "continuation pp" "#<continuation>" (Datum.to_string c1);
+  Alcotest.(check bool) "continuations never equal" false (Datum.equal c1 c2)
+
+let test_datum_values () =
+  let v1 = Datum.Values [Datum.Fixnum 1; Datum.Fixnum 2] in
+  let v2 = Datum.Values [Datum.Fixnum 1; Datum.Fixnum 2] in
+  let v3 = Datum.Values [Datum.Fixnum 1; Datum.Fixnum 3] in
+  Alcotest.(check string) "values pp" "#<values 2>" (Datum.to_string v1);
+  Alcotest.(check bool) "values equal" true (Datum.equal v1 v2);
+  Alcotest.(check bool) "values not equal" false (Datum.equal v1 v3);
+  let v4 = Datum.Values [] in
+  Alcotest.(check string) "values 0 pp" "#<values 0>" (Datum.to_string v4)
 
 let test_datum_pp () =
   Alcotest.(check string) "#t" "#t" (Datum.to_string (Bool true));
@@ -143,5 +176,7 @@ let () =
        ; Alcotest.test_case "void" `Quick test_datum_void
        ; Alcotest.test_case "primitive" `Quick test_datum_primitive
        ; Alcotest.test_case "closure" `Quick test_datum_closure
+       ; Alcotest.test_case "continuation" `Quick test_datum_continuation
+       ; Alcotest.test_case "values" `Quick test_datum_values
        ])
     ]

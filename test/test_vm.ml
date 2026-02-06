@@ -402,6 +402,225 @@ let test_tail_recursion () =
   ] in
   check_datum "tail recursion" (Datum.Fixnum 0) result
 
+(* --- apply --- *)
+
+let test_apply_basic () =
+  check_datum "apply basic" (Datum.Fixnum 6) (eval "(apply + '(1 2 3))")
+
+let test_apply_spread () =
+  check_datum "apply spread" (Datum.Fixnum 6) (eval "(apply + 1 2 '(3))")
+
+let test_apply_cons () =
+  check_datum "apply cons" (Datum.Pair (Datum.Fixnum 1, Datum.Fixnum 2))
+    (eval "(apply cons '(1 2))")
+
+let test_apply_empty () =
+  check_datum "apply empty" Datum.Nil (eval "(apply list '())")
+
+let test_apply_multi_spread () =
+  let expected = Datum.Pair (Datum.Fixnum 1,
+    Datum.Pair (Datum.Fixnum 2,
+      Datum.Pair (Datum.Fixnum 3,
+        Datum.Pair (Datum.Fixnum 4, Datum.Nil)))) in
+  check_datum "apply multi spread" expected (eval "(apply list 1 2 '(3 4))")
+
+let test_apply_lambda () =
+  check_datum "apply lambda" (Datum.Fixnum 7)
+    (eval "(apply (lambda (x y) (+ x y)) '(3 4))")
+
+let test_apply_first_class () =
+  check_datum "apply first class" (Datum.Fixnum 3)
+    (eval "(let ((a apply)) (a + '(1 2)))")
+
+let test_apply_error () =
+  Alcotest.check_raises "apply non-list"
+    (Vm.Runtime_error "apply: last argument must be a list")
+    (fun () -> ignore (eval "(apply + 1)"))
+
+(* --- call/cc --- *)
+
+let test_callcc_unused () =
+  check_datum "unused k" (Datum.Fixnum 42)
+    (eval "(call/cc (lambda (k) 42))")
+
+let test_callcc_invoke () =
+  check_datum "invoke k" (Datum.Fixnum 42)
+    (eval "(call/cc (lambda (k) (k 42)))")
+
+let test_callcc_abort () =
+  check_datum "k aborts" (Datum.Fixnum 42)
+    (eval "(call/cc (lambda (k) (k 42) 99))")
+
+let test_callcc_expr_context () =
+  check_datum "expr context" (Datum.Fixnum 11)
+    (eval "(+ 1 (call/cc (lambda (k) (k 10))))")
+
+let test_callcc_saved () =
+  check_datum "saved cont" (Datum.Fixnum 42)
+    (eval "(let ((saved #f)) \
+            (let ((result (call/cc (lambda (k) (set! saved k) 1)))) \
+              (if (= result 1) (saved 42) result)))")
+
+let test_callcc_long_name () =
+  check_datum "long name" (Datum.Fixnum 42)
+    (eval "(call-with-current-continuation (lambda (k) (k 42)))")
+
+let test_callcc_first_class () =
+  check_datum "first class" (Datum.Fixnum 42)
+    (eval "(let ((cc call/cc)) (cc (lambda (k) (k 42))))")
+
+let test_callcc_multi_shot () =
+  (* Multi-shot: continuation invoked 3 times *)
+  check_datum "multi shot" (Datum.Fixnum 15)
+    (eval "(let ((k-saved #f)) \
+            (let ((x (call/cc (lambda (k) (set! k-saved k) 0)))) \
+              (if (< x 15) (k-saved (+ x 5)) x)))")
+
+let test_callcc_nested () =
+  check_datum "nested call/cc" (Datum.Fixnum 42)
+    (eval "(call/cc (lambda (outer) (call/cc (lambda (inner) (outer 42)))))")
+
+let test_callcc_tail () =
+  check_datum "tail call/cc" (Datum.Fixnum 42)
+    (eval "((lambda () (call/cc (lambda (k) (k 42)))))")
+
+let test_callcc_closure () =
+  (* Continuation captured inside a closure, invoked from outside *)
+  check_datum "closure captures k" (Datum.Fixnum 99)
+    (eval "(let ((escape #f)) \
+            (let ((result (call/cc (lambda (k) (set! escape k) 0)))) \
+              (if (= result 0) (escape 99) result)))")
+
+(* --- values / call-with-values --- *)
+
+let test_cwv_basic () =
+  check_datum "cwv basic" (Datum.Fixnum 3)
+    (eval "(call-with-values (lambda () (values 1 2)) +)")
+
+let test_cwv_single () =
+  check_datum "cwv single" (Datum.Fixnum 42)
+    (eval "(call-with-values (lambda () 42) (lambda (x) x))")
+
+let test_cwv_triple () =
+  let expected = Datum.Pair (Datum.Fixnum 1,
+    Datum.Pair (Datum.Fixnum 2,
+      Datum.Pair (Datum.Fixnum 3, Datum.Nil))) in
+  check_datum "cwv triple" expected
+    (eval "(call-with-values (lambda () (values 1 2 3)) list)")
+
+let test_values_single () =
+  check_datum "values single" (Datum.Fixnum 42) (eval "(values 42)")
+
+let test_cwv_no_values () =
+  check_datum "cwv no values" (Datum.Fixnum 99)
+    (eval "(call-with-values (lambda () (values)) (lambda () 99))")
+
+let test_cwv_nested () =
+  check_datum "cwv nested" (Datum.Fixnum 3)
+    (eval "(call-with-values \
+            (lambda () (values 1 2)) \
+            (lambda (a b) (+ a b)))")
+
+(* --- dynamic-wind --- *)
+
+let test_dw_basic () =
+  (* before, thunk, after all called in order; result is thunk's value *)
+  check_datum "dw basic" (Datum.Fixnum 42)
+    (eval "(let ((log '())) \
+            (let ((result \
+              (dynamic-wind \
+                (lambda () (set! log (cons 'before log))) \
+                (lambda () 42) \
+                (lambda () (set! log (cons 'after log)))))) \
+              result))")
+
+let test_dw_order () =
+  (* verify before/thunk/after execution order via side effects *)
+  check_datum "dw order"
+    (Datum.Pair (Datum.Fixnum 3,
+      Datum.Pair (Datum.Fixnum 2,
+        Datum.Pair (Datum.Fixnum 1, Datum.Nil))))
+    (eval "(let ((log '())) \
+            (dynamic-wind \
+              (lambda () (set! log (cons 1 log))) \
+              (lambda () (set! log (cons 2 log))) \
+              (lambda () (set! log (cons 3 log)))) \
+            log)")
+
+let test_dw_escape () =
+  (* escaping via continuation calls after *)
+  check_datum "dw escape"
+    (Datum.Pair (Datum.Symbol "after",
+      Datum.Pair (Datum.Symbol "before", Datum.Nil)))
+    (eval "(let ((log '())) \
+            (call/cc (lambda (k) \
+              (dynamic-wind \
+                (lambda () (set! log (cons 'before log))) \
+                (lambda () (k 'escaped)) \
+                (lambda () (set! log (cons 'after log)))))) \
+            log)")
+
+let test_dw_reenter () =
+  (* re-entering via saved continuation calls before again *)
+  check_datum "dw reenter" (Datum.Fixnum 2)
+    (eval "(let ((k-saved #f) (count 0)) \
+            (dynamic-wind \
+              (lambda () (set! count (+ count 1))) \
+              (lambda () (call/cc (lambda (k) (set! k-saved k)))) \
+              (lambda () #f)) \
+            (if (< count 2) (k-saved #f) count))")
+
+let test_dw_nested () =
+  (* nested dynamic-wind: outer-before, inner-before, inner-after, outer-after *)
+  check_datum "dw nested"
+    (Datum.Pair (Datum.Symbol "a1",
+      Datum.Pair (Datum.Symbol "a2",
+        Datum.Pair (Datum.Symbol "b2",
+          Datum.Pair (Datum.Symbol "b1", Datum.Nil)))))
+    (eval "(let ((log '())) \
+            (dynamic-wind \
+              (lambda () (set! log (cons 'b1 log))) \
+              (lambda () \
+                (dynamic-wind \
+                  (lambda () (set! log (cons 'b2 log))) \
+                  (lambda () #f) \
+                  (lambda () (set! log (cons 'a2 log))))) \
+              (lambda () (set! log (cons 'a1 log)))) \
+            log)")
+
+let test_dw_escape_nested () =
+  (* escaping from nested dynamic-wind calls both afters in right order *)
+  check_datum "dw escape nested"
+    (Datum.Pair (Datum.Symbol "a1",
+      Datum.Pair (Datum.Symbol "a2",
+        Datum.Pair (Datum.Symbol "b2",
+          Datum.Pair (Datum.Symbol "b1", Datum.Nil)))))
+    (eval "(let ((log '())) \
+            (call/cc (lambda (k) \
+              (dynamic-wind \
+                (lambda () (set! log (cons 'b1 log))) \
+                (lambda () \
+                  (dynamic-wind \
+                    (lambda () (set! log (cons 'b2 log))) \
+                    (lambda () (k 'done)) \
+                    (lambda () (set! log (cons 'a2 log))))) \
+                (lambda () (set! log (cons 'a1 log)))))) \
+            log)")
+
+let test_dw_first_class () =
+  (* dynamic-wind as first-class value *)
+  check_datum "dw first class" (Datum.Fixnum 99)
+    (eval "(let ((dw dynamic-wind)) \
+            (dw (lambda () #f) (lambda () 99) (lambda () #f)))")
+
+let test_dw_thunk_result () =
+  (* thunk's return value is dynamic-wind's result *)
+  check_datum "dw thunk result" (Datum.Pair (Datum.Fixnum 1, Datum.Fixnum 2))
+    (eval "(dynamic-wind \
+            (lambda () #f) \
+            (lambda () (cons 1 2)) \
+            (lambda () #f))")
+
 let () =
   Alcotest.run "VM"
     [ ("self-evaluating",
@@ -540,5 +759,46 @@ let () =
        ])
     ; ("tail recursion",
        [ Alcotest.test_case "tail recursion" `Quick test_tail_recursion
+       ])
+    ; ("apply",
+       [ Alcotest.test_case "apply basic" `Quick test_apply_basic
+       ; Alcotest.test_case "apply spread" `Quick test_apply_spread
+       ; Alcotest.test_case "apply cons" `Quick test_apply_cons
+       ; Alcotest.test_case "apply empty" `Quick test_apply_empty
+       ; Alcotest.test_case "apply multi spread" `Quick test_apply_multi_spread
+       ; Alcotest.test_case "apply lambda" `Quick test_apply_lambda
+       ; Alcotest.test_case "apply first class" `Quick test_apply_first_class
+       ; Alcotest.test_case "apply error" `Quick test_apply_error
+       ])
+    ; ("call/cc",
+       [ Alcotest.test_case "unused k" `Quick test_callcc_unused
+       ; Alcotest.test_case "invoke k" `Quick test_callcc_invoke
+       ; Alcotest.test_case "k aborts" `Quick test_callcc_abort
+       ; Alcotest.test_case "expr context" `Quick test_callcc_expr_context
+       ; Alcotest.test_case "saved cont" `Quick test_callcc_saved
+       ; Alcotest.test_case "long name" `Quick test_callcc_long_name
+       ; Alcotest.test_case "first class" `Quick test_callcc_first_class
+       ; Alcotest.test_case "multi shot" `Quick test_callcc_multi_shot
+       ; Alcotest.test_case "nested call/cc" `Quick test_callcc_nested
+       ; Alcotest.test_case "tail call/cc" `Quick test_callcc_tail
+       ; Alcotest.test_case "closure captures k" `Quick test_callcc_closure
+       ])
+    ; ("values/call-with-values",
+       [ Alcotest.test_case "cwv basic" `Quick test_cwv_basic
+       ; Alcotest.test_case "cwv single" `Quick test_cwv_single
+       ; Alcotest.test_case "cwv triple" `Quick test_cwv_triple
+       ; Alcotest.test_case "values single" `Quick test_values_single
+       ; Alcotest.test_case "cwv no values" `Quick test_cwv_no_values
+       ; Alcotest.test_case "cwv nested" `Quick test_cwv_nested
+       ])
+    ; ("dynamic-wind",
+       [ Alcotest.test_case "basic" `Quick test_dw_basic
+       ; Alcotest.test_case "order" `Quick test_dw_order
+       ; Alcotest.test_case "escape" `Quick test_dw_escape
+       ; Alcotest.test_case "reenter" `Quick test_dw_reenter
+       ; Alcotest.test_case "nested" `Quick test_dw_nested
+       ; Alcotest.test_case "escape nested" `Quick test_dw_escape_nested
+       ; Alcotest.test_case "first class" `Quick test_dw_first_class
+       ; Alcotest.test_case "thunk result" `Quick test_dw_thunk_result
        ])
     ]
