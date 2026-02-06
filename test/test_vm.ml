@@ -176,6 +176,222 @@ let test_greater_than () =
   check_datum "> true" (Datum.Bool true) (eval "(> 3 1)");
   check_datum "> false" (Datum.Bool false) (eval "(> 1 3)")
 
+(* --- and/or --- *)
+
+let test_and_empty () =
+  check_datum "(and)" (Datum.Bool true) (eval "(and)")
+
+let test_and_single () =
+  check_datum "(and 1)" (Datum.Fixnum 1) (eval "(and 1)")
+
+let test_and_two () =
+  check_datum "(and 1 2)" (Datum.Fixnum 2) (eval "(and 1 2)")
+
+let test_and_short_circuit () =
+  check_datum "(and #f 2)" (Datum.Bool false) (eval "(and #f 2)")
+
+let test_and_middle_false () =
+  check_datum "(and 1 #f 3)" (Datum.Bool false) (eval "(and 1 #f 3)")
+
+let test_and_all_true () =
+  check_datum "(and 1 2 3)" (Datum.Fixnum 3) (eval "(and 1 2 3)")
+
+let test_or_empty () =
+  check_datum "(or)" (Datum.Bool false) (eval "(or)")
+
+let test_or_single () =
+  check_datum "(or 1)" (Datum.Fixnum 1) (eval "(or 1)")
+
+let test_or_false_then_value () =
+  check_datum "(or #f 2)" (Datum.Fixnum 2) (eval "(or #f 2)")
+
+let test_or_short_circuit () =
+  check_datum "(or 1 2)" (Datum.Fixnum 1) (eval "(or 1 2)")
+
+let test_or_all_false () =
+  check_datum "(or #f #f #f)" (Datum.Bool false) (eval "(or #f #f #f)")
+
+let test_or_last_true () =
+  check_datum "(or #f #f 3)" (Datum.Fixnum 3) (eval "(or #f #f 3)")
+
+(* --- when/unless --- *)
+
+let test_when_true () =
+  check_datum "when true" (Datum.Fixnum 42) (eval "(when #t 42)")
+
+let test_when_false () =
+  check_datum "when false" Datum.Void (eval "(when #f 42)")
+
+let test_when_multi_body () =
+  check_datum "when multi" (Datum.Fixnum 3) (eval "(when #t 1 2 3)")
+
+let test_unless_false () =
+  check_datum "unless false" (Datum.Fixnum 42) (eval "(unless #f 42)")
+
+let test_unless_true () =
+  check_datum "unless true" Datum.Void (eval "(unless #t 42)")
+
+(* --- let --- *)
+
+let test_let_simple () =
+  check_datum "let simple" (Datum.Fixnum 1) (eval "(let ((x 1)) x)")
+
+let test_let_two_bindings () =
+  check_datum "let two" (Datum.Fixnum 3) (eval "(let ((x 1) (y 2)) (+ x y))")
+
+let test_let_shadow () =
+  check_datum "let shadow" (Datum.Fixnum 2) (eval "(let ((x 1)) (let ((x 2)) x))")
+
+(* --- let* --- *)
+
+let test_let_star () =
+  check_datum "let* seq" (Datum.Fixnum 2) (eval "(let* ((x 1) (y (+ x 1))) y)")
+
+let test_let_star_empty () =
+  check_datum "let* empty" (Datum.Fixnum 42) (eval "(let* () 42)")
+
+(* --- letrec / letrec* --- *)
+
+let test_letrec_factorial () =
+  check_datum "letrec factorial" (Datum.Fixnum 120)
+    (eval "(letrec ((f (lambda (n) (if (= n 0) 1 (* n (f (- n 1))))))) (f 5))")
+
+let test_letrec_star_seq () =
+  check_datum "letrec* seq" (Datum.Fixnum 2)
+    (eval "(letrec* ((a 1) (b (+ a 1))) b)")
+
+let test_letrec_mutual () =
+  let result = eval
+    "(letrec ((even? (lambda (n) (if (= n 0) #t (odd? (- n 1))))) \
+              (odd? (lambda (n) (if (= n 0) #f (even? (- n 1)))))) \
+       (even? 10))" in
+  check_datum "mutual recursion" (Datum.Bool true) result
+
+(* --- Named let --- *)
+
+let test_named_let () =
+  check_datum "named let sum" (Datum.Fixnum 10)
+    (eval "(let loop ((i 0) (s 0)) (if (= i 5) s (loop (+ i 1) (+ s i))))")
+
+let test_named_let_large () =
+  check_datum "named let large" (Datum.Fixnum 0)
+    (eval "(let loop ((n 100000)) (if (= n 0) 0 (loop (- n 1))))")
+
+(* --- Internal define --- *)
+
+let test_internal_define () =
+  check_datum "internal define" (Datum.Fixnum 11)
+    (eval "((lambda (x) (define a (+ x 1)) a) 10)")
+
+let test_internal_define_fn () =
+  check_datum "internal define fn" (Datum.Fixnum 6)
+    (eval "((lambda () (define (f x) (+ x 1)) (f 5)))")
+
+let test_internal_define_mutual () =
+  let result = eval
+    "((lambda () \
+        (define (even? n) (if (= n 0) #t (odd? (- n 1)))) \
+        (define (odd? n) (if (= n 0) #f (even? (- n 1)))) \
+        (even? 6)))" in
+  check_datum "internal define mutual" (Datum.Bool true) result
+
+(* --- cond --- *)
+
+let test_cond_true () =
+  check_datum "cond true" (Datum.Fixnum 1) (eval "(cond (#t 1))")
+
+let test_cond_second () =
+  check_datum "cond second" (Datum.Fixnum 2) (eval "(cond (#f 1) (#t 2))")
+
+let test_cond_else () =
+  check_datum "cond else" (Datum.Fixnum 2) (eval "(cond (#f 1) (else 2))")
+
+let test_cond_no_match () =
+  check_datum "cond no match" Datum.Void (eval "(cond (#f 1))")
+
+let test_cond_expr () =
+  check_datum "cond expr" (Datum.Symbol "yes") (eval "(cond ((< 1 2) 'yes))")
+
+let test_cond_multi_body () =
+  check_datum "cond multi body" (Datum.Fixnum 3) (eval "(cond (#t 1 2 3))")
+
+let test_cond_test_only () =
+  (* (cond (42)) → 42, the test value is returned *)
+  check_datum "cond test only" (Datum.Fixnum 42) (eval "(cond (42))")
+
+(* --- case --- *)
+
+let test_case_match () =
+  check_datum "case match" (Datum.Symbol "b")
+    (eval "(case 2 ((1) 'a) ((2) 'b) (else 'c))")
+
+let test_case_multi_datum () =
+  check_datum "case multi datum" (Datum.Symbol "hi")
+    (eval "(case 3 ((1 2) 'lo) ((3 4) 'hi))")
+
+let test_case_else () =
+  check_datum "case else" (Datum.Symbol "other")
+    (eval "(case 99 ((1) 'a) (else 'other))")
+
+let test_case_no_match () =
+  check_datum "case no match" Datum.Void
+    (eval "(case 99 ((1) 'a))")
+
+(* --- do --- *)
+
+let test_do_simple () =
+  check_datum "do simple" (Datum.Fixnum 5)
+    (eval "(do ((i 0 (+ i 1))) ((= i 5) i))")
+
+let test_do_two_vars () =
+  check_datum "do two vars" (Datum.Fixnum 10)
+    (eval "(do ((i 0 (+ i 1)) (s 0 (+ s i))) ((= i 5) s))")
+
+let test_do_no_result () =
+  check_datum "do no result" Datum.Void
+    (eval "(do ((i 0 (+ i 1))) ((= i 3)))")
+
+(* --- Equivalence primitives --- *)
+
+let test_eqv_fixnum () =
+  check_datum "eqv? same int" (Datum.Bool true) (eval "(eqv? 1 1)");
+  check_datum "eqv? diff int" (Datum.Bool false) (eval "(eqv? 1 2)")
+
+let test_eqv_symbol () =
+  check_datum "eqv? same sym" (Datum.Bool true) (eval "(eqv? 'a 'a)");
+  check_datum "eqv? diff sym" (Datum.Bool false) (eval "(eqv? 'a 'b)")
+
+let test_eqv_string () =
+  check_datum "eqv? strings" (Datum.Bool false) (eval "(eqv? \"a\" \"a\")")
+
+let test_eqv_bool () =
+  check_datum "eqv? #t #t" (Datum.Bool true) (eval "(eqv? #t #t)");
+  check_datum "eqv? #t #f" (Datum.Bool false) (eval "(eqv? #t #f)")
+
+let test_eqv_nil () =
+  check_datum "eqv? nil nil" (Datum.Bool true) (eval "(eqv? '() '())")
+
+let test_eq () =
+  check_datum "eq? #t #t" (Datum.Bool true) (eval "(eq? #t #t)");
+  check_datum "eq? 1 1" (Datum.Bool true) (eval "(eq? 1 1)")
+
+let test_prim_list () =
+  let expected = Datum.Pair (Datum.Fixnum 1,
+    Datum.Pair (Datum.Fixnum 2,
+      Datum.Pair (Datum.Fixnum 3, Datum.Nil))) in
+  check_datum "list 1 2 3" expected (eval "(list 1 2 3)");
+  check_datum "list empty" Datum.Nil (eval "(list)")
+
+let test_le () =
+  check_datum "<= true" (Datum.Bool true) (eval "(<= 1 2)");
+  check_datum "<= equal" (Datum.Bool true) (eval "(<= 2 2)");
+  check_datum "<= false" (Datum.Bool false) (eval "(<= 3 2)")
+
+let test_ge () =
+  check_datum ">= true" (Datum.Bool true) (eval "(>= 2 1)");
+  check_datum ">= equal" (Datum.Bool true) (eval "(>= 2 2)");
+  check_datum ">= false" (Datum.Bool false) (eval "(>= 1 2)")
+
 (* --- Tail recursion --- *)
 
 let test_tail_recursion () =
@@ -244,6 +460,83 @@ let () =
        [ Alcotest.test_case "<" `Quick test_less_than
        ; Alcotest.test_case "=" `Quick test_num_equal
        ; Alcotest.test_case ">" `Quick test_greater_than
+       ])
+    ; ("and",
+       [ Alcotest.test_case "(and)" `Quick test_and_empty
+       ; Alcotest.test_case "(and 1)" `Quick test_and_single
+       ; Alcotest.test_case "(and 1 2)" `Quick test_and_two
+       ; Alcotest.test_case "(and #f 2)" `Quick test_and_short_circuit
+       ; Alcotest.test_case "(and 1 #f 3)" `Quick test_and_middle_false
+       ; Alcotest.test_case "(and 1 2 3)" `Quick test_and_all_true
+       ])
+    ; ("or",
+       [ Alcotest.test_case "(or)" `Quick test_or_empty
+       ; Alcotest.test_case "(or 1)" `Quick test_or_single
+       ; Alcotest.test_case "(or #f 2)" `Quick test_or_false_then_value
+       ; Alcotest.test_case "(or 1 2)" `Quick test_or_short_circuit
+       ; Alcotest.test_case "(or #f #f #f)" `Quick test_or_all_false
+       ; Alcotest.test_case "(or #f #f 3)" `Quick test_or_last_true
+       ])
+    ; ("when/unless",
+       [ Alcotest.test_case "when true" `Quick test_when_true
+       ; Alcotest.test_case "when false" `Quick test_when_false
+       ; Alcotest.test_case "when multi body" `Quick test_when_multi_body
+       ; Alcotest.test_case "unless false" `Quick test_unless_false
+       ; Alcotest.test_case "unless true" `Quick test_unless_true
+       ])
+    ; ("let",
+       [ Alcotest.test_case "let simple" `Quick test_let_simple
+       ; Alcotest.test_case "let two bindings" `Quick test_let_two_bindings
+       ; Alcotest.test_case "let shadow" `Quick test_let_shadow
+       ])
+    ; ("let*",
+       [ Alcotest.test_case "let*" `Quick test_let_star
+       ; Alcotest.test_case "let* empty" `Quick test_let_star_empty
+       ])
+    ; ("letrec",
+       [ Alcotest.test_case "letrec factorial" `Quick test_letrec_factorial
+       ; Alcotest.test_case "letrec* sequential" `Quick test_letrec_star_seq
+       ; Alcotest.test_case "letrec mutual" `Quick test_letrec_mutual
+       ])
+    ; ("named let",
+       [ Alcotest.test_case "named let sum" `Quick test_named_let
+       ; Alcotest.test_case "named let large" `Quick test_named_let_large
+       ])
+    ; ("internal define",
+       [ Alcotest.test_case "internal define" `Quick test_internal_define
+       ; Alcotest.test_case "internal define fn" `Quick test_internal_define_fn
+       ; Alcotest.test_case "internal define mutual" `Quick test_internal_define_mutual
+       ])
+    ; ("cond",
+       [ Alcotest.test_case "cond true" `Quick test_cond_true
+       ; Alcotest.test_case "cond second" `Quick test_cond_second
+       ; Alcotest.test_case "cond else" `Quick test_cond_else
+       ; Alcotest.test_case "cond no match" `Quick test_cond_no_match
+       ; Alcotest.test_case "cond expr" `Quick test_cond_expr
+       ; Alcotest.test_case "cond multi body" `Quick test_cond_multi_body
+       ; Alcotest.test_case "cond test only" `Quick test_cond_test_only
+       ])
+    ; ("case",
+       [ Alcotest.test_case "case match" `Quick test_case_match
+       ; Alcotest.test_case "case multi datum" `Quick test_case_multi_datum
+       ; Alcotest.test_case "case else" `Quick test_case_else
+       ; Alcotest.test_case "case no match" `Quick test_case_no_match
+       ])
+    ; ("do",
+       [ Alcotest.test_case "do simple" `Quick test_do_simple
+       ; Alcotest.test_case "do two vars" `Quick test_do_two_vars
+       ; Alcotest.test_case "do no result" `Quick test_do_no_result
+       ])
+    ; ("equivalence",
+       [ Alcotest.test_case "eqv? fixnum" `Quick test_eqv_fixnum
+       ; Alcotest.test_case "eqv? symbol" `Quick test_eqv_symbol
+       ; Alcotest.test_case "eqv? string" `Quick test_eqv_string
+       ; Alcotest.test_case "eqv? bool" `Quick test_eqv_bool
+       ; Alcotest.test_case "eqv? nil" `Quick test_eqv_nil
+       ; Alcotest.test_case "eq?" `Quick test_eq
+       ; Alcotest.test_case "list" `Quick test_prim_list
+       ; Alcotest.test_case "<=" `Quick test_le
+       ; Alcotest.test_case ">=" `Quick test_ge
        ])
     ; ("tail recursion",
        [ Alcotest.test_case "tail recursion" `Quick test_tail_recursion

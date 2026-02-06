@@ -79,7 +79,7 @@ val to_string : t -> string
 val pp_display : Format.formatter -> t -> unit
 (** [pp_display fmt d] prints [d] in display representation per R7RS §6.13.3.
     Like {!pp} except strings are printed without quotes and characters are
-    printed as their raw character (not [#\\] notation). *)
+    printed as their raw character (not #\\ notation). *)
 
 val to_display_string : t -> string
 (** [to_display_string d] is [Format.asprintf "%a" pp_display d]. *)

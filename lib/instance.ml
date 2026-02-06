@@ -120,6 +120,44 @@ let prim_not args =
   | [_] -> Datum.Bool false
   | _ -> runtime_error (Printf.sprintf "not: expected 1 argument, got %d" (List.length args))
 
+(* --- Equivalence primitives --- *)
+
+let prim_eqv args =
+  match args with
+  | [a; b] ->
+    let result = match (a, b) with
+      | Datum.Bool x, Datum.Bool y -> x = y
+      | Datum.Fixnum x, Datum.Fixnum y -> x = y
+      | Datum.Flonum x, Datum.Flonum y -> Float.equal x y
+      | Datum.Char x, Datum.Char y -> Uchar.equal x y
+      | Datum.Symbol x, Datum.Symbol y -> String.equal x y
+      | Datum.Nil, Datum.Nil -> true
+      | _ -> false
+    in
+    Datum.Bool result
+  | _ -> runtime_error (Printf.sprintf "eqv?: expected 2 arguments, got %d" (List.length args))
+
+let prim_eq args = prim_eqv args
+
+let prim_list args =
+  List.fold_right (fun x acc -> Datum.Pair (x, acc)) args Datum.Nil
+
+let prim_le args =
+  match args with
+  | [a; b] ->
+    if is_numeric a && is_numeric b then
+      Datum.Bool (as_flonum "<=" a <= as_flonum "<=" b)
+    else runtime_error "<=: expected numeric arguments"
+  | _ -> runtime_error (Printf.sprintf "<=: expected 2 arguments, got %d" (List.length args))
+
+let prim_ge args =
+  match args with
+  | [a; b] ->
+    if is_numeric a && is_numeric b then
+      Datum.Bool (as_flonum ">=" a >= as_flonum ">=" b)
+    else runtime_error ">=: expected numeric arguments"
+  | _ -> runtime_error (Printf.sprintf ">=: expected 2 arguments, got %d" (List.length args))
+
 (* --- I/O primitives --- *)
 
 let prim_display args =
@@ -152,7 +190,12 @@ let register_primitives symbols env =
   register "pair?" prim_pair;
   register "not" prim_not;
   register "display" prim_display;
-  register "newline" prim_newline
+  register "newline" prim_newline;
+  register "eqv?" prim_eqv;
+  register "eq?" prim_eq;
+  register "list" prim_list;
+  register "<=" prim_le;
+  register ">=" prim_ge
 
 (* --- Instance creation --- *)
 

@@ -22,8 +22,10 @@ type t = {
 
 val create : ?readtable:Readtable.t -> unit -> t
 (** [create ?readtable ()] returns a fresh instance with an empty symbol table,
-    a global environment pre-populated with standard primitives, and the given
-    [readtable] (defaults to {!Readtable.default}). *)
+    a global environment pre-populated with standard primitives ([+], [-], [*],
+    [<], [=], [>], [<=], [>=], [cons], [car], [cdr], [null?], [pair?], [not],
+    [display], [newline], [eqv?], [eq?], [list]), and the given [readtable]
+    (defaults to {!Readtable.default}). *)
 
 (** {1 Convenience} *)
 

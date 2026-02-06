@@ -100,7 +100,13 @@ Changes to existing modules:
 - `Env`: `type t = Datum.env` (no longer opaque)
 - `Instance`: Added `eval_string`, `eval_syntax`; 14 primitives registered at creation
 
-**Next: Milestone 4** — TBD.
+**Milestone 4 (Core Special Forms)** — complete.
+
+Compiler-only changes (no new opcodes or VM modifications):
+- `Compiler`: Added `and`, `or`, `when`, `unless`, `let`, `let*`, `letrec`, `letrec*`, named `let`, `cond`, `case`, `do`, internal `define`
+- `Instance`: Added 5 primitives: `eqv?`, `eq?`, `list`, `>=`, `<=` (19 total)
+
+**Next: Milestone 5** — TBD.
 
 ## Development Workflow
 
@@ -139,8 +145,8 @@ Tests live in `test/` as per-topic files and are run via `dune test`.
 | `test/test_env.ml` | Env (10 tests) |
 | `test/test_instance.ml` | Instance (8 tests) |
 | `test/test_opcode.ml`   | Opcode (4 tests) |
-| `test/test_compiler.ml` | Compiler (9 tests) |
-| `test/test_vm.ml`       | VM (36 tests: end-to-end via Instance.eval_string) |
+| `test/test_compiler.ml` | Compiler (14 tests) |
+| `test/test_vm.ml`       | VM (89 tests: end-to-end via Instance.eval_string) |
 
 Test dependencies:
 - **alcotest** — unit test framework with readable output

@@ -5,7 +5,9 @@
     {!Instance.t}) to avoid circular dependencies.
 
     Supports: self-evaluating literals, symbols, [quote], [if], [lambda],
-    [define], [set!], [begin], and procedure calls.  Tracks tail position
+    [define], [set!], [begin], [and], [or], [when], [unless], [let],
+    [let*], [letrec], [letrec*], named [let], [cond], [case], [do],
+    internal [define], and procedure calls.  Tracks tail position
     for proper tail calls. *)
 
 (** {1 Exceptions} *)
