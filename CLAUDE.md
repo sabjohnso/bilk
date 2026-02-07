@@ -131,6 +131,17 @@ Changes to existing modules:
 - `Syntax`: Updated `to_datum` for mutable Pair
 - `Vm`: Updated for mutable Pair
 
+**Milestone 7 (Hygienic Macros)** — complete.
+
+| Module     | Purpose                                                        |
+|------------|----------------------------------------------------------------|
+| `Expander` | Macro expander: syntax-rules, define-syntax, let-syntax, letrec-syntax, quasiquote, guard, define-record-type, syntax-error |
+
+Changes to existing modules:
+- `Syntax`: Added `from_datum` helper (inverse of `to_datum`)
+- `Instance`: Added `syn_env`, `gensym_counter` fields; expander wired into
+  `eval_syntax`/`eval_boot` pipeline (Reader → Expander → Compiler → VM)
+
 ## Development Workflow
 
 **This project uses TDD (Test-Driven Development).** Follow this cycle:
@@ -161,7 +172,7 @@ Tests live in `test/` as per-topic files and are run via `dune test`.
 | `test/test_datum.ml` | Datum (17 tests) |
 | `test/test_readtable.ml` | Readtable (24 tests: 20 unit + 4 QCheck) |
 | `test/test_loc.ml` | Loc (4 tests) |
-| `test/test_syntax.ml` | Syntax (8 tests) |
+| `test/test_syntax.ml` | Syntax (12 tests) |
 | `test/test_port.ml` | Port (10 tests: 9 unit + 1 QCheck) |
 | `test/test_reader.ml` | Reader (31 tests: 30 unit + 1 QCheck) |
 | `test/test_symbol.ml` | Symbol (8 tests: 6 unit + 2 QCheck) |
@@ -169,8 +180,9 @@ Tests live in `test/` as per-topic files and are run via `dune test`.
 | `test/test_instance.ml` | Instance (8 tests) |
 | `test/test_opcode.ml`   | Opcode (4 tests) |
 | `test/test_compiler.ml` | Compiler (14 tests) |
-| `test/test_vm.ml`       | VM (189 tests: end-to-end via Instance.eval_string) |
+| `test/test_vm.ml`       | VM (228 tests: end-to-end via Instance.eval_string) |
 | `test/test_m6_review.ml` | M6 bugfix regression (7 tests) |
+| `test/test_expander.ml` | Expander (8 tests) |
 
 Test dependencies:
 - **alcotest** — unit test framework with readable output

@@ -35,6 +35,13 @@ val to_datum : t -> Datum.t
 (** [to_datum s] recursively strips all source locations, converting a
     syntax tree to a plain runtime value. *)
 
+val from_datum : Loc.t -> Datum.t -> t
+(** [from_datum loc d] wraps a runtime datum [d] as a syntax tree with
+    source location [loc].  Inverse of {!to_datum} for data types
+    (Bool, Fixnum, Flonum, Char, Str, Symbol, Pair, Vector, Bytevector,
+    Nil, Eof).  Non-data values (Void, Primitive, Closure, etc.) are
+    represented as opaque symbols. *)
+
 (** {1 Equality} *)
 
 val equal_datum : t -> t -> bool

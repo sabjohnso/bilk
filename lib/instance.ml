@@ -4,6 +4,8 @@ type t = {
   readtable : Readtable.t;
   winds : Datum.wind list ref;
   handlers : Datum.t list ref;
+  syn_env : Expander.syn_env;
+  gensym_counter : int ref;
 }
 
 (* --- Primitive helpers --- *)
@@ -1699,10 +1701,16 @@ let boot_definitions = [
      (for-each f (vector->list v)))";
 ]
 
+let make_gensym inst () =
+  let n = !(inst.gensym_counter) in
+  inst.gensym_counter := n + 1;
+  Printf.sprintf "%%g%d" n
+
 let eval_boot inst src =
   let port = Port.of_string src in
   let expr = Reader.read_syntax inst.readtable port in
-  let code = Compiler.compile inst.symbols expr in
+  let expanded = Expander.expand ~syn_env:inst.syn_env ~gensym:(make_gensym inst) expr in
+  let code = Compiler.compile inst.symbols expanded in
   ignore (Vm.execute ~winds:inst.winds inst.global_env code)
 
 let create ?(readtable = Readtable.default) () =
@@ -1710,7 +1718,10 @@ let create ?(readtable = Readtable.default) () =
   let global_env = Env.empty () in
   let handlers = ref [] in
   register_primitives symbols global_env handlers;
-  let inst = { symbols; global_env; readtable; winds = ref []; handlers } in
+  let syn_env = Expander.core_env () in
+  let gensym_counter = ref 0 in
+  let inst = { symbols; global_env; readtable; winds = ref []; handlers;
+               syn_env; gensym_counter } in
   List.iter (eval_boot inst) boot_definitions;
   inst
 
@@ -1719,7 +1730,8 @@ let intern inst name = Symbol.intern inst.symbols name
 (* --- Evaluation --- *)
 
 let eval_syntax inst expr =
-  let code = Compiler.compile inst.symbols expr in
+  let expanded = Expander.expand ~syn_env:inst.syn_env ~gensym:(make_gensym inst) expr in
+  let code = Compiler.compile inst.symbols expanded in
   Vm.execute ~winds:inst.winds inst.global_env code
 
 let eval_string inst src =

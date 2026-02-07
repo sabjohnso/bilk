@@ -1,8 +1,9 @@
 (** Per-instance Scheme state.
 
     An {!t} value holds all mutable state for one Scheme instance: the symbol
-    table, the global environment, and the readtable.  Multiple independent
-    instances can coexist in a single process.
+    table, the global environment, the readtable, the syntactic environment
+    for macro expansion, and the dynamic-wind/exception handler stacks.
+    Multiple independent instances can coexist in a single process.
 
     Instances are passed explicitly — never stored in a global ref. *)
 
@@ -20,6 +21,10 @@ type t = {
   (** The dynamic-wind stack, shared across evaluations. *)
   handlers : Datum.t list ref;
   (** The exception handler stack, shared across evaluations. *)
+  syn_env : Expander.syn_env;
+  (** The syntactic environment for macro expansion. *)
+  gensym_counter : int ref;
+  (** Counter for generating fresh identifiers during macro expansion. *)
 }
 
 (** {1 Constructors} *)
@@ -42,13 +47,14 @@ val intern : t -> string -> Symbol.t
 (** {1 Evaluation} *)
 
 val eval_syntax : t -> Syntax.t -> Datum.t
-(** [eval_syntax inst expr] compiles and executes a syntax object.
-    @raise Compiler.Compile_error on malformed syntax.
+(** [eval_syntax inst expr] expands macros, compiles, and executes a syntax
+    object.
+    @raise Compiler.Compile_error on malformed syntax or macro expansion error.
     @raise Vm.Runtime_error on runtime errors. *)
 
 val eval_string : t -> string -> Datum.t
-(** [eval_string inst src] reads one expression from [src], compiles, and
-    executes it.  Returns the result.
+(** [eval_string inst src] reads one expression from [src], expands macros,
+    compiles, and executes it.  Returns the result.
     @raise Reader.Read_error on malformed input.
-    @raise Compiler.Compile_error on malformed syntax.
+    @raise Compiler.Compile_error on malformed syntax or macro expansion error.
     @raise Vm.Runtime_error on runtime errors. *)

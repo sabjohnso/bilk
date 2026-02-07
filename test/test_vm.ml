@@ -1166,6 +1166,284 @@ let test_write () =
   check_datum "write returns void" Datum.Void
     (eval "(write 42)")
 
+(* --- define-syntax / syntax-rules --- *)
+
+let test_macro_constant () =
+  check_datum "constant macro" (Datum.Fixnum 5)
+    (eval_seq [
+      "(define-syntax five (syntax-rules () ((five) 5)))";
+      "(five)"])
+
+let test_macro_pattern_var () =
+  check_datum "pattern var" (Datum.Fixnum 6)
+    (eval_seq [
+      "(define-syntax inc (syntax-rules () ((inc x) (+ x 1))))";
+      "(inc 5)"])
+
+let test_macro_multi_rule () =
+  check_datum "multi rule" (Datum.Fixnum 1)
+    (eval_seq [
+      "(define-syntax my-if (syntax-rules () \
+         ((my-if #t t f) t) \
+         ((my-if #f t f) f) \
+         ((my-if test t f) (if test t f))))";
+      "(my-if #t 1 2)"])
+
+let test_macro_ellipsis () =
+  check_datum "ellipsis" (Datum.Bool true)
+    (eval_seq [
+      "(define-syntax my-list (syntax-rules () ((my-list x ...) (list x ...))))";
+      "(equal? '(1 2 3) (my-list 1 2 3))"])
+
+let test_macro_ellipsis_zero () =
+  check_datum "ellipsis zero" Datum.Nil
+    (eval_seq [
+      "(define-syntax my-list (syntax-rules () ((my-list x ...) (list x ...))))";
+      "(my-list)"])
+
+let test_macro_recursive () =
+  check_datum "recursive macro" (Datum.Fixnum 3)
+    (eval_seq [
+      "(define-syntax my-begin (syntax-rules () \
+         ((my-begin e) e) \
+         ((my-begin e rest ...) (begin e (my-begin rest ...)))))";
+      "(my-begin 1 2 3)"])
+
+let test_macro_hygiene () =
+  (* swap! macro introduces tmp — shouldn't capture user's tmp *)
+  check_datum "hygiene swap" (Datum.Bool true)
+    (eval_seq [
+      "(define-syntax swap! (syntax-rules () \
+         ((swap! a b) (let ((tmp a)) (set! a b) (set! b tmp)))))";
+      "(let ((x 1) (y 2) (tmp 99)) \
+         (swap! x y) \
+         (and (= x 2) (= y 1) (= tmp 99)))"])
+
+let test_macro_persistent () =
+  check_datum "persistent" (Datum.Fixnum 10)
+    (eval_seq [
+      "(define-syntax double (syntax-rules () ((double x) (+ x x))))";
+      "(double 5)"])
+
+let test_macro_nested () =
+  check_datum "nested macro" (Datum.Fixnum 7)
+    (eval_seq [
+      "(define-syntax inc (syntax-rules () ((inc x) (+ x 1))))";
+      "(define-syntax double (syntax-rules () ((double x) (+ x x))))";
+      "(inc (double 3))"])
+
+let test_macro_no_match () =
+  Alcotest.check_raises "no matching pattern"
+    (Compiler.Compile_error (Loc.none, ""))
+    (fun () ->
+      try ignore (eval_seq [
+        "(define-syntax my-add (syntax-rules () ((my-add a b) (+ a b))))";
+        "(my-add 1)"])
+      with Compiler.Compile_error (_, _) ->
+        raise (Compiler.Compile_error (Loc.none, "")))
+
+let test_macro_literal () =
+  check_datum "literal keyword" (Datum.Fixnum 10)
+    (eval_seq [
+      "(define-syntax my-arrow (syntax-rules (=>) \
+         ((my-arrow x => f) (f x))))";
+      "(my-arrow 5 => (lambda (n) (* n 2)))"])
+
+let test_macro_underscore () =
+  check_datum "underscore wildcard" (Datum.Fixnum 42)
+    (eval_seq [
+      "(define-syntax always-42 (syntax-rules () ((always-42 _ _) 42)))";
+      "(always-42 hello world)"])
+
+(* --- let-syntax / letrec-syntax --- *)
+
+let test_let_syntax_basic () =
+  check_datum "let-syntax" (Datum.Fixnum 10)
+    (eval "(let-syntax ((double (syntax-rules () ((double x) (+ x x))))) \
+             (double 5))")
+
+let test_let_syntax_scope () =
+  (* let-syntax binding not visible outside *)
+  check_datum "let-syntax scope" (Datum.Fixnum 3)
+    (eval "(begin \
+             (let-syntax ((inc (syntax-rules () ((inc x) (+ x 1))))) \
+               (inc 2)))")
+
+let test_let_syntax_shadow () =
+  check_datum "let-syntax shadows" (Datum.Fixnum 100)
+    (eval_seq [
+      "(define-syntax double (syntax-rules () ((double x) (+ x x))))";
+      "(let-syntax ((double (syntax-rules () ((double x) (* x x))))) \
+         (double 10))";
+    ])
+
+let test_letrec_syntax_self_ref () =
+  check_datum "letrec-syntax self-ref" (Datum.Fixnum 6)
+    (eval "(letrec-syntax \
+             ((my-or (syntax-rules () \
+               ((my-or) #f) \
+               ((my-or e) e) \
+               ((my-or e rest ...) (let ((t e)) (if t t (my-or rest ...))))))) \
+             (my-or #f #f 6))")
+
+let test_let_syntax_multi () =
+  check_datum "let-syntax multi" (Datum.Fixnum 8)
+    (eval "(let-syntax \
+             ((inc (syntax-rules () ((inc x) (+ x 1)))) \
+              (double (syntax-rules () ((double x) (+ x x))))) \
+             (double (inc 3)))")
+
+let test_let_syntax_hygiene () =
+  (* Test that let-syntax introduces a scope boundary *)
+  check_datum "let-syntax in nested let" (Datum.Fixnum 10)
+    (eval "(let ((x 5)) \
+             (let-syntax ((double (syntax-rules () ((double e) (+ e e))))) \
+               (double x)))")
+
+(* --- quasiquote --- *)
+
+let test_quasiquote_simple () =
+  check_datum "qq simple" (Datum.Bool true)
+    (eval "(equal? '(1 2 3) `(1 2 3))")
+
+let test_quasiquote_unquote () =
+  check_datum "qq unquote" (Datum.Bool true)
+    (eval "(let ((x 5)) (equal? '(1 5 3) `(1 ,x 3)))")
+
+let test_quasiquote_splicing () =
+  check_datum "qq splicing" (Datum.Bool true)
+    (eval "(let ((xs '(2 3))) (equal? '(1 2 3 4) `(1 ,@xs 4)))")
+
+let test_quasiquote_nested () =
+  check_datum "qq nested" (Datum.Bool true)
+    (eval "(let ((x 1)) (equal? `(a ,(+ x 1) c) '(a 2 c)))")
+
+let test_quasiquote_no_unquote () =
+  check_datum "qq no unquote" (Datum.Bool true)
+    (eval "(equal? '(a b c) `(a b c))")
+
+let test_quasiquote_expr () =
+  check_datum "qq expr" (Datum.Bool true)
+    (eval "(equal? '(1 4 3) `(1 ,(+ 2 2) 3))")
+
+(* --- guard --- *)
+
+let test_guard_basic () =
+  check_datum "guard basic" (Datum.Fixnum 42)
+    (eval "(guard (exn ((= exn 42) exn)) (raise 42))")
+
+let test_guard_else () =
+  check_datum "guard else" (Datum.Symbol "caught")
+    (eval "(guard (exn (else 'caught)) (raise 'boom))")
+
+let test_guard_no_match () =
+  (* guard with no matching clause re-raises *)
+  check_datum "guard no match reraise" (Datum.Symbol "outer")
+    (eval "(call/cc (lambda (k) \
+             (with-exception-handler \
+               (lambda (e) (k 'outer)) \
+               (lambda () \
+                 (guard (exn ((equal? exn 99) 'inner)) \
+                   (raise 'boom))))))")
+
+let test_guard_error_object () =
+  check_datum "guard error object" (Datum.Bool true)
+    (eval "(guard (exn ((error-object? exn) \
+                        (string=? \"test\" (error-object-message exn)))) \
+             (error \"test\" 1 2))")
+
+let test_guard_body () =
+  check_datum "guard body" (Datum.Fixnum 10)
+    (eval "(guard (exn (else 0)) (+ 3 7))")
+
+let test_guard_multi_clause () =
+  check_datum "guard multi clause" (Datum.Symbol "second")
+    (eval "(guard (exn \
+              ((= exn 1) 'first) \
+              ((= exn 2) 'second) \
+              ((= exn 3) 'third)) \
+             (raise 2))")
+
+(* --- define-record-type --- *)
+
+let test_record_basic () =
+  check_datum "record basic" (Datum.Fixnum 1)
+    (eval_seq [
+      "(define-record-type <point> (make-point x y) point? (x point-x) (y point-y))";
+      "(point-x (make-point 1 2))"])
+
+let test_record_predicate () =
+  check_datum "record pred true" (Datum.Bool true)
+    (eval_seq [
+      "(define-record-type <point> (make-point x y) point? (x point-x) (y point-y))";
+      "(point? (make-point 1 2))"]);
+  check_datum "record pred false" (Datum.Bool false)
+    (eval_seq [
+      "(define-record-type <point> (make-point x y) point? (x point-x) (y point-y))";
+      "(point? 42)"])
+
+let test_record_accessor () =
+  check_datum "record accessor" (Datum.Fixnum 2)
+    (eval_seq [
+      "(define-record-type <point> (make-point x y) point? (x point-x) (y point-y))";
+      "(point-y (make-point 1 2))"])
+
+let test_record_mutator () =
+  check_datum "record mutator" (Datum.Fixnum 99)
+    (eval_seq [
+      "(define-record-type <point> (make-point x y) point? \
+         (x point-x set-point-x!) (y point-y))";
+      "(let ((p (make-point 1 2))) \
+         (set-point-x! p 99) \
+         (point-x p))"])
+
+let test_record_distinct_types () =
+  check_datum "distinct types" (Datum.Bool false)
+    (eval_seq [
+      "(define-record-type <point> (make-point x y) point? (x point-x) (y point-y))";
+      "(define-record-type <pair2> (make-pair2 a b) pair2? (a pair2-a) (b pair2-b))";
+      "(point? (make-pair2 1 2))"])
+
+let test_record_r7rs_example () =
+  (* R7RS example: <pare> with kons/pare?/kar/kdr/set-kar! *)
+  check_datum "R7RS pare" (Datum.Fixnum 3)
+    (eval_seq [
+      "(define-record-type <pare> (kons x y) pare? \
+         (x kar set-kar!) (y kdr))";
+      "(let ((p (kons 1 2))) \
+         (set-kar! p 3) \
+         (kar p))"])
+
+(* --- syntax-error --- *)
+
+let test_syntax_error () =
+  Alcotest.check_raises "syntax-error"
+    (Compiler.Compile_error (Loc.none, ""))
+    (fun () ->
+      try ignore (eval "(syntax-error \"bad form\")")
+      with Compiler.Compile_error (_, _) ->
+        raise (Compiler.Compile_error (Loc.none, "")))
+
+let test_syntax_error_in_template () =
+  Alcotest.check_raises "syntax-error in template"
+    (Compiler.Compile_error (Loc.none, ""))
+    (fun () ->
+      try ignore (eval_seq [
+        "(define-syntax must-be-pair (syntax-rules () \
+           ((must-be-pair (a b)) (list a b)) \
+           ((must-be-pair x) (syntax-error \"expected pair\"))))";
+        "(must-be-pair 42)"])
+      with Compiler.Compile_error (_, _) ->
+        raise (Compiler.Compile_error (Loc.none, "")))
+
+(* --- internal define-syntax --- *)
+
+let test_internal_define_syntax () =
+  check_datum "internal define-syntax" (Datum.Fixnum 10)
+    (eval "(let ((x 5)) \
+             (define-syntax double (syntax-rules () ((double e) (+ e e)))) \
+             (double x))")
+
 let () =
   Alcotest.run "VM"
     [ ("self-evaluating",
@@ -1432,5 +1710,56 @@ let () =
        ; Alcotest.test_case "symbol?/symbol=?" `Quick test_type_symbol
        ; Alcotest.test_case "symbol->string/string->symbol" `Quick test_symbol_string
        ; Alcotest.test_case "char?/string?/vector?/bytevector?/procedure?/list?/eof" `Quick test_type_predicates
+       ])
+    ; ("define-syntax",
+       [ Alcotest.test_case "constant macro" `Quick test_macro_constant
+       ; Alcotest.test_case "pattern variable" `Quick test_macro_pattern_var
+       ; Alcotest.test_case "multi rule" `Quick test_macro_multi_rule
+       ; Alcotest.test_case "ellipsis" `Quick test_macro_ellipsis
+       ; Alcotest.test_case "ellipsis zero" `Quick test_macro_ellipsis_zero
+       ; Alcotest.test_case "recursive" `Quick test_macro_recursive
+       ; Alcotest.test_case "hygiene" `Quick test_macro_hygiene
+       ; Alcotest.test_case "persistent" `Quick test_macro_persistent
+       ; Alcotest.test_case "nested" `Quick test_macro_nested
+       ; Alcotest.test_case "no match" `Quick test_macro_no_match
+       ; Alcotest.test_case "literal" `Quick test_macro_literal
+       ; Alcotest.test_case "underscore" `Quick test_macro_underscore
+       ])
+    ; ("let-syntax",
+       [ Alcotest.test_case "basic" `Quick test_let_syntax_basic
+       ; Alcotest.test_case "scope" `Quick test_let_syntax_scope
+       ; Alcotest.test_case "shadow" `Quick test_let_syntax_shadow
+       ; Alcotest.test_case "letrec-syntax" `Quick test_letrec_syntax_self_ref
+       ; Alcotest.test_case "multi" `Quick test_let_syntax_multi
+       ; Alcotest.test_case "hygiene" `Quick test_let_syntax_hygiene
+       ])
+    ; ("quasiquote",
+       [ Alcotest.test_case "simple" `Quick test_quasiquote_simple
+       ; Alcotest.test_case "unquote" `Quick test_quasiquote_unquote
+       ; Alcotest.test_case "splicing" `Quick test_quasiquote_splicing
+       ; Alcotest.test_case "nested" `Quick test_quasiquote_nested
+       ; Alcotest.test_case "no unquote" `Quick test_quasiquote_no_unquote
+       ; Alcotest.test_case "expr" `Quick test_quasiquote_expr
+       ])
+    ; ("guard",
+       [ Alcotest.test_case "basic" `Quick test_guard_basic
+       ; Alcotest.test_case "else" `Quick test_guard_else
+       ; Alcotest.test_case "no match" `Quick test_guard_no_match
+       ; Alcotest.test_case "error object" `Quick test_guard_error_object
+       ; Alcotest.test_case "body value" `Quick test_guard_body
+       ; Alcotest.test_case "multi clause" `Quick test_guard_multi_clause
+       ])
+    ; ("define-record-type",
+       [ Alcotest.test_case "basic" `Quick test_record_basic
+       ; Alcotest.test_case "predicate" `Quick test_record_predicate
+       ; Alcotest.test_case "accessor" `Quick test_record_accessor
+       ; Alcotest.test_case "mutator" `Quick test_record_mutator
+       ; Alcotest.test_case "distinct types" `Quick test_record_distinct_types
+       ; Alcotest.test_case "R7RS pare" `Quick test_record_r7rs_example
+       ])
+    ; ("syntax-error",
+       [ Alcotest.test_case "syntax-error" `Quick test_syntax_error
+       ; Alcotest.test_case "in template" `Quick test_syntax_error_in_template
+       ; Alcotest.test_case "internal define-syntax" `Quick test_internal_define_syntax
        ])
     ]
