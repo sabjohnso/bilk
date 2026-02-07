@@ -26,7 +26,7 @@ type t = {
 
 val create : ?readtable:Readtable.t -> unit -> t
 (** [create ?readtable ()] returns a fresh instance with an empty symbol table,
-    a global environment pre-populated with 180 R7RS (scheme base) primitives
+    a global environment pre-populated with 182 R7RS (scheme base) primitives
     and intrinsics covering arithmetic, pairs/lists, characters, strings,
     vectors, bytevectors, type predicates, equivalence, exceptions, and control,
     plus 10 self-hosted boot definitions ([with-exception-handler], [raise],

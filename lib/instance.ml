@@ -290,17 +290,16 @@ let prim_round args =
   match args with
   | [Datum.Fixnum n] -> Datum.Fixnum n
   | [Datum.Flonum f] ->
-    (* R7RS: round to even (banker's rounding) *)
+    (* R7RS: round to even (banker's rounding).
+       f -. floor f is always in [0, 1), so only frac = 0.5 needs special
+       handling — the negative-half case is covered because floor(-2.5) = -3
+       gives frac = 0.5 and -3 is odd, so we round up to -2. *)
     let rounded =
       let fl = floor f in
       let frac = f -. fl in
       if frac = 0.5 then
         let ifl = int_of_float fl in
         if ifl mod 2 = 0 then fl else fl +. 1.0
-      else if frac = -0.5 then
-        let cl = ceil f in
-        let icl = int_of_float cl in
-        if icl mod 2 = 0 then cl else cl -. 1.0
       else Float.round f
     in
     Datum.Flonum rounded
@@ -430,7 +429,7 @@ let prim_number_to_string args =
   | [v] ->
     let s = match v with
       | Datum.Fixnum n -> string_of_int n
-      | Datum.Flonum f -> Datum.to_string v |> fun _ ->
+      | Datum.Flonum f ->
         if Float.is_nan f then "+nan.0"
         else if Float.is_infinite f then (if f > 0.0 then "+inf.0" else "-inf.0")
         else string_of_float f
@@ -734,7 +733,11 @@ let char_ci_chain_compare name cmp args =
   match args with
   | [] | [_] -> runtime_error (Printf.sprintf "%s: expected at least 2 arguments" name)
   | _ ->
-    let fold c = Uchar.to_int (Uchar.of_char (Char.lowercase_ascii (Uchar.to_char c))) in
+    let fold c =
+      let n = Uchar.to_int c in
+      if n < 128 then Char.code (Char.lowercase_ascii (Char.chr n))
+      else n
+    in
     let rec go = function
       | [] | [_] -> Datum.Bool true
       | a :: ((b :: _) as rest) ->
@@ -757,7 +760,10 @@ let prim_char_to_integer args =
 
 let prim_integer_to_char args =
   match args with
-  | [Datum.Fixnum n] -> Datum.Char (Uchar.of_int n)
+  | [Datum.Fixnum n] ->
+    if not (Uchar.is_valid n) then
+      runtime_error (Printf.sprintf "integer->char: invalid Unicode scalar value %d" n);
+    Datum.Char (Uchar.of_int n)
   | [_] -> runtime_error "integer->char: expected integer"
   | _ -> runtime_error (Printf.sprintf "integer->char: expected 1 argument, got %d" (List.length args))
 
@@ -944,7 +950,9 @@ let prim_list_to_string args =
     let rec collect acc = function
       | Datum.Nil -> List.rev acc
       | Datum.Pair { car = Datum.Char c; cdr } ->
-        collect (Char.chr (Uchar.to_int c) :: acc) cdr
+        let n = Uchar.to_int c in
+        if n >= 256 then runtime_error "list->string: char out of byte range";
+        collect (Char.chr n :: acc) cdr
       | _ -> runtime_error "list->string: expected list of chars"
     in
     let chars = collect [] lst in
@@ -971,7 +979,9 @@ let prim_string_copy_to args =
 let prim_string_fill args =
   match args with
   | [Datum.Str s; Datum.Char c] ->
-    Bytes.fill s 0 (Bytes.length s) (Char.chr (Uchar.to_int c)); Datum.Void
+    let n = Uchar.to_int c in
+    if n >= 256 then runtime_error "string-fill!: char out of byte range";
+    Bytes.fill s 0 (Bytes.length s) (Char.chr n); Datum.Void
   | _ -> runtime_error "string-fill!: expected 2 arguments (string char)"
 
 let prim_string_upcase args =
@@ -1356,6 +1366,24 @@ let prim_handler_stack_empty handlers args =
   | [] -> Datum.Bool (!handlers = [])
   | _ -> runtime_error "%handler-stack-empty?: expected 0 arguments"
 
+let prim_handler_depth handlers args =
+  match args with
+  | [] -> Datum.Fixnum (List.length !handlers)
+  | _ -> runtime_error "%handler-depth: expected 0 arguments"
+
+let prim_handler_truncate handlers args =
+  match args with
+  | [Datum.Fixnum target] ->
+    let rec truncate lst n =
+      if n <= target then lst
+      else match lst with
+        | _ :: rest -> truncate rest (n - 1)
+        | [] -> []
+    in
+    handlers := truncate !handlers (List.length !handlers);
+    Datum.Void
+  | _ -> runtime_error "%handler-truncate!: expected 1 argument (depth)"
+
 let prim_make_error args =
   match args with
   | Datum.Str msg :: irritants ->
@@ -1600,6 +1628,8 @@ let register_primitives symbols env handlers =
   register "%push-handler!" (prim_push_handler handlers);
   register "%pop-handler!" (prim_pop_handler handlers);
   register "%handler-stack-empty?" (prim_handler_stack_empty handlers);
+  register "%handler-depth" (prim_handler_depth handlers);
+  register "%handler-truncate!" (prim_handler_truncate handlers);
   register "%make-error" prim_make_error;
   register "%fatal-error" prim_fatal_error;
   register "error-object?" prim_error_object_pred;
@@ -1612,12 +1642,14 @@ let register_primitives symbols env handlers =
 (* --- Instance creation --- *)
 
 let boot_definitions = [
-  (* with-exception-handler: push handler, run thunk, pop handler *)
+  (* with-exception-handler: use dynamic-wind + depth-based truncation
+     so that cleanup is safe even if raise already popped the handler *)
   "(define (with-exception-handler handler thunk) \
-     (%push-handler! handler) \
-     (let ((result (thunk))) \
-       (%pop-handler!) \
-       result))";
+     (let ((depth (%handler-depth))) \
+       (dynamic-wind \
+         (lambda () (%push-handler! handler)) \
+         thunk \
+         (lambda () (%handler-truncate! depth)))))";
 
   (* raise: pop handler and call it; if it returns, raise again *)
   "(define (raise obj) \
@@ -1627,13 +1659,13 @@ let boot_definitions = [
          (handler obj) \
          (raise (%make-error \"handler returned\" (list obj))))))";
 
-  (* raise-continuable: pop handler and call it; return value is result *)
+  (* raise-continuable: pop handler, call it, re-push after it returns *)
   "(define (raise-continuable obj) \
      (if (%handler-stack-empty?) \
        (%fatal-error obj) \
        (let ((handler (%pop-handler!))) \
-         (%push-handler! handler) \
          (let ((result (handler obj))) \
+           (%push-handler! handler) \
            result))))";
 
   (* error — create error object and raise it *)

@@ -124,7 +124,7 @@ R7RS (scheme base) standard library.
 Changes to existing modules:
 - `Datum`: Mutable `Pair` (inline record), `Str of bytes`, `Error_object`
   variant with `error_tag`/`error_obj` types; updated `equal`/`pp` for all
-- `Instance`: 180 registered primitives/intrinsics (up from 25), 10 boot
+- `Instance`: 182 registered primitives/intrinsics (up from 25), 10 boot
   definitions (self-hosted Scheme), `handlers` field for exception stack;
   covers type predicates, equivalence, numbers, pairs/lists, characters,
   strings, vectors, bytevectors, exceptions, and higher-order procedures
@@ -170,6 +170,7 @@ Tests live in `test/` as per-topic files and are run via `dune test`.
 | `test/test_opcode.ml`   | Opcode (4 tests) |
 | `test/test_compiler.ml` | Compiler (14 tests) |
 | `test/test_vm.ml`       | VM (189 tests: end-to-end via Instance.eval_string) |
+| `test/test_m6_review.ml` | M6 bugfix regression (7 tests) |
 
 Test dependencies:
 - **alcotest** — unit test framework with readable output
