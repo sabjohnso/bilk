@@ -80,6 +80,19 @@ let test_file_roundtrip () =
     let prog' = Fasl.read_program_fasl tbl path in
     Alcotest.(check int) "two decls" 2 (List.length prog'.declarations))
 
+let test_trailing_data_detected () =
+  let prog : Fasl.program_fasl = { declarations = [] } in
+  let data = Fasl.write_program_bytes prog in
+  (* Append extra bytes *)
+  let bad = Bytes.create (Bytes.length data + 3) in
+  Bytes.blit data 0 bad 0 (Bytes.length data);
+  let tbl = Symbol.create_table () in
+  match Fasl.read_program_bytes tbl bad with
+  | _ -> Alcotest.fail "expected Fasl_error"
+  | exception Fasl.Fasl_error msg ->
+    Alcotest.(check bool) "mentions trailing" true
+      (String.length msg > 0)
+
 (* --- Group 2: compile_port --- *)
 
 let test_compile_single_expr () =
@@ -140,6 +153,31 @@ let test_compile_error_propagated () =
   | exception Compiler.Compile_error (_, msg) ->
     Alcotest.(check string) "error msg"
       "lambda expects parameters and at least one body expression" msg
+
+let test_compile_read_error_propagated () =
+  let inst = make_instance () in
+  let port = Port.of_string "(unterminated" in
+  match Instance.compile_port inst port with
+  | _ -> Alcotest.fail "expected read error"
+  | exception Reader.Read_error (_, msg) ->
+    Alcotest.(check bool) "has message" true (String.length msg > 0)
+
+let test_compile_define_syntax () =
+  let inst = make_instance () in
+  let port = Port.of_string
+    "(define-syntax my-add \
+       (syntax-rules () \
+         ((my-add a b) (+ a b)))) \
+     (my-add 3 4)" in
+  let prog = Instance.compile_port inst port in
+  (* define-syntax is expand-time, so we get code declarations *)
+  let code_count = List.length (List.filter (function
+    | Fasl.Lib_code _ -> true
+    | _ -> false) prog.declarations) in
+  Alcotest.(check bool) "has code" true (code_count >= 1);
+  (* Verify the compiled program actually works *)
+  let result = Instance.run_program inst prog in
+  Alcotest.(check string) "result" "7" (Datum.to_string result)
 
 (* --- Group 3: run_program --- *)
 
@@ -214,7 +252,9 @@ let test_e2e_closures () =
   let result = Instance.run_program inst2 prog' in
   Alcotest.(check string) "result" "15" (Datum.to_string result)
 
-let test_e2e_define_library_then_import () =
+let test_e2e_define_library_same_instance () =
+  (* define-library is compile-time only. Running on the same instance
+     works because the library is already registered from compile_port. *)
   let inst = make_instance () in
   inst.search_paths := [];
   let port = Port.of_string
@@ -225,10 +265,27 @@ let test_e2e_define_library_then_import () =
      (import (test e2e lib)) \
      (double 21)" in
   let prog = Instance.compile_port inst port in
-  (* Running on the same instance: define-library was compile-time only,
-     so the library is already registered in this instance. *)
   let result = Instance.run_program inst prog in
   Alcotest.(check string) "result" "42" (Datum.to_string result)
+
+let test_e2e_define_library_cross_instance () =
+  (* define-library is NOT recorded in the FASL. Running on a fresh
+     instance without the library available should fail at the import. *)
+  let inst = make_instance () in
+  inst.search_paths := [];
+  let port = Port.of_string
+    "(define-library (test e2e cross lib) \
+       (import (scheme base)) \
+       (export triple) \
+       (begin (define (triple x) (* x 3)))) \
+     (import (test e2e cross lib)) \
+     (triple 7)" in
+  let prog = Instance.compile_port inst port in
+  let inst2 = make_instance () in
+  inst2.search_paths := [];
+  match Instance.run_program inst2 prog with
+  | _ -> Alcotest.fail "expected failure on fresh instance"
+  | exception _ -> ()
 
 let test_e2e_file_roundtrip () =
   let inst = make_instance () in
@@ -245,6 +302,25 @@ let test_e2e_file_roundtrip () =
     let result = Instance.run_program inst2 prog' in
     Alcotest.(check string) "result" "3628800" (Datum.to_string result))
 
+let test_e2e_define_syntax () =
+  (* Macros are expanded at compile time; the compiled FASL
+     contains only the expanded code, no syntax-rules. *)
+  let inst = make_instance () in
+  let port = Port.of_string
+    "(define-syntax swap! \
+       (syntax-rules () \
+         ((swap! a b) \
+          (let ((tmp a)) (set! a b) (set! b tmp))))) \
+     (define x 1) (define y 2) \
+     (swap! x y) \
+     (+ (* x 10) y)" in
+  let prog = Instance.compile_port inst port in
+  let data = Fasl.write_program_bytes prog in
+  let inst2 = make_instance () in
+  let prog' = Fasl.read_program_bytes inst2.symbols data in
+  let result = Instance.run_program inst2 prog' in
+  Alcotest.(check string) "result" "21" (Datum.to_string result)
+
 (* --- Test runner --- *)
 
 let () =
@@ -256,6 +332,7 @@ let () =
       Alcotest.test_case "mixed round-trip" `Quick test_mixed_roundtrip;
       Alcotest.test_case "wrong format type" `Quick test_wrong_format_type;
       Alcotest.test_case "file round-trip" `Quick test_file_roundtrip;
+      Alcotest.test_case "trailing data" `Quick test_trailing_data_detected;
     ]);
     ("compile-port", [
       Alcotest.test_case "single expr" `Quick test_compile_single_expr;
@@ -264,6 +341,8 @@ let () =
       Alcotest.test_case "define-library not recorded" `Quick test_compile_define_library_not_recorded;
       Alcotest.test_case "empty port" `Quick test_compile_empty_port;
       Alcotest.test_case "compile error propagated" `Quick test_compile_error_propagated;
+      Alcotest.test_case "read error propagated" `Quick test_compile_read_error_propagated;
+      Alcotest.test_case "define-syntax" `Quick test_compile_define_syntax;
     ]);
     ("run-program", [
       Alcotest.test_case "simple" `Quick test_run_simple;
@@ -276,7 +355,9 @@ let () =
       Alcotest.test_case "simple" `Quick test_e2e_simple;
       Alcotest.test_case "with imports" `Quick test_e2e_with_imports;
       Alcotest.test_case "closures" `Quick test_e2e_closures;
-      Alcotest.test_case "define-library then import" `Quick test_e2e_define_library_then_import;
+      Alcotest.test_case "define-library same inst" `Quick test_e2e_define_library_same_instance;
+      Alcotest.test_case "define-library cross inst" `Quick test_e2e_define_library_cross_instance;
       Alcotest.test_case "file round-trip" `Quick test_e2e_file_roundtrip;
+      Alcotest.test_case "define-syntax e2e" `Quick test_e2e_define_syntax;
     ]);
   ]

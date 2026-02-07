@@ -460,6 +460,9 @@ let read_program_fasl_from_data symbols data =
   let decl_count = read_u16 data pos in
   let declarations = List.init decl_count (fun _ ->
     read_lib_declaration symbols data pos) in
+  if !pos <> Bytes.length data then
+    fasl_error (Printf.sprintf "trailing data: %d bytes remaining"
+      (Bytes.length data - !pos));
   { declarations }
 
 let read_program_fasl symbols path =

@@ -23,6 +23,7 @@ let handle_errors f =
   | Vm.Runtime_error msg -> format_error msg; 1
   | Fasl.Fasl_error msg -> format_error msg; 1
   | Sys_error msg -> format_error msg; 1
+  | Failure msg -> format_error msg; 1
 
 (* --- Instance setup --- *)
 
@@ -36,6 +37,13 @@ let dir_for_path path =
     if Filename.is_relative path then Filename.concat (Sys.getcwd ()) path
     else path
   )
+
+let chop_extension path =
+  match Filename.chop_suffix_opt ~suffix:".scm" path with
+  | Some base -> base
+  | None ->
+    try Filename.chop_extension path
+    with Invalid_argument _ -> path
 
 (* --- Expression mode (-e) --- *)
 
@@ -60,6 +68,9 @@ let run_file path =
 
 (* --- Compile subcommand --- *)
 
+(* Escape a raw byte string for embedding as an OCaml string literal.
+   All non-printable-ASCII, backslash, and double-quote characters are
+   hex-escaped (\xHH) to safely embed arbitrary binary FASL data. *)
 let escape_string_literal s =
   let buf = Buffer.create (String.length s * 4) in
   String.iter (fun c ->
@@ -71,22 +82,38 @@ let escape_string_literal s =
   ) s;
   Buffer.contents buf
 
+let remove_if_exists path =
+  try Sys.remove path with Sys_error _ -> ()
+
 let generate_executable prog output_path =
   let fasl_bytes = Fasl.write_program_bytes prog in
   let escaped = escape_string_literal (Bytes.to_string fasl_bytes) in
   let ocaml_src = Printf.sprintf
     "let fasl_data = \"%s\"\n\
      let () =\n\
-     \  let inst = Wile.Instance.create () in\n\
-     \  inst.Wile.Instance.fasl_cache := true;\n\
-     \  let prog = Wile.Fasl.read_program_bytes\n\
-     \    inst.Wile.Instance.symbols (Bytes.of_string fasl_data) in\n\
-     \  ignore (Wile.Instance.run_program inst prog)\n"
+     \  try\n\
+     \    let inst = Wile.Instance.create () in\n\
+     \    inst.Wile.Instance.fasl_cache := true;\n\
+     \    inst.Wile.Instance.search_paths := [Sys.getcwd ()];\n\
+     \    let prog = Wile.Fasl.read_program_bytes\n\
+     \      inst.Wile.Instance.symbols (Bytes.of_string fasl_data) in\n\
+     \    ignore (Wile.Instance.run_program inst prog)\n\
+     \  with\n\
+     \  | Wile.Vm.Runtime_error msg ->\n\
+     \    Printf.eprintf \"Error: %%s\\n%%!\" msg; exit 1\n\
+     \  | Wile.Fasl.Fasl_error msg ->\n\
+     \    Printf.eprintf \"Error: %%s\\n%%!\" msg; exit 1\n\
+     \  | Failure msg ->\n\
+     \    Printf.eprintf \"Error: %%s\\n%%!\" msg; exit 1\n"
     escaped
   in
   let tmp_ml = Filename.temp_file "wile_aot_" ".ml" in
+  let tmp_base = Filename.chop_extension tmp_ml in
   Fun.protect ~finally:(fun () ->
-    (try Sys.remove tmp_ml with Sys_error _ -> ()))
+    remove_if_exists tmp_ml;
+    remove_if_exists (tmp_base ^ ".cmi");
+    remove_if_exists (tmp_base ^ ".cmx");
+    remove_if_exists (tmp_base ^ ".o"))
     (fun () ->
       let oc = open_out tmp_ml in
       Fun.protect ~finally:(fun () -> close_out oc) (fun () ->
@@ -111,13 +138,13 @@ let compile_file path output exe =
     if exe then begin
       let out = match output with
         | Some o -> o
-        | None -> Filename.chop_extension path
+        | None -> chop_extension path
       in
       generate_executable prog out
     end else begin
       let out = match output with
         | Some o -> o
-        | None -> Filename.chop_extension path ^ ".fasl"
+        | None -> chop_extension path ^ ".fasl"
       in
       Fasl.write_program_fasl out prog
     end)
@@ -273,9 +300,8 @@ let run_repl () =
 
 (* --- Cmdliner CLI --- *)
 
-let () =
+let make_default_cmd () =
   let open Cmdliner in
-  (* Default command: REPL / file / -e *)
   let expr_opt =
     Arg.(value & opt (some string) None &
          info ["e"] ~docv:"EXPR" ~doc:"Evaluate expression and print result.")
@@ -290,8 +316,21 @@ let () =
     | _, Some f -> exit (run_file f)
     | None, None -> run_repl ()
   in
-  let default_term = Term.(const default_cmd $ expr_opt $ file_arg) in
-  (* compile subcommand *)
+  let term = Term.(const default_cmd $ expr_opt $ file_arg) in
+  let info =
+    Cmd.info "wile" ~version
+      ~doc:"Wile Scheme — an R7RS implementation"
+      ~man:[`S "DESCRIPTION";
+            `P "Run Scheme code interactively, from a file, or from a \
+                command-line expression.";
+            `S "SUBCOMMANDS";
+            `P "Use $(b,wile compile) to ahead-of-time compile Scheme source.";
+            `P "Use $(b,wile run) to execute a compiled program FASL."]
+  in
+  Cmd.v info term
+
+let make_compile_cmd () =
+  let open Cmdliner in
   let compile_output =
     Arg.(value & opt (some string) None &
          info ["o"] ~docv:"OUTPUT" ~doc:"Output file path.")
@@ -308,8 +347,8 @@ let () =
   let compile_cmd_fn file output exe =
     exit (compile_file file output exe)
   in
-  let compile_term = Term.(const compile_cmd_fn $ compile_file_arg $ compile_output $ compile_exe) in
-  let compile_info =
+  let term = Term.(const compile_cmd_fn $ compile_file_arg $ compile_output $ compile_exe) in
+  let info =
     Cmd.info "compile" ~version
       ~doc:"Compile a Scheme source file to a program FASL"
       ~man:[`S "DESCRIPTION";
@@ -317,8 +356,10 @@ let () =
                 Expander, and Compiler, and writes a program FASL file. \
                 Use $(b,--exe) to generate a standalone native executable."]
   in
-  let compile_sub = Cmd.v compile_info compile_term in
-  (* run subcommand *)
+  Cmd.v info term
+
+let make_run_cmd () =
+  let open Cmdliner in
   let run_file_arg =
     Arg.(required & pos 0 (some string) None &
          info [] ~docv:"FILE" ~doc:"Program FASL file to execute.")
@@ -326,24 +367,35 @@ let () =
   let run_cmd_fn file =
     exit (run_fasl file)
   in
-  let run_term = Term.(const run_cmd_fn $ run_file_arg) in
-  let run_info =
+  let term = Term.(const run_cmd_fn $ run_file_arg) in
+  let info =
     Cmd.info "run" ~version
       ~doc:"Execute a program FASL file"
       ~man:[`S "DESCRIPTION";
             `P "Loads and executes a program FASL file produced by \
                 $(b,wile compile)."]
   in
-  let run_sub = Cmd.v run_info run_term in
-  (* Group *)
-  let group_info =
-    Cmd.info "wile" ~version
-      ~doc:"Wile Scheme — an R7RS implementation"
-      ~man:[`S "DESCRIPTION";
-            `P "Run Scheme code interactively, from a file, or from a \
-                command-line expression.";
-            `S "COMMANDS";
-            `P "Use $(b,wile compile) to ahead-of-time compile Scheme source.";
-            `P "Use $(b,wile run) to execute a compiled program FASL."]
-  in
-  exit (Cmd.eval (Cmd.group ~default:default_term group_info [compile_sub; run_sub]))
+  Cmd.v info term
+
+(* Manual subcommand dispatch to avoid Cmd.group intercepting positional
+   file arguments (e.g. "wile file.scm") as unknown subcommand names. *)
+let () =
+  let open Cmdliner in
+  let argc = Array.length Sys.argv in
+  if argc >= 2 then begin
+    match Sys.argv.(1) with
+    | "compile" ->
+      let argv = Array.concat [
+        [| Sys.argv.(0) |];
+        Array.sub Sys.argv 2 (argc - 2)
+      ] in
+      exit (Cmd.eval ~argv (make_compile_cmd ()))
+    | "run" ->
+      let argv = Array.concat [
+        [| Sys.argv.(0) |];
+        Array.sub Sys.argv 2 (argc - 2)
+      ] in
+      exit (Cmd.eval ~argv (make_run_cmd ()))
+    | _ -> exit (Cmd.eval (make_default_cmd ()))
+  end else
+    exit (Cmd.eval (make_default_cmd ()))
