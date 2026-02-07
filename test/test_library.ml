@@ -217,6 +217,15 @@ let test_resolve_rename_dup_to () =
          (Library.Import_rename (Library.Import_lib ["test"; "lib"],
                                  [("car", "same"); ("+", "same")]))))
 
+let test_resolve_rename_collision () =
+  let lib = make_test_lib () in
+  Alcotest.check_raises "rename collision"
+    (Failure "rename: produces duplicate export name: car")
+    (fun () ->
+       ignore (Library.resolve_import (lookup_test_lib lib)
+         (Library.Import_rename (Library.Import_lib ["test"; "lib"],
+                                 [("+", "car")]))))
+
 (* --- Registry --- *)
 
 let test_registry () =
@@ -255,6 +264,7 @@ let () =
        ; Alcotest.test_case "resolve rename missing" `Quick test_resolve_rename_missing
        ; Alcotest.test_case "resolve rename dup from" `Quick test_resolve_rename_dup_from
        ; Alcotest.test_case "resolve rename dup to" `Quick test_resolve_rename_dup_to
+       ; Alcotest.test_case "resolve rename collision" `Quick test_resolve_rename_collision
        ])
     ; ("parse-errors",
        [ Alcotest.test_case "only empty" `Quick test_parse_only_empty

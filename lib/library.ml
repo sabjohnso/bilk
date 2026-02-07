@@ -194,6 +194,16 @@ let resolve_import lookup_fn iset =
       in
       let rt' = List.map (fun (name, id, slot) -> (rename_name name, id, slot)) rt in
       let syn' = List.map (fun (name, b) -> (rename_name name, b)) syn in
+      (* Check for collisions between renamed and unrenamed exports *)
+      let all_names =
+        List.map (fun (n, _, _) -> n) rt' @
+        List.map (fun (n, _) -> n) syn' in
+      let seen = Hashtbl.create (List.length all_names) in
+      List.iter (fun name ->
+        if Hashtbl.mem seen name then
+          failwith ("rename: produces duplicate export name: " ^ name);
+        Hashtbl.replace seen name ()
+      ) all_names;
       (rt', syn')
   in
   resolve iset
