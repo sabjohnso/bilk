@@ -168,6 +168,55 @@ let test_resolve_only_missing () =
          (Library.Import_only (Library.Import_lib ["test"; "lib"],
                                ["nonexistent"]))))
 
+(* --- parse error tests --- *)
+
+let test_parse_only_empty () =
+  let s = list_ [ sym "only"; list_ [ sym "scheme"; sym "base" ] ] in
+  Alcotest.check_raises "only empty"
+    (Compiler.Compile_error (loc, "only: expected import set and identifiers"))
+    (fun () -> ignore (Library.parse_import_set s))
+
+let test_parse_except_empty () =
+  let s = list_ [ sym "except"; list_ [ sym "scheme"; sym "base" ] ] in
+  Alcotest.check_raises "except empty"
+    (Compiler.Compile_error (loc, "except: expected import set and identifiers"))
+    (fun () -> ignore (Library.parse_import_set s))
+
+let test_parse_rename_empty () =
+  let s = list_ [ sym "rename"; list_ [ sym "scheme"; sym "base" ] ] in
+  Alcotest.check_raises "rename empty"
+    (Compiler.Compile_error (loc, "rename: expected import set and pairs"))
+    (fun () -> ignore (Library.parse_import_set s))
+
+(* --- resolve error tests --- *)
+
+let test_resolve_rename_missing () =
+  let lib = make_test_lib () in
+  Alcotest.check_raises "rename missing"
+    (Failure "rename: name not in export set: nonexistent")
+    (fun () ->
+       ignore (Library.resolve_import (lookup_test_lib lib)
+         (Library.Import_rename (Library.Import_lib ["test"; "lib"],
+                                 [("nonexistent", "x")]))))
+
+let test_resolve_rename_dup_from () =
+  let lib = make_test_lib () in
+  Alcotest.check_raises "rename dup from"
+    (Failure "rename: duplicate source name: car")
+    (fun () ->
+       ignore (Library.resolve_import (lookup_test_lib lib)
+         (Library.Import_rename (Library.Import_lib ["test"; "lib"],
+                                 [("car", "first"); ("car", "second")]))))
+
+let test_resolve_rename_dup_to () =
+  let lib = make_test_lib () in
+  Alcotest.check_raises "rename dup to"
+    (Failure "rename: duplicate target name: same")
+    (fun () ->
+       ignore (Library.resolve_import (lookup_test_lib lib)
+         (Library.Import_rename (Library.Import_lib ["test"; "lib"],
+                                 [("car", "same"); ("+", "same")]))))
+
 (* --- Registry --- *)
 
 let test_registry () =
@@ -203,6 +252,14 @@ let () =
        ; Alcotest.test_case "resolve rename" `Quick test_resolve_rename
        ; Alcotest.test_case "resolve unknown lib" `Quick test_resolve_unknown_lib
        ; Alcotest.test_case "resolve only missing" `Quick test_resolve_only_missing
+       ; Alcotest.test_case "resolve rename missing" `Quick test_resolve_rename_missing
+       ; Alcotest.test_case "resolve rename dup from" `Quick test_resolve_rename_dup_from
+       ; Alcotest.test_case "resolve rename dup to" `Quick test_resolve_rename_dup_to
+       ])
+    ; ("parse-errors",
+       [ Alcotest.test_case "only empty" `Quick test_parse_only_empty
+       ; Alcotest.test_case "except empty" `Quick test_parse_except_empty
+       ; Alcotest.test_case "rename empty" `Quick test_parse_rename_empty
        ])
     ; ("registry",
        [ Alcotest.test_case "register + lookup" `Quick test_registry

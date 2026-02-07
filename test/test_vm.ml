@@ -2041,6 +2041,102 @@ let test_load_transitive () =
   Sys.remove sld_a; Sys.remove sld_b;
   Sys.rmdir sub_a; Sys.rmdir dir
 
+(* --- Library bugfix regression --- *)
+
+let test_loading_libs_per_instance () =
+  (* Two instances loading from the same dir should not interfere *)
+  let dir = Filename.temp_dir "wile_lib" "" in
+  let sub = Filename.concat dir "iso" in
+  Sys.mkdir sub 0o755;
+  let sld = Filename.concat sub "lib.sld" in
+  let oc = open_out sld in
+  output_string oc "(define-library (iso lib) \
+    (export v) \
+    (import (scheme base)) \
+    (begin (define v 42)))";
+  close_out oc;
+  let inst1 = Instance.create () in
+  let inst2 = Instance.create () in
+  inst1.search_paths := [dir];
+  inst2.search_paths := [dir];
+  ignore (Instance.eval_string inst1 "(import (iso lib))");
+  (* inst2 should independently load the same library *)
+  ignore (Instance.eval_string inst2 "(import (iso lib))");
+  check_datum "inst1" (Datum.Fixnum 42) (Instance.eval_string inst1 "v");
+  check_datum "inst2" (Datum.Fixnum 42) (Instance.eval_string inst2 "v");
+  Sys.remove sld; Sys.rmdir sub; Sys.rmdir dir
+
+let test_loading_libs_cleanup_on_error () =
+  (* If loading a library fails, loading_libs must be cleaned up so
+     a corrected version can be loaded later *)
+  let dir = Filename.temp_dir "wile_lib" "" in
+  let sub = Filename.concat dir "retry" in
+  Sys.mkdir sub 0o755;
+  let sld = Filename.concat sub "lib.sld" in
+  (* Write a broken .sld file *)
+  let oc = open_out sld in
+  output_string oc "(define-library (retry lib) \
+    (export v) \
+    (import (scheme base)) \
+    (begin (define v (/ 1 0))))";
+  close_out oc;
+  let inst = Instance.create () in
+  inst.search_paths := [dir];
+  (* First attempt should fail *)
+  (try ignore (Instance.eval_string inst "(import (retry lib))"); ()
+   with _ -> ());
+  (* Write a correct .sld file *)
+  let oc2 = open_out sld in
+  output_string oc2 "(define-library (retry lib) \
+    (export v) \
+    (import (scheme base)) \
+    (begin (define v 77)))";
+  close_out oc2;
+  (* Second attempt should succeed — loading_libs was cleaned up *)
+  ignore (Instance.eval_string inst "(import (retry lib))");
+  check_datum "retry" (Datum.Fixnum 77) (Instance.eval_string inst "v");
+  Sys.remove sld; Sys.rmdir sub; Sys.rmdir dir
+
+let test_cond_expand_library_autoload () =
+  (* cond-expand (library ...) should auto-load from .sld files *)
+  let dir = Filename.temp_dir "wile_lib" "" in
+  let sub = Filename.concat dir "probe" in
+  Sys.mkdir sub 0o755;
+  let sld = Filename.concat sub "lib.sld" in
+  let oc = open_out sld in
+  output_string oc "(define-library (probe lib) \
+    (export val) \
+    (import (scheme base)) \
+    (begin (define val 55)))";
+  close_out oc;
+  let inst = Instance.create () in
+  inst.search_paths := [dir];
+  let result = Instance.eval_string inst
+    "(cond-expand ((library (probe lib)) 1) (else 0))" in
+  check_datum "autoload library check" (Datum.Fixnum 1) result;
+  Sys.remove sld; Sys.rmdir sub; Sys.rmdir dir
+
+let test_import_rename_bad_source () =
+  let inst = Instance.create () in
+  Alcotest.check_raises "rename bad source"
+    (Failure "rename: name not in export set: no-such-name")
+    (fun () -> ignore (Instance.eval_string inst
+       "(import (rename (scheme base) (no-such-name x)))"))
+
+let test_import_only_empty () =
+  let inst = Instance.create () in
+  (try ignore (Instance.eval_string inst "(import (only (scheme base)))");
+       Alcotest.fail "expected error"
+   with Compiler.Compile_error (_, msg) ->
+     Alcotest.(check string) "msg" "only: expected import set and identifiers" msg)
+
+let test_import_rename_empty () =
+  let inst = Instance.create () in
+  (try ignore (Instance.eval_string inst "(import (rename (scheme base)))");
+       Alcotest.fail "expected error"
+   with Compiler.Compile_error (_, msg) ->
+     Alcotest.(check string) "msg" "rename: expected import set and pairs" msg)
+
 let () =
   Alcotest.run "VM"
     [ ("self-evaluating",
@@ -2432,5 +2528,13 @@ let () =
        ; Alcotest.test_case "search path order" `Quick test_load_search_path_order
        ; Alcotest.test_case "not found" `Quick test_load_not_found
        ; Alcotest.test_case "transitive" `Quick test_load_transitive
+       ])
+    ; ("library-bugfixes",
+       [ Alcotest.test_case "per-instance loading" `Quick test_loading_libs_per_instance
+       ; Alcotest.test_case "cleanup on error" `Quick test_loading_libs_cleanup_on_error
+       ; Alcotest.test_case "cond-expand autoload" `Quick test_cond_expand_library_autoload
+       ; Alcotest.test_case "rename bad source" `Quick test_import_rename_bad_source
+       ; Alcotest.test_case "only empty" `Quick test_import_only_empty
+       ; Alcotest.test_case "rename empty" `Quick test_import_rename_empty
        ])
     ]

@@ -200,10 +200,10 @@ Tests live in `test/` as per-topic files and are run via `dune test`.
 | `test/test_instance.ml` | Instance (11 tests) |
 | `test/test_opcode.ml`   | Opcode (4 tests) |
 | `test/test_compiler.ml` | Compiler (14 tests) |
-| `test/test_vm.ml`       | VM (290 tests: end-to-end via Instance.eval_string) |
+| `test/test_vm.ml`       | VM (296 tests: end-to-end via Instance.eval_string) |
 | `test/test_m6_review.ml` | M6 bugfix regression (7 tests) |
 | `test/test_expander.ml` | Expander (11 tests) |
-| `test/test_library.ml` | Library (18 tests) |
+| `test/test_library.ml` | Library (24 tests) |
 
 Test dependencies:
 - **alcotest** — unit test framework with readable output
