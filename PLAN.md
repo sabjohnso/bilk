@@ -448,13 +448,12 @@ wile run file.fasl       # run a FASL file
 
 ---
 
-### Milestone 11 — Embedding API
+### Milestone 11 — OCaml Embedding API (done)
 
 **OCaml API** (`Wile` library):
 
 ```ocaml
 val Instance.create : ?readtable:Readtable.t -> unit -> Instance.t
-val Instance.destroy : Instance.t -> unit
 
 val eval_string : Instance.t -> string -> Datum.t
 val eval_port   : Instance.t -> Port.t -> Datum.t
@@ -472,25 +471,8 @@ val load_fasl : Instance.t -> string -> unit
 Multiple `Instance.t` values coexist independently. Each has its own symbol
 table, environment, ports, and loaded libraries.
 
-**C API** (`libwile`):
-
-Built via OCaml's C FFI. Exposes the same operations with C-friendly types:
-
-```c
-wile_instance_t *wile_create(void);
-void             wile_destroy(wile_instance_t *);
-
-wile_value_t     wile_eval_string(wile_instance_t *, const char *);
-wile_value_t     wile_call(wile_instance_t *, wile_value_t proc, int argc, wile_value_t *argv);
-void             wile_define_primitive(wile_instance_t *, const char *name, wile_cfunc_t fn);
-```
-
-Values crossing the C boundary are either immediate (tagged integers,
-booleans) or heap-allocated handles. The C API manages GC roots for
-handles.
-
-**Build:** The C API produces `libwile.a` / `libwile.so` plus `wile.h`.
-A `pkg-config` file is generated for easy integration.
+Also includes `Datum` helpers (`is_true`, `list_of`, `to_list`) and
+`Expander.var_binding` for registration. Example programs in `examples/`.
 
 ---
 
@@ -556,6 +538,29 @@ my-package/
 - Dependency resolution with version constraints
 - `wile pkg install`, `wile pkg build`, `wile pkg test`
 - Lock file for reproducible builds
+
+---
+
+### Milestone 14 — C Embedding API
+
+Built via OCaml's C FFI. Exposes the same operations as the OCaml embedding
+API (M11) with C-friendly types:
+
+```c
+wile_instance_t *wile_create(void);
+void             wile_destroy(wile_instance_t *);
+
+wile_value_t     wile_eval_string(wile_instance_t *, const char *);
+wile_value_t     wile_call(wile_instance_t *, wile_value_t proc, int argc, wile_value_t *argv);
+void             wile_define_primitive(wile_instance_t *, const char *name, wile_cfunc_t fn);
+```
+
+Values crossing the C boundary are either immediate (tagged integers,
+booleans) or heap-allocated handles. The C API manages GC roots for
+handles.
+
+**Build:** The C API produces `libwile.a` / `libwile.so` plus `wile.h`.
+A `pkg-config` file is generated for easy integration.
 
 ---
 
@@ -629,11 +634,13 @@ M6 (stdlib)     M7 (macros)
          │
        M9 (FASL)
        ┌─┴─┐
-  M10 (REPL)  M11 (embedding)
+  M10 (REPL)  M11 (OCaml embedding)
        │
   M12 (AOT compiler)
        │
   M13 (packages)
+       │
+  M14 (C embedding)
 ```
 
 Each milestone is usable and testable on its own. The first meaningful
