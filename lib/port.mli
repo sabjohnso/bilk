@@ -42,3 +42,6 @@ val readtable : t -> Readtable.t option
 val set_readtable : t -> Readtable.t -> unit
 (** [set_readtable p rt] stores readtable [rt] on the port.  Subsequent
     [read] calls on [p] will pick up this readtable. *)
+
+val position : t -> int
+(** [position p] returns the current byte offset in the port's content. *)

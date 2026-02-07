@@ -1,7 +1,11 @@
 open Wile
 
 let version = "0.1.0"
-let history_file = Filename.concat (Sys.getenv "HOME") ".wile_history"
+
+let history_file =
+  match Sys.getenv_opt "HOME" with
+  | Some home -> Some (Filename.concat home ".wile_history")
+  | None -> None
 
 (* --- Error formatting --- *)
 
@@ -32,7 +36,8 @@ let run_expr expr =
   let inst = make_instance () in
   inst.search_paths := [Sys.getcwd ()];
   handle_errors (fun () ->
-    let result = Instance.eval_string inst expr in
+    let port = Port.of_string expr in
+    let result = Instance.eval_port inst port in
     match result with
     | Datum.Void -> ()
     | v -> print_endline (Datum.to_string v))
@@ -87,10 +92,13 @@ let handle_repl_command inst line =
   | ",quit" | ",q" -> exit 0
   | ",help" | ",h" -> repl_help ()
   | ",env" -> repl_env inst
+  | ",load" ->
+    Printf.eprintf "Usage: ,load <file>\n%!"
   | _ ->
     if String.length line > 6 && String.sub line 0 6 = ",load " then
       let path = String.trim (String.sub line 6 (String.length line - 6)) in
-      repl_load inst path
+      if path = "" then Printf.eprintf "Usage: ,load <file>\n%!"
+      else repl_load inst path
     else
       Printf.eprintf "Unknown command: %s\nType ,help for available commands.\n%!" line
 
@@ -102,20 +110,31 @@ let is_unterminated msg =
   String.length msg >= len && String.sub msg 0 len = prefix
 
 let save_history () =
-  ignore (LNoise.history_save ~filename:history_file)
+  Option.iter (fun f -> ignore (LNoise.history_save ~filename:f)) history_file
 
 let run_repl () =
   let inst = make_instance () in
   inst.search_paths := [Sys.getcwd ()];
   Printf.printf "Wile Scheme %s\nType ,help for REPL commands, Ctrl-D to exit.\n%!" version;
-  ignore (LNoise.history_load ~filename:history_file);
+  Option.iter (fun f -> ignore (LNoise.history_load ~filename:f)) history_file;
   ignore (LNoise.history_set ~max_length:1000);
+  LNoise.catch_break true;
   at_exit save_history;
   let buf = Buffer.create 256 in
   let continuation = ref false in
+  let print_result v =
+    match v with
+    | Datum.Void -> ()
+    | _ -> print_endline (Datum.to_string v)
+  in
   let rec loop () =
     let prompt = if !continuation then "  ... " else "wile> " in
     match LNoise.linenoise prompt with
+    | exception Sys.Break ->
+      Buffer.clear buf;
+      continuation := false;
+      print_endline "Interrupted.";
+      loop ()
     | None ->
       if !continuation then begin
         (* Ctrl-D during continuation: abandon partial input *)
@@ -135,44 +154,42 @@ let run_repl () =
         Buffer.add_string buf line;
         let input = Buffer.contents buf in
         let port = Port.of_string input in
-        try
-          let expr = Reader.read_syntax inst.readtable port in
-          match expr with
-          | { Syntax.datum = Syntax.Eof; _ } ->
+        (* Evaluate all complete expressions from the port *)
+        let rec eval_loop () =
+          let save_pos = Port.position port in
+          try
+            let expr = Reader.read_syntax inst.readtable port in
+            match expr with
+            | { Syntax.datum = Syntax.Eof; _ } ->
+              (* All expressions consumed successfully *)
+              ignore (LNoise.history_add input);
+              Buffer.clear buf;
+              continuation := false
+            | _ ->
+              begin try
+                print_result (Instance.eval_syntax inst expr)
+              with
+              | Reader.Read_error (loc, msg) -> format_loc_error loc msg
+              | Compiler.Compile_error (loc, msg) -> format_loc_error loc msg
+              | Vm.Runtime_error msg -> format_error msg
+              end;
+              eval_loop ()
+          with
+          | Reader.Read_error (_, msg) when is_unterminated msg ->
+            (* Keep only the unconsumed portion in the buffer *)
+            let remaining = String.sub input save_pos (String.length input - save_pos) in
             Buffer.clear buf;
-            continuation := false;
-            loop ()
-          | _ ->
-            ignore (LNoise.history_add input);
-            begin try
-              let result = Instance.eval_syntax inst expr in
-              (match result with
-               | Datum.Void -> ()
-               | v -> print_endline (Datum.to_string v))
-            with
-            | Reader.Read_error (loc, msg) -> format_loc_error loc msg
-            | Compiler.Compile_error (loc, msg) -> format_loc_error loc msg
-            | Vm.Runtime_error msg -> format_error msg
-            end;
+            Buffer.add_string buf remaining;
+            continuation := true
+          | Reader.Read_error (loc, msg) ->
+            format_loc_error loc msg;
             Buffer.clear buf;
-            continuation := false;
-            loop ()
-        with
-        | Reader.Read_error (_, msg) when is_unterminated msg ->
-          continuation := true;
-          loop ()
-        | Reader.Read_error (loc, msg) ->
-          format_loc_error loc msg;
-          Buffer.clear buf;
-          continuation := false;
-          loop ()
+            continuation := false
+        in
+        eval_loop ();
+        loop ()
       end
   in
-  Sys.set_signal Sys.sigint (Sys.Signal_handle (fun _ ->
-    Buffer.clear buf;
-    continuation := false;
-    print_endline "\nInterrupted."
-  ));
   loop ()
 
 (* --- Cmdliner CLI --- *)
