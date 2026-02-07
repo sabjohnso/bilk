@@ -24,7 +24,7 @@ let rec to_datum t =
   | Symbol s -> Datum.Symbol s
   | Pair (car, cdr) -> Datum.Pair { car = to_datum car; cdr = to_datum cdr }
   | Vector elts -> Datum.Vector (Array.map to_datum elts)
-  | Bytevector bv -> Datum.Bytevector bv
+  | Bytevector bv -> Datum.Bytevector (Bytes.copy bv)
   | Nil -> Datum.Nil
   | Eof -> Datum.Eof
 
