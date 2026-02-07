@@ -92,7 +92,7 @@ let is_ellipsis s =
 
 let rec parse_pattern ~literals (s : Syntax.t) : pattern =
   match s.datum with
-  | Syntax.Symbol "_" -> Pat_underscore
+  | Syntax.Symbol "_" when not (List.mem "_" literals) -> Pat_underscore
   | Syntax.Symbol name ->
     if List.mem name literals then Pat_literal name
     else Pat_var name
@@ -337,6 +337,7 @@ type template =
   | Tmpl_pair of template * template
   | Tmpl_ellipsis_pair of template * template
   | Tmpl_vector of template list
+  | Tmpl_vector_ellipsis of template list * template * template list
   | Tmpl_nil
   | Tmpl_id of string
 
@@ -356,8 +357,28 @@ let rec parse_template ~pat_vars (s : Syntax.t) : template =
   | Syntax.Pair _ ->
     parse_template_list ~pat_vars s
   | Syntax.Vector elts ->
-    Tmpl_vector (Array.to_list (Array.map (parse_template ~pat_vars) elts))
+    parse_template_vector ~pat_vars (Array.to_list elts)
   | _ -> Tmpl_const s.datum
+
+and parse_template_vector ~pat_vars elts =
+  (* Scan for ... among vector template elements *)
+  let rec find_ell pre = function
+    | [] -> None
+    | elt :: rest ->
+      if is_ellipsis elt then
+        (match pre with
+         | [] -> compile_error elt.Syntax.loc "ellipsis must follow a template in vector"
+         | last :: before -> Some (List.rev before, last, rest))
+      else
+        find_ell (elt :: pre) rest
+  in
+  match find_ell [] elts with
+  | None -> Tmpl_vector (List.map (parse_template ~pat_vars) elts)
+  | Some (before, repeated, after) ->
+    let pre = List.map (parse_template ~pat_vars) before in
+    let rep = parse_template ~pat_vars repeated in
+    let post = List.map (parse_template ~pat_vars) after in
+    Tmpl_vector_ellipsis (pre, rep, post)
 
 and parse_template_list ~pat_vars (s : Syntax.t) =
   match s.datum with
@@ -437,6 +458,36 @@ let rec instantiate (env : match_env) ~gensym ~rename loc (tmpl : template) : Sy
   | Tmpl_vector elts ->
     let arr = Array.of_list (List.map (instantiate env ~gensym ~rename loc) elts) in
     { Syntax.datum = Syntax.Vector arr; loc }
+  | Tmpl_vector_ellipsis (pre, rep, post) ->
+    let pre_elts = List.map (instantiate env ~gensym ~rename loc) pre in
+    let post_elts = List.map (instantiate env ~gensym ~rename loc) post in
+    (* Determine repetition count from repeated template vars *)
+    let rep_vars = collect_template_vars rep in
+    let count = List.fold_left (fun acc name ->
+      match Hashtbl.find_opt env name with
+      | Some (Repeated vs) ->
+        let n = List.length vs in
+        (match acc with None -> Some n | Some m ->
+          if m <> n then
+            compile_error loc "ellipsis count mismatch in vector template"
+          else Some n)
+      | _ -> acc
+    ) None rep_vars in
+    let n = match count with Some n -> n | None -> 0 in
+    let rep_elts = List.init n (fun i ->
+      let sub = Hashtbl.copy env in
+      List.iter (fun name ->
+        match Hashtbl.find_opt env name with
+        | Some (Repeated vs) ->
+          (match List.nth_opt vs i with
+           | Some v -> Hashtbl.replace sub name v
+           | None -> ())
+        | _ -> ()
+      ) rep_vars;
+      instantiate sub ~gensym ~rename loc rep
+    ) in
+    let all = pre_elts @ rep_elts @ post_elts in
+    { Syntax.datum = Syntax.Vector (Array.of_list all); loc }
 
 and collect_template_vars tmpl =
   match tmpl with
@@ -444,6 +495,10 @@ and collect_template_vars tmpl =
   | Tmpl_pair (a, b) -> collect_template_vars a @ collect_template_vars b
   | Tmpl_ellipsis_pair (a, b) -> collect_template_vars a @ collect_template_vars b
   | Tmpl_vector elts -> List.concat_map collect_template_vars elts
+  | Tmpl_vector_ellipsis (pre, rep, post) ->
+    List.concat_map collect_template_vars pre
+    @ collect_template_vars rep
+    @ List.concat_map collect_template_vars post
   | _ -> []
 
 (* --- Transformer application --- *)
@@ -742,79 +797,46 @@ let expand_guard ~expand_fn ~gensym loc (s : Syntax.t) : Syntax.t =
         | Syntax.Symbol var_name ->
           let guard_k = gensym () in
           let condition = gensym () in
-          (* Build cond expression from clauses *)
+          (* Build nested if/let forms from clauses — each test evaluated once *)
+          let mk_sym n = { Syntax.datum = Syntax.Symbol n; loc } in
+          let mk_guard_k e = list_to_syntax loc [mk_sym guard_k; e] in
           let cond_with_reraise =
-            (* Check if last clause is an else clause *)
-            let has_else = match List.rev cond_clauses with
-              | last :: _ ->
-                let parts = syntax_list_to_list last in
+            let rec build_clauses = function
+              | [] ->
+                (* No match — re-raise with raise-continuable *)
+                list_to_syntax loc [mk_sym "raise-continuable"; mk_sym var_name]
+              | clause :: rest ->
+                let parts = syntax_list_to_list clause in
+                let fallthrough = build_clauses rest in
                 (match parts with
-                 | { Syntax.datum = Syntax.Symbol "else"; _ } :: _ -> true
-                 | _ -> false)
-              | [] -> false
+                 | { Syntax.datum = Syntax.Symbol "else"; _ } :: exprs when exprs <> [] ->
+                   mk_guard_k (list_to_syntax loc (mk_sym "begin" :: exprs))
+                 | [test; { Syntax.datum = Syntax.Symbol "=>"; _ }; proc] ->
+                   (* (test => proc): bind test once, pass value to proc *)
+                   let v = gensym () in
+                   list_to_syntax loc [mk_sym "let";
+                     list_to_syntax loc [
+                       list_to_syntax loc [mk_sym v; test]];
+                     list_to_syntax loc [mk_sym "if"; mk_sym v;
+                       mk_guard_k (list_to_syntax loc [proc; mk_sym v]);
+                       fallthrough]]
+                 | [test] ->
+                   (* Test-only: bind test once, return value if truthy *)
+                   let v = gensym () in
+                   list_to_syntax loc [mk_sym "let";
+                     list_to_syntax loc [
+                       list_to_syntax loc [mk_sym v; test]];
+                     list_to_syntax loc [mk_sym "if"; mk_sym v;
+                       mk_guard_k (mk_sym v);
+                       fallthrough]]
+                 | test :: exprs when exprs <> [] ->
+                   (* Regular clause: test not needed in body *)
+                   list_to_syntax loc [mk_sym "if"; test;
+                     mk_guard_k (list_to_syntax loc (mk_sym "begin" :: exprs));
+                     fallthrough]
+                 | _ -> fallthrough)
             in
-            if has_else then
-              (* Wrap each clause result with (guard-k result) *)
-              let wrapped_clauses = List.map (fun clause ->
-                let parts = syntax_list_to_list clause in
-                match parts with
-                | [{ Syntax.datum = Syntax.Symbol "else"; _ } as e; expr] ->
-                  list_to_syntax loc [e;
-                    list_to_syntax loc [
-                      { Syntax.datum = Syntax.Symbol guard_k; loc }; expr]]
-                | [test; { Syntax.datum = Syntax.Symbol "=>"; _ }; proc] ->
-                  (* (test => proc) → (test (guard-k (proc test))) *)
-                  list_to_syntax loc [test;
-                    list_to_syntax loc [
-                      { Syntax.datum = Syntax.Symbol guard_k; loc };
-                      list_to_syntax loc [proc; test]]]
-                | test :: exprs when exprs <> [] ->
-                  let last = List.nth exprs (List.length exprs - 1) in
-                  let init = List.filteri (fun i _ -> i < List.length exprs - 1) exprs in
-                  list_to_syntax loc (test :: init @ [
-                    list_to_syntax loc [
-                      { Syntax.datum = Syntax.Symbol guard_k; loc }; last]])
-                | [test] ->
-                  (* Test-only clause: (test) → (test (guard-k test)) *)
-                  list_to_syntax loc [test;
-                    list_to_syntax loc [
-                      { Syntax.datum = Syntax.Symbol guard_k; loc }; test]]
-                | _ -> clause
-              ) cond_clauses in
-              list_to_syntax loc
-                ({ Syntax.datum = Syntax.Symbol "cond"; loc } :: wrapped_clauses)
-            else begin
-              (* Add else clause that re-raises *)
-              let wrapped_clauses = List.map (fun clause ->
-                let parts = syntax_list_to_list clause in
-                match parts with
-                | [test; { Syntax.datum = Syntax.Symbol "=>"; _ }; proc] ->
-                  list_to_syntax loc [test;
-                    list_to_syntax loc [
-                      { Syntax.datum = Syntax.Symbol guard_k; loc };
-                      list_to_syntax loc [proc; test]]]
-                | test :: exprs when exprs <> [] ->
-                  let last = List.nth exprs (List.length exprs - 1) in
-                  let init = List.filteri (fun i _ -> i < List.length exprs - 1) exprs in
-                  list_to_syntax loc (test :: init @ [
-                    list_to_syntax loc [
-                      { Syntax.datum = Syntax.Symbol guard_k; loc }; last]])
-                | [test] ->
-                  list_to_syntax loc [test;
-                    list_to_syntax loc [
-                      { Syntax.datum = Syntax.Symbol guard_k; loc }; test]]
-                | _ -> clause
-              ) cond_clauses in
-              let else_clause = list_to_syntax loc [
-                { Syntax.datum = Syntax.Symbol "else"; loc };
-                list_to_syntax loc [
-                  { Syntax.datum = Syntax.Symbol "raise-continuable"; loc };
-                  { Syntax.datum = Syntax.Symbol var_name; loc }]]
-              in
-              list_to_syntax loc
-                ({ Syntax.datum = Syntax.Symbol "cond"; loc }
-                 :: wrapped_clauses @ [else_clause])
-            end
+            build_clauses cond_clauses
           in
           (* Build: (call/cc (lambda (guard-k)
                (with-exception-handler

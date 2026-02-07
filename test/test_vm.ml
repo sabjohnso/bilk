@@ -1262,6 +1262,46 @@ let test_macro_vector_ellipsis () =
          ((vec-list #(x ...)) (list x ...))))";
       "(equal? '(1 2 3) (vec-list #(1 2 3)))"])
 
+let test_macro_underscore_literal () =
+  (* When _ is in the literals list, it should match literally, not as wildcard *)
+  check_datum "underscore as literal" (Datum.Fixnum 1)
+    (eval_seq [
+      "(define _ 'placeholder)";
+      "(define-syntax test-ul (syntax-rules (_) \
+         ((test-ul _) 1) \
+         ((test-ul x) 2)))";
+      "(test-ul _)"]);
+  check_datum "non-underscore falls through" (Datum.Fixnum 2)
+    (eval_seq [
+      "(define _ 'placeholder)";
+      "(define-syntax test-ul (syntax-rules (_) \
+         ((test-ul _) 1) \
+         ((test-ul x) 2)))";
+      "(test-ul hello)"])
+
+let test_macro_vector_tmpl_ellipsis () =
+  (* Vector template with ellipsis: #(x ...) in template position *)
+  check_datum "vector template ellipsis" (Datum.Bool true)
+    (eval_seq [
+      "(define-syntax list->vec (syntax-rules () \
+         ((list->vec x ...) #(x ...))))";
+      "(equal? #(1 2 3) (list->vec 1 2 3))"]);
+  check_datum "vector template ellipsis zero" (Datum.Bool true)
+    (eval_seq [
+      "(define-syntax list->vec (syntax-rules () \
+         ((list->vec x ...) #(x ...))))";
+      "(equal? #() (list->vec))"])
+
+let test_guard_single_eval () =
+  (* Guard test expressions should be evaluated exactly once *)
+  check_datum "guard test single eval" (Datum.Fixnum 1)
+    (eval_seq [
+      "(define counter 0)";
+      "(guard (exn \
+         ((begin (set! counter (+ counter 1)) exn))) \
+       (raise 42))";
+      "counter"])
+
 (* --- let-syntax / letrec-syntax --- *)
 
 let test_let_syntax_basic () =
@@ -1759,6 +1799,8 @@ let () =
        ; Alcotest.test_case "literal" `Quick test_macro_literal
        ; Alcotest.test_case "underscore" `Quick test_macro_underscore
        ; Alcotest.test_case "vector ellipsis" `Quick test_macro_vector_ellipsis
+       ; Alcotest.test_case "underscore literal" `Quick test_macro_underscore_literal
+       ; Alcotest.test_case "vector tmpl ellipsis" `Quick test_macro_vector_tmpl_ellipsis
        ])
     ; ("let-syntax",
        [ Alcotest.test_case "basic" `Quick test_let_syntax_basic
@@ -1786,6 +1828,7 @@ let () =
        ; Alcotest.test_case "multi clause" `Quick test_guard_multi_clause
        ; Alcotest.test_case "test-only clause" `Quick test_guard_test_only_clause
        ; Alcotest.test_case "arrow clause" `Quick test_guard_arrow_clause
+       ; Alcotest.test_case "single eval" `Quick test_guard_single_eval
        ])
     ; ("define-record-type",
        [ Alcotest.test_case "basic" `Quick test_record_basic
