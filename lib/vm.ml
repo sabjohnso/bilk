@@ -58,7 +58,7 @@ let rec execute ?(winds : Datum.wind list ref option) (env : Datum.env) (code : 
         bindings := (params.(i), List.hd !args_ref) :: !bindings;
         args_ref := List.tl !args_ref
       done;
-      let rest = List.fold_right (fun x acc -> Datum.Pair (x, acc)) !args_ref Datum.Nil in
+      let rest = List.fold_right (fun x acc -> Datum.Pair { car = x; cdr = acc }) !args_ref Datum.Nil in
       bindings := (params.(nfixed), rest) :: !bindings;
       Env.extend env (List.rev !bindings)
     end else begin
@@ -207,7 +207,7 @@ let rec execute ?(winds : Datum.wind list ref option) (env : Datum.env) (code : 
         | [last] ->
           let rec datum_to_list = function
             | Datum.Nil -> []
-            | Datum.Pair (a, d) -> a :: datum_to_list d
+            | Datum.Pair { car = a; cdr = d } -> a :: datum_to_list d
             | _ -> runtime_error "apply: last argument must be a list"
           in
           datum_to_list last

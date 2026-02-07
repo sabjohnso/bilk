@@ -20,9 +20,9 @@ let rec to_datum t =
   | Fixnum n -> Datum.Fixnum n
   | Flonum f -> Datum.Flonum f
   | Char c -> Datum.Char c
-  | Str s -> Datum.Str s
+  | Str s -> Datum.Str (Bytes.of_string s)
   | Symbol s -> Datum.Symbol s
-  | Pair (car, cdr) -> Datum.Pair (to_datum car, to_datum cdr)
+  | Pair (car, cdr) -> Datum.Pair { car = to_datum car; cdr = to_datum cdr }
   | Vector elts -> Datum.Vector (Array.map to_datum elts)
   | Bytevector bv -> Datum.Bytevector bv
   | Nil -> Datum.Nil

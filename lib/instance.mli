@@ -18,18 +18,21 @@ type t = {
   (** The readtable used by the reader. *)
   winds : Datum.wind list ref;
   (** The dynamic-wind stack, shared across evaluations. *)
+  handlers : Datum.t list ref;
+  (** The exception handler stack, shared across evaluations. *)
 }
 
 (** {1 Constructors} *)
 
 val create : ?readtable:Readtable.t -> unit -> t
 (** [create ?readtable ()] returns a fresh instance with an empty symbol table,
-    a global environment pre-populated with standard primitives ([+], [-], [*],
-    [<], [=], [>], [<=], [>=], [cons], [car], [cdr], [null?], [pair?], [not],
-    [display], [newline], [eqv?], [eq?], [list], [values]) and intrinsics
-    ([apply], [call/cc], [call-with-current-continuation], [call-with-values],
-    [dynamic-wind]), and the given [readtable] (defaults to
-    {!Readtable.default}). *)
+    a global environment pre-populated with 180 R7RS (scheme base) primitives
+    and intrinsics covering arithmetic, pairs/lists, characters, strings,
+    vectors, bytevectors, type predicates, equivalence, exceptions, and control,
+    plus 10 self-hosted boot definitions ([with-exception-handler], [raise],
+    [raise-continuable], [error], [map], [for-each], [string-map],
+    [string-for-each], [vector-map], [vector-for-each]), and the given
+    [readtable] (defaults to {!Readtable.default}). *)
 
 (** {1 Convenience} *)
 

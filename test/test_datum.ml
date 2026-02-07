@@ -29,15 +29,15 @@ let test_datum_nil_eof () =
     (Datum.equal Datum.Nil Datum.Eof)
 
 let test_datum_pair () =
-  let p = Datum.Pair (Datum.Fixnum 1, Datum.Fixnum 2) in
+  let p = Datum.Pair { car = Datum.Fixnum 1; cdr = Datum.Fixnum 2 } in
   check_datum "pair" p p;
-  let q = Datum.Pair (Datum.Fixnum 1, Datum.Fixnum 3) in
+  let q = Datum.Pair { car = Datum.Fixnum 1; cdr = Datum.Fixnum 3 } in
   Alcotest.(check bool) "diff cdr" false (Datum.equal p q)
 
 let test_datum_string () =
-  check_datum "str" (Datum.Str "hello") (Datum.Str "hello");
+  check_datum "str" (Datum.Str (Bytes.of_string "hello")) (Datum.Str (Bytes.of_string "hello"));
   Alcotest.(check bool) "diff str" false
-    (Datum.equal (Datum.Str "a") (Datum.Str "b"))
+    (Datum.equal (Datum.Str (Bytes.of_string "a")) (Datum.Str (Bytes.of_string "b")))
 
 let test_datum_char () =
   let a = Datum.Char (Uchar.of_int 0x41) in
@@ -148,13 +148,13 @@ let test_datum_pp () =
   Alcotest.(check string) "nil" "()" (Datum.to_string Nil);
   Alcotest.(check string) "eof" "#<eof>" (Datum.to_string Eof);
   Alcotest.(check string) "pair" "(1 . 2)"
-    (Datum.to_string (Pair (Fixnum 1, Fixnum 2)));
+    (Datum.to_string (Pair { car = Fixnum 1; cdr = Fixnum 2 }));
   Alcotest.(check string) "list" "(1 2 3)"
-    (Datum.to_string (Pair (Fixnum 1, Pair (Fixnum 2, Pair (Fixnum 3, Nil)))));
+    (Datum.to_string (Pair { car = Fixnum 1; cdr = Pair { car = Fixnum 2; cdr = Pair { car = Fixnum 3; cdr = Nil } } }));
   Alcotest.(check string) "vector" "#(1 2)"
     (Datum.to_string (Vector [| Fixnum 1; Fixnum 2 |]));
   Alcotest.(check string) "string" "\"hello\""
-    (Datum.to_string (Str "hello"));
+    (Datum.to_string (Str (Bytes.of_string "hello")));
   Alcotest.(check string) "bytevector" "#u8(1 2 3)"
     (Datum.to_string (Bytevector (Bytes.of_string "\x01\x02\x03")))
 

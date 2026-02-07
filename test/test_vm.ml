@@ -32,7 +32,7 @@ let test_bool_false () =
   check_datum "#f" (Datum.Bool false) (eval "#f")
 
 let test_string () =
-  check_datum "hello" (Datum.Str "hello") (eval "\"hello\"")
+  check_datum "hello" (Datum.Str (Bytes.of_string "hello")) (eval "\"hello\"")
 
 let test_flonum () =
   check_datum "3.14" (Datum.Flonum 3.14) (eval "3.14")
@@ -41,9 +41,9 @@ let test_flonum () =
 
 let test_quote_list () =
   let result = eval "'(1 2 3)" in
-  let expected = Datum.Pair (Datum.Fixnum 1,
-    Datum.Pair (Datum.Fixnum 2,
-      Datum.Pair (Datum.Fixnum 3, Datum.Nil))) in
+  let expected = Datum.Pair { car = Datum.Fixnum 1; cdr =
+    Datum.Pair { car = Datum.Fixnum 2; cdr =
+      Datum.Pair { car = Datum.Fixnum 3; cdr = Datum.Nil } } } in
   check_datum "quoted list" expected result
 
 let test_quote_symbol () =
@@ -139,14 +139,14 @@ let test_begin () =
 (* --- List primitives --- *)
 
 let test_cons () =
-  check_datum "cons" (Datum.Pair (Datum.Fixnum 1, Datum.Fixnum 2)) (eval "(cons 1 2)")
+  check_datum "cons" (Datum.Pair { car = Datum.Fixnum 1; cdr = Datum.Fixnum 2 }) (eval "(cons 1 2)")
 
 let test_car () =
   check_datum "car" (Datum.Fixnum 1) (eval "(car '(1 2 3))")
 
 let test_cdr () =
-  let expected = Datum.Pair (Datum.Fixnum 2,
-    Datum.Pair (Datum.Fixnum 3, Datum.Nil)) in
+  let expected = Datum.Pair { car = Datum.Fixnum 2; cdr =
+    Datum.Pair { car = Datum.Fixnum 3; cdr = Datum.Nil } } in
   check_datum "cdr" expected (eval "(cdr '(1 2 3))")
 
 let test_null () =
@@ -376,9 +376,9 @@ let test_eq () =
   check_datum "eq? 1 1" (Datum.Bool true) (eval "(eq? 1 1)")
 
 let test_prim_list () =
-  let expected = Datum.Pair (Datum.Fixnum 1,
-    Datum.Pair (Datum.Fixnum 2,
-      Datum.Pair (Datum.Fixnum 3, Datum.Nil))) in
+  let expected = Datum.Pair { car = Datum.Fixnum 1; cdr =
+    Datum.Pair { car = Datum.Fixnum 2; cdr =
+      Datum.Pair { car = Datum.Fixnum 3; cdr = Datum.Nil } } } in
   check_datum "list 1 2 3" expected (eval "(list 1 2 3)");
   check_datum "list empty" Datum.Nil (eval "(list)")
 
@@ -411,17 +411,17 @@ let test_apply_spread () =
   check_datum "apply spread" (Datum.Fixnum 6) (eval "(apply + 1 2 '(3))")
 
 let test_apply_cons () =
-  check_datum "apply cons" (Datum.Pair (Datum.Fixnum 1, Datum.Fixnum 2))
+  check_datum "apply cons" (Datum.Pair { car = Datum.Fixnum 1; cdr = Datum.Fixnum 2 })
     (eval "(apply cons '(1 2))")
 
 let test_apply_empty () =
   check_datum "apply empty" Datum.Nil (eval "(apply list '())")
 
 let test_apply_multi_spread () =
-  let expected = Datum.Pair (Datum.Fixnum 1,
-    Datum.Pair (Datum.Fixnum 2,
-      Datum.Pair (Datum.Fixnum 3,
-        Datum.Pair (Datum.Fixnum 4, Datum.Nil)))) in
+  let expected = Datum.Pair { car = Datum.Fixnum 1; cdr =
+    Datum.Pair { car = Datum.Fixnum 2; cdr =
+      Datum.Pair { car = Datum.Fixnum 3; cdr =
+        Datum.Pair { car = Datum.Fixnum 4; cdr = Datum.Nil } } } } in
   check_datum "apply multi spread" expected (eval "(apply list 1 2 '(3 4))")
 
 let test_apply_lambda () =
@@ -502,9 +502,9 @@ let test_cwv_single () =
     (eval "(call-with-values (lambda () 42) (lambda (x) x))")
 
 let test_cwv_triple () =
-  let expected = Datum.Pair (Datum.Fixnum 1,
-    Datum.Pair (Datum.Fixnum 2,
-      Datum.Pair (Datum.Fixnum 3, Datum.Nil))) in
+  let expected = Datum.Pair { car = Datum.Fixnum 1; cdr =
+    Datum.Pair { car = Datum.Fixnum 2; cdr =
+      Datum.Pair { car = Datum.Fixnum 3; cdr = Datum.Nil } } } in
   check_datum "cwv triple" expected
     (eval "(call-with-values (lambda () (values 1 2 3)) list)")
 
@@ -537,9 +537,9 @@ let test_dw_basic () =
 let test_dw_order () =
   (* verify before/thunk/after execution order via side effects *)
   check_datum "dw order"
-    (Datum.Pair (Datum.Fixnum 3,
-      Datum.Pair (Datum.Fixnum 2,
-        Datum.Pair (Datum.Fixnum 1, Datum.Nil))))
+    (Datum.Pair { car = Datum.Fixnum 3; cdr =
+      Datum.Pair { car = Datum.Fixnum 2; cdr =
+        Datum.Pair { car = Datum.Fixnum 1; cdr = Datum.Nil } } })
     (eval "(let ((log '())) \
             (dynamic-wind \
               (lambda () (set! log (cons 1 log))) \
@@ -550,8 +550,8 @@ let test_dw_order () =
 let test_dw_escape () =
   (* escaping via continuation calls after *)
   check_datum "dw escape"
-    (Datum.Pair (Datum.Symbol "after",
-      Datum.Pair (Datum.Symbol "before", Datum.Nil)))
+    (Datum.Pair { car = Datum.Symbol "after"; cdr =
+      Datum.Pair { car = Datum.Symbol "before"; cdr = Datum.Nil } })
     (eval "(let ((log '())) \
             (call/cc (lambda (k) \
               (dynamic-wind \
@@ -573,10 +573,10 @@ let test_dw_reenter () =
 let test_dw_nested () =
   (* nested dynamic-wind: outer-before, inner-before, inner-after, outer-after *)
   check_datum "dw nested"
-    (Datum.Pair (Datum.Symbol "a1",
-      Datum.Pair (Datum.Symbol "a2",
-        Datum.Pair (Datum.Symbol "b2",
-          Datum.Pair (Datum.Symbol "b1", Datum.Nil)))))
+    (Datum.Pair { car = Datum.Symbol "a1"; cdr =
+      Datum.Pair { car = Datum.Symbol "a2"; cdr =
+        Datum.Pair { car = Datum.Symbol "b2"; cdr =
+          Datum.Pair { car = Datum.Symbol "b1"; cdr = Datum.Nil } } } })
     (eval "(let ((log '())) \
             (dynamic-wind \
               (lambda () (set! log (cons 'b1 log))) \
@@ -591,10 +591,10 @@ let test_dw_nested () =
 let test_dw_escape_nested () =
   (* escaping from nested dynamic-wind calls both afters in right order *)
   check_datum "dw escape nested"
-    (Datum.Pair (Datum.Symbol "a1",
-      Datum.Pair (Datum.Symbol "a2",
-        Datum.Pair (Datum.Symbol "b2",
-          Datum.Pair (Datum.Symbol "b1", Datum.Nil)))))
+    (Datum.Pair { car = Datum.Symbol "a1"; cdr =
+      Datum.Pair { car = Datum.Symbol "a2"; cdr =
+        Datum.Pair { car = Datum.Symbol "b2"; cdr =
+          Datum.Pair { car = Datum.Symbol "b1"; cdr = Datum.Nil } } } })
     (eval "(let ((log '())) \
             (call/cc (lambda (k) \
               (dynamic-wind \
@@ -615,11 +615,556 @@ let test_dw_first_class () =
 
 let test_dw_thunk_result () =
   (* thunk's return value is dynamic-wind's result *)
-  check_datum "dw thunk result" (Datum.Pair (Datum.Fixnum 1, Datum.Fixnum 2))
+  check_datum "dw thunk result" (Datum.Pair { car = Datum.Fixnum 1; cdr = Datum.Fixnum 2 })
     (eval "(dynamic-wind \
             (lambda () #f) \
             (lambda () (cons 1 2)) \
             (lambda () #f))")
+
+(* --- numeric enhancements --- *)
+
+let test_division () =
+  check_datum "/ exact" (Datum.Fixnum 3) (eval "(/ 6 2)");
+  check_datum "/ inexact" (Datum.Flonum 2.5) (eval "(/ 5 2)");
+  check_datum "/ float" (Datum.Flonum 2.0) (eval "(/ 6.0 3.0)");
+  check_datum "/ reciprocal" (Datum.Flonum 0.5) (eval "(/ 2)")
+
+let test_abs () =
+  check_datum "abs pos" (Datum.Fixnum 5) (eval "(abs 5)");
+  check_datum "abs neg" (Datum.Fixnum 5) (eval "(abs -5)");
+  check_datum "abs float" (Datum.Flonum 3.14) (eval "(abs -3.14)")
+
+let test_min_max () =
+  check_datum "min" (Datum.Fixnum 1) (eval "(min 3 1 2)");
+  check_datum "max" (Datum.Fixnum 3) (eval "(max 1 3 2)");
+  check_datum "min single" (Datum.Fixnum 42) (eval "(min 42)")
+
+let test_quotient_remainder_modulo () =
+  check_datum "quotient" (Datum.Fixnum 3) (eval "(quotient 10 3)");
+  check_datum "remainder" (Datum.Fixnum 1) (eval "(remainder 10 3)");
+  check_datum "remainder neg" (Datum.Fixnum (-1)) (eval "(remainder -10 3)");
+  check_datum "modulo" (Datum.Fixnum 1) (eval "(modulo 10 3)");
+  check_datum "modulo neg" (Datum.Fixnum 2) (eval "(modulo -10 3)")
+
+let test_floor_ceil_trunc_round () =
+  check_datum "floor 2.7" (Datum.Flonum 2.0) (eval "(floor 2.7)");
+  check_datum "floor -2.3" (Datum.Flonum (-3.0)) (eval "(floor -2.3)");
+  check_datum "ceiling 2.3" (Datum.Flonum 3.0) (eval "(ceiling 2.3)");
+  check_datum "truncate 2.7" (Datum.Flonum 2.0) (eval "(truncate 2.7)");
+  check_datum "truncate -2.7" (Datum.Flonum (-2.0)) (eval "(truncate -2.7)");
+  check_datum "round 2.5" (Datum.Flonum 2.0) (eval "(round 2.5)");
+  check_datum "round 3.5" (Datum.Flonum 4.0) (eval "(round 3.5)");
+  check_datum "floor int" (Datum.Fixnum 3) (eval "(floor 3)")
+
+let test_gcd_lcm () =
+  check_datum "gcd" (Datum.Fixnum 4) (eval "(gcd 8 12)");
+  check_datum "gcd 0" (Datum.Fixnum 0) (eval "(gcd)");
+  check_datum "gcd three" (Datum.Fixnum 3) (eval "(gcd 9 12 15)");
+  check_datum "lcm" (Datum.Fixnum 24) (eval "(lcm 8 12)");
+  check_datum "lcm empty" (Datum.Fixnum 1) (eval "(lcm)")
+
+let test_exact_inexact () =
+  check_datum "exact->inexact" (Datum.Flonum 42.0) (eval "(exact->inexact 42)");
+  check_datum "inexact->exact" (Datum.Fixnum 3) (eval "(inexact->exact 3.0)");
+  check_datum "inexact" (Datum.Flonum 42.0) (eval "(inexact 42)");
+  check_datum "exact" (Datum.Fixnum 3) (eval "(exact 3.0)")
+
+let test_expt_sqrt () =
+  check_datum "expt" (Datum.Fixnum 8) (eval "(expt 2 3)");
+  check_datum "expt 0" (Datum.Fixnum 1) (eval "(expt 5 0)");
+  check_datum "sqrt 4" (Datum.Fixnum 2) (eval "(sqrt 4)");
+  check_datum "sqrt 2" (Datum.Flonum (sqrt 2.0)) (eval "(sqrt 2)")
+
+let test_chain_compare () =
+  check_datum "< chain true" (Datum.Bool true) (eval "(< 1 2 3)");
+  check_datum "< chain false" (Datum.Bool false) (eval "(< 1 3 2)");
+  check_datum "= chain true" (Datum.Bool true) (eval "(= 2 2 2)");
+  check_datum "<= chain" (Datum.Bool true) (eval "(<= 1 1 2)");
+  check_datum ">= chain" (Datum.Bool true) (eval "(>= 3 2 2)")
+
+let test_number_string () =
+  check_datum "num->str" (Datum.Str (Bytes.of_string "42")) (eval "(number->string 42)");
+  check_datum "num->str hex" (Datum.Str (Bytes.of_string "ff")) (eval "(number->string 255 16)");
+  check_datum "num->str bin" (Datum.Str (Bytes.of_string "101")) (eval "(number->string 5 2)");
+  check_datum "str->num" (Datum.Fixnum 42) (eval "(string->number \"42\")");
+  check_datum "str->num float" (Datum.Flonum 3.14) (eval "(string->number \"3.14\")");
+  check_datum "str->num fail" (Datum.Bool false) (eval "(string->number \"abc\")");
+  check_datum "str->num hex" (Datum.Fixnum 255) (eval "(string->number \"ff\" 16)")
+
+(* --- equal? --- *)
+
+let test_equal_basic () =
+  check_datum "equal? same int" (Datum.Bool true) (eval "(equal? 1 1)");
+  check_datum "equal? diff int" (Datum.Bool false) (eval "(equal? 1 2)");
+  check_datum "equal? strings" (Datum.Bool true) (eval "(equal? \"abc\" \"abc\")");
+  check_datum "equal? nested" (Datum.Bool true)
+    (eval "(equal? '(1 (2 3)) '(1 (2 3)))");
+  check_datum "equal? diff struct" (Datum.Bool false)
+    (eval "(equal? '(1 2) '(1 3))");
+  check_datum "equal? vectors" (Datum.Bool true)
+    (eval "(equal? '#(1 2 3) '#(1 2 3))");
+  check_datum "equal? diff types" (Datum.Bool false)
+    (eval "(equal? 1 \"1\")")
+
+(* --- type predicates --- *)
+
+let test_type_boolean () =
+  check_datum "boolean? #t" (Datum.Bool true) (eval "(boolean? #t)");
+  check_datum "boolean? #f" (Datum.Bool true) (eval "(boolean? #f)");
+  check_datum "boolean? 0" (Datum.Bool false) (eval "(boolean? 0)")
+
+let test_type_boolean_eq () =
+  check_datum "boolean=? same" (Datum.Bool true) (eval "(boolean=? #t #t)");
+  check_datum "boolean=? diff" (Datum.Bool false) (eval "(boolean=? #t #f)");
+  check_datum "boolean=? three" (Datum.Bool true) (eval "(boolean=? #f #f #f)")
+
+let test_type_number () =
+  check_datum "number? int" (Datum.Bool true) (eval "(number? 42)");
+  check_datum "number? float" (Datum.Bool true) (eval "(number? 3.14)");
+  check_datum "number? sym" (Datum.Bool false) (eval "(number? 'x)");
+  check_datum "complex? int" (Datum.Bool true) (eval "(complex? 42)");
+  check_datum "real? int" (Datum.Bool true) (eval "(real? 42)");
+  check_datum "rational? int" (Datum.Bool true) (eval "(rational? 42)")
+
+let test_type_integer () =
+  check_datum "integer? int" (Datum.Bool true) (eval "(integer? 42)");
+  check_datum "integer? float" (Datum.Bool false) (eval "(integer? 3.14)");
+  check_datum "integer? exact float" (Datum.Bool true) (eval "(integer? 3.0)")
+
+let test_type_exact () =
+  check_datum "exact? int" (Datum.Bool true) (eval "(exact? 42)");
+  check_datum "exact? float" (Datum.Bool false) (eval "(exact? 3.14)");
+  check_datum "inexact? int" (Datum.Bool false) (eval "(inexact? 42)");
+  check_datum "inexact? float" (Datum.Bool true) (eval "(inexact? 3.14)");
+  check_datum "exact-integer?" (Datum.Bool true) (eval "(exact-integer? 42)");
+  check_datum "exact-integer? float" (Datum.Bool false) (eval "(exact-integer? 3.14)")
+
+let test_type_numeric_preds () =
+  check_datum "zero? 0" (Datum.Bool true) (eval "(zero? 0)");
+  check_datum "zero? 1" (Datum.Bool false) (eval "(zero? 1)");
+  check_datum "zero? 0.0" (Datum.Bool true) (eval "(zero? 0.0)");
+  check_datum "positive? 1" (Datum.Bool true) (eval "(positive? 1)");
+  check_datum "positive? -1" (Datum.Bool false) (eval "(positive? -1)");
+  check_datum "negative? -1" (Datum.Bool true) (eval "(negative? -1)");
+  check_datum "negative? 1" (Datum.Bool false) (eval "(negative? 1)");
+  check_datum "odd? 3" (Datum.Bool true) (eval "(odd? 3)");
+  check_datum "odd? 2" (Datum.Bool false) (eval "(odd? 2)");
+  check_datum "even? 4" (Datum.Bool true) (eval "(even? 4)");
+  check_datum "even? 3" (Datum.Bool false) (eval "(even? 3)")
+
+let test_type_symbol () =
+  check_datum "symbol? sym" (Datum.Bool true) (eval "(symbol? 'foo)");
+  check_datum "symbol? str" (Datum.Bool false) (eval "(symbol? \"foo\")");
+  check_datum "symbol=? same" (Datum.Bool true) (eval "(symbol=? 'a 'a)");
+  check_datum "symbol=? diff" (Datum.Bool false) (eval "(symbol=? 'a 'b)")
+
+let test_symbol_string () =
+  check_datum "sym->str" (Datum.Str (Bytes.of_string "hello"))
+    (eval "(symbol->string 'hello)");
+  check_datum "str->sym" (Datum.Symbol "hello")
+    (eval "(string->symbol \"hello\")");
+  check_datum "round-trip" (Datum.Bool true)
+    (eval "(equal? 'hello (string->symbol (symbol->string 'hello)))")
+
+let test_type_predicates () =
+  check_datum "char?" (Datum.Bool true) (eval "(char? #\\a)");
+  check_datum "char? int" (Datum.Bool false) (eval "(char? 42)");
+  check_datum "string?" (Datum.Bool true) (eval "(string? \"hi\")");
+  check_datum "string? int" (Datum.Bool false) (eval "(string? 42)");
+  check_datum "vector?" (Datum.Bool true) (eval "(vector? '#(1))");
+  check_datum "vector? int" (Datum.Bool false) (eval "(vector? 42)");
+  check_datum "bytevector?" (Datum.Bool true) (eval "(bytevector? #u8(1))");
+  check_datum "bytevector? int" (Datum.Bool false) (eval "(bytevector? 42)");
+  check_datum "procedure? lambda" (Datum.Bool true) (eval "(procedure? car)");
+  check_datum "procedure? int" (Datum.Bool false) (eval "(procedure? 42)");
+  check_datum "procedure? closure" (Datum.Bool true) (eval "(procedure? (lambda () 1))");
+  check_datum "list? proper" (Datum.Bool true) (eval "(list? '(1 2 3))");
+  check_datum "list? nil" (Datum.Bool true) (eval "(list? '())");
+  check_datum "list? dotted" (Datum.Bool false) (eval "(list? (cons 1 2))");
+  check_datum "list? non" (Datum.Bool false) (eval "(list? 42)");
+  check_datum "eof-object?" (Datum.Bool true) (eval "(eof-object? (eof-object))");
+  check_datum "eof-object? int" (Datum.Bool false) (eval "(eof-object? 42)")
+
+(* --- pair & list primitives --- *)
+
+let test_set_car_cdr () =
+  check_datum "set-car!" (Datum.Pair { car = Datum.Fixnum 99; cdr = Datum.Fixnum 2 })
+    (eval "(let ((p (cons 1 2))) (set-car! p 99) p)");
+  check_datum "set-cdr!" (Datum.Pair { car = Datum.Fixnum 1; cdr = Datum.Fixnum 99 })
+    (eval "(let ((p (cons 1 2))) (set-cdr! p 99) p)")
+
+let test_cxxr () =
+  check_datum "caar" (Datum.Fixnum 1)
+    (eval "(caar '((1 2) 3))");
+  check_datum "cadr" (Datum.Fixnum 2)
+    (eval "(cadr '(1 2 3))");
+  check_datum "cdar" (Datum.Fixnum 2)
+    (eval "(cdar '((1 . 2) 3))");
+  check_datum "cddr" (Datum.Pair { car = Datum.Fixnum 3; cdr = Datum.Nil })
+    (eval "(cddr '(1 2 3))")
+
+let test_make_list () =
+  check_datum "make-list" (Datum.Fixnum 3) (eval "(length (make-list 3))");
+  check_datum "make-list fill" (Datum.Bool true)
+    (eval "(equal? '(#t #t #t) (make-list 3 #t))");
+  check_datum "make-list 0" Datum.Nil (eval "(make-list 0)")
+
+let test_length () =
+  check_datum "length 0" (Datum.Fixnum 0) (eval "(length '())");
+  check_datum "length 3" (Datum.Fixnum 3) (eval "(length '(1 2 3))")
+
+let test_append () =
+  check_datum "append 2" (Datum.Bool true)
+    (eval "(equal? '(1 2 3 4) (append '(1 2) '(3 4)))");
+  check_datum "append 3" (Datum.Bool true)
+    (eval "(equal? '(1 2 3) (append '(1) '(2) '(3)))");
+  check_datum "append empty" Datum.Nil (eval "(append)");
+  check_datum "append one" (Datum.Bool true)
+    (eval "(equal? '(1 2) (append '(1 2)))");
+  check_datum "append last non-list" (Datum.Pair { car = Datum.Fixnum 1; cdr = Datum.Fixnum 2 })
+    (eval "(append '(1) 2)")
+
+let test_reverse () =
+  check_datum "reverse" (Datum.Bool true)
+    (eval "(equal? '(3 2 1) (reverse '(1 2 3)))");
+  check_datum "reverse empty" Datum.Nil (eval "(reverse '())")
+
+let test_list_tail_ref_set () =
+  check_datum "list-tail" (Datum.Bool true)
+    (eval "(equal? '(3 4) (list-tail '(1 2 3 4) 2))");
+  check_datum "list-ref" (Datum.Fixnum 3)
+    (eval "(list-ref '(1 2 3 4) 2)");
+  check_datum "list-set!" (Datum.Bool true)
+    (eval "(let ((l (list 1 2 3))) (list-set! l 1 99) (equal? '(1 99 3) l))")
+
+let test_list_copy () =
+  check_datum "list-copy" (Datum.Bool true)
+    (eval "(let ((a '(1 2 3))) \
+             (let ((b (list-copy a))) \
+               (equal? a b)))");
+  check_datum "list-copy independent" (Datum.Bool true)
+    (eval "(let ((a (list 1 2 3))) \
+             (let ((b (list-copy a))) \
+               (set-car! b 99) \
+               (equal? '(1 2 3) a)))")
+
+let test_memq_member () =
+  check_datum "memq found" (Datum.Bool true)
+    (eval "(equal? '(2 3) (memq 2 '(1 2 3)))");
+  check_datum "memq not found" (Datum.Bool false)
+    (eval "(memq 4 '(1 2 3))");
+  check_datum "memv found" (Datum.Bool true)
+    (eval "(equal? '(2 3) (memv 2 '(1 2 3)))");
+  check_datum "member found" (Datum.Bool true)
+    (eval "(equal? '((2) 3) (member '(2) '(1 (2) 3)))");
+  check_datum "member not found" (Datum.Bool false)
+    (eval "(member '(4) '(1 (2) 3))")
+
+let test_assq_assoc () =
+  check_datum "assq found" (Datum.Bool true)
+    (eval "(equal? '(b 2) (assq 'b '((a 1) (b 2) (c 3))))");
+  check_datum "assq not found" (Datum.Bool false)
+    (eval "(assq 'd '((a 1) (b 2)))");
+  check_datum "assv found" (Datum.Bool true)
+    (eval "(equal? '(2 b) (assv 2 '((1 a) (2 b) (3 c))))");
+  check_datum "assoc found" (Datum.Bool true)
+    (eval "(equal? '((2) b) (assoc '(2) '((1 a) ((2) b) (3 c))))");
+  check_datum "assoc not found" (Datum.Bool false)
+    (eval "(assoc '(4) '((1 a) (2 b)))")
+
+(* --- character primitives --- *)
+
+let test_char_compare () =
+  check_datum "char=?" (Datum.Bool true) (eval "(char=? #\\a #\\a)");
+  check_datum "char=? diff" (Datum.Bool false) (eval "(char=? #\\a #\\b)");
+  check_datum "char<?" (Datum.Bool true) (eval "(char<? #\\a #\\b)");
+  check_datum "char>?" (Datum.Bool true) (eval "(char>? #\\b #\\a)");
+  check_datum "char<=?" (Datum.Bool true) (eval "(char<=? #\\a #\\a)");
+  check_datum "char>=?" (Datum.Bool true) (eval "(char>=? #\\b #\\a)")
+
+let test_char_ci_compare () =
+  check_datum "char-ci=?" (Datum.Bool true) (eval "(char-ci=? #\\A #\\a)");
+  check_datum "char-ci=? diff" (Datum.Bool false) (eval "(char-ci=? #\\a #\\b)");
+  check_datum "char-ci<?" (Datum.Bool true) (eval "(char-ci<? #\\A #\\b)");
+  check_datum "char-ci>?" (Datum.Bool true) (eval "(char-ci>? #\\B #\\a)")
+
+let test_char_integer () =
+  check_datum "char->integer" (Datum.Fixnum 65) (eval "(char->integer #\\A)");
+  check_datum "integer->char" (Datum.Char (Uchar.of_int 65)) (eval "(integer->char 65)");
+  check_datum "round-trip" (Datum.Bool true)
+    (eval "(char=? #\\A (integer->char (char->integer #\\A)))")
+
+let test_char_case () =
+  check_datum "upcase" (Datum.Char (Uchar.of_int 0x41)) (eval "(char-upcase #\\a)");
+  check_datum "downcase" (Datum.Char (Uchar.of_int 0x61)) (eval "(char-downcase #\\A)");
+  check_datum "foldcase" (Datum.Char (Uchar.of_int 0x61)) (eval "(char-foldcase #\\A)")
+
+let test_char_classification () =
+  check_datum "alphabetic" (Datum.Bool true) (eval "(char-alphabetic? #\\a)");
+  check_datum "alphabetic non" (Datum.Bool false) (eval "(char-alphabetic? #\\1)");
+  check_datum "numeric" (Datum.Bool true) (eval "(char-numeric? #\\5)");
+  check_datum "numeric non" (Datum.Bool false) (eval "(char-numeric? #\\a)");
+  check_datum "whitespace space" (Datum.Bool true) (eval "(char-whitespace? #\\space)");
+  check_datum "whitespace tab" (Datum.Bool true) (eval "(char-whitespace? #\\tab)");
+  check_datum "whitespace non" (Datum.Bool false) (eval "(char-whitespace? #\\a)");
+  check_datum "upper-case" (Datum.Bool true) (eval "(char-upper-case? #\\A)");
+  check_datum "upper-case non" (Datum.Bool false) (eval "(char-upper-case? #\\a)");
+  check_datum "lower-case" (Datum.Bool true) (eval "(char-lower-case? #\\a)");
+  check_datum "lower-case non" (Datum.Bool false) (eval "(char-lower-case? #\\A)")
+
+let test_digit_value () =
+  check_datum "digit-value 5" (Datum.Fixnum 5) (eval "(digit-value #\\5)");
+  check_datum "digit-value 0" (Datum.Fixnum 0) (eval "(digit-value #\\0)");
+  check_datum "digit-value non" (Datum.Bool false) (eval "(digit-value #\\a)")
+
+(* --- string primitives --- *)
+
+let test_string_construct () =
+  check_datum "make-string" (Datum.Fixnum 3) (eval "(string-length (make-string 3))");
+  check_datum "make-string fill" (Datum.Bool true)
+    (eval "(string=? \"aaa\" (make-string 3 #\\a))");
+  check_datum "string from chars" (Datum.Bool true)
+    (eval "(string=? \"abc\" (string #\\a #\\b #\\c))")
+
+let test_string_ref_set () =
+  check_datum "string-ref" (Datum.Char (Uchar.of_int 0x62))
+    (eval "(string-ref \"abc\" 1)");
+  check_datum "string-set!" (Datum.Bool true)
+    (eval "(let ((s (string-copy \"abc\"))) (string-set! s 1 #\\x) (string=? \"axc\" s))")
+
+let test_string_compare () =
+  check_datum "string=?" (Datum.Bool true) (eval "(string=? \"abc\" \"abc\")");
+  check_datum "string=? diff" (Datum.Bool false) (eval "(string=? \"abc\" \"abd\")");
+  check_datum "string<?" (Datum.Bool true) (eval "(string<? \"abc\" \"abd\")");
+  check_datum "string>?" (Datum.Bool true) (eval "(string>? \"abd\" \"abc\")");
+  check_datum "string<=?" (Datum.Bool true) (eval "(string<=? \"abc\" \"abc\")");
+  check_datum "string>=?" (Datum.Bool true) (eval "(string>=? \"abc\" \"abc\")")
+
+let test_string_ci_compare () =
+  check_datum "string-ci=?" (Datum.Bool true) (eval "(string-ci=? \"ABC\" \"abc\")");
+  check_datum "string-ci<?" (Datum.Bool true) (eval "(string-ci<? \"ABC\" \"abd\")")
+
+let test_substring () =
+  check_datum "substring" (Datum.Bool true)
+    (eval "(string=? \"bc\" (substring \"abcd\" 1 3))")
+
+let test_string_append () =
+  check_datum "string-append" (Datum.Bool true)
+    (eval "(string=? \"abcdef\" (string-append \"ab\" \"cd\" \"ef\"))");
+  check_datum "string-append empty" (Datum.Bool true)
+    (eval "(string=? \"\" (string-append))")
+
+let test_string_list_conv () =
+  check_datum "string->list" (Datum.Bool true)
+    (eval "(equal? '(#\\a #\\b #\\c) (string->list \"abc\"))");
+  check_datum "list->string" (Datum.Bool true)
+    (eval "(string=? \"abc\" (list->string '(#\\a #\\b #\\c)))")
+
+let test_string_copy_fill () =
+  check_datum "string-copy" (Datum.Bool true)
+    (eval "(let ((a \"abc\")) \
+             (let ((b (string-copy a))) \
+               (string=? a b)))");
+  check_datum "string-copy independent" (Datum.Bool true)
+    (eval "(let ((a (string-copy \"abc\"))) \
+             (let ((b (string-copy a))) \
+               (string-set! b 0 #\\x) \
+               (string=? \"abc\" a)))");
+  check_datum "string-copy!" (Datum.Bool true)
+    (eval "(let ((s (string-copy \"abcde\"))) \
+             (string-copy! s 1 \"xy\") \
+             (string=? \"axyde\" s))");
+  check_datum "string-fill!" (Datum.Bool true)
+    (eval "(let ((s (string-copy \"abc\"))) \
+             (string-fill! s #\\x) \
+             (string=? \"xxx\" s))")
+
+let test_string_case () =
+  check_datum "string-upcase" (Datum.Bool true)
+    (eval "(string=? \"ABC\" (string-upcase \"abc\"))");
+  check_datum "string-downcase" (Datum.Bool true)
+    (eval "(string=? \"abc\" (string-downcase \"ABC\"))");
+  check_datum "string-foldcase" (Datum.Bool true)
+    (eval "(string=? \"abc\" (string-foldcase \"ABC\"))")
+
+(* --- vector primitives --- *)
+
+let test_vector_construct () =
+  check_datum "make-vector" (Datum.Fixnum 3) (eval "(vector-length (make-vector 3))");
+  check_datum "make-vector fill" (Datum.Bool true)
+    (eval "(equal? '#(7 7 7) (make-vector 3 7))");
+  check_datum "vector" (Datum.Bool true)
+    (eval "(equal? '#(1 2 3) (vector 1 2 3))")
+
+let test_vector_ref_set () =
+  check_datum "vector-ref" (Datum.Fixnum 2) (eval "(vector-ref '#(1 2 3) 1)");
+  check_datum "vector-set!" (Datum.Bool true)
+    (eval "(let ((v (vector 1 2 3))) (vector-set! v 1 99) (equal? '#(1 99 3) v))")
+
+let test_vector_conversions () =
+  check_datum "vector->list" (Datum.Bool true)
+    (eval "(equal? '(1 2 3) (vector->list '#(1 2 3)))");
+  check_datum "list->vector" (Datum.Bool true)
+    (eval "(equal? '#(1 2 3) (list->vector '(1 2 3)))");
+  check_datum "vector->string" (Datum.Bool true)
+    (eval "(string=? \"abc\" (vector->string (vector #\\a #\\b #\\c)))");
+  check_datum "string->vector" (Datum.Bool true)
+    (eval "(equal? (vector #\\a #\\b #\\c) (string->vector \"abc\"))")
+
+let test_vector_copy_append () =
+  check_datum "vector-copy" (Datum.Bool true)
+    (eval "(let ((a (vector 1 2 3))) \
+             (let ((b (vector-copy a))) \
+               (vector-set! b 0 99) \
+               (equal? '#(1 2 3) a)))");
+  check_datum "vector-copy!" (Datum.Bool true)
+    (eval "(let ((v (vector 1 2 3 4 5))) \
+             (vector-copy! v 1 (vector 10 20)) \
+             (equal? '#(1 10 20 4 5) v))");
+  check_datum "vector-append" (Datum.Bool true)
+    (eval "(equal? '#(1 2 3 4) (vector-append '#(1 2) '#(3 4)))");
+  check_datum "vector-fill!" (Datum.Bool true)
+    (eval "(let ((v (vector 1 2 3))) \
+             (vector-fill! v 0) \
+             (equal? '#(0 0 0) v))")
+
+(* --- bytevector primitives --- *)
+
+let test_bytevector_construct () =
+  check_datum "make-bytevector" (Datum.Fixnum 3) (eval "(bytevector-length (make-bytevector 3))");
+  check_datum "make-bytevector fill" (Datum.Bool true)
+    (eval "(equal? (bytevector 7 7 7) (make-bytevector 3 7))");
+  check_datum "bytevector" (Datum.Fixnum 3) (eval "(bytevector-length (bytevector 1 2 3))")
+
+let test_bytevector_ref_set () =
+  check_datum "bytevector-u8-ref" (Datum.Fixnum 2) (eval "(bytevector-u8-ref (bytevector 1 2 3) 1)");
+  check_datum "bytevector-u8-set!" (Datum.Bool true)
+    (eval "(let ((bv (bytevector 1 2 3))) \
+             (bytevector-u8-set! bv 1 99) \
+             (equal? (bytevector 1 99 3) bv))")
+
+let test_bytevector_copy_append () =
+  check_datum "bytevector-copy" (Datum.Bool true)
+    (eval "(let ((a (bytevector 1 2 3))) \
+             (let ((b (bytevector-copy a))) \
+               (bytevector-u8-set! b 0 99) \
+               (equal? (bytevector 1 2 3) a)))");
+  check_datum "bytevector-append" (Datum.Bool true)
+    (eval "(equal? (bytevector 1 2 3 4) (bytevector-append (bytevector 1 2) (bytevector 3 4)))")
+
+let test_utf8_string () =
+  check_datum "utf8->string" (Datum.Bool true)
+    (eval "(string=? \"abc\" (utf8->string (bytevector 97 98 99)))");
+  check_datum "string->utf8" (Datum.Bool true)
+    (eval "(equal? (bytevector 97 98 99) (string->utf8 \"abc\"))")
+
+(* --- exception primitives --- *)
+
+let test_error_objects () =
+  check_datum "error-object?" (Datum.Bool true)
+    (eval "(error-object? (%make-error \"test\" 1 2))");
+  check_datum "error-object? non" (Datum.Bool false)
+    (eval "(error-object? 42)");
+  check_datum "error-object-message" (Datum.Bool true)
+    (eval "(string=? \"test\" (error-object-message (%make-error \"test\")))");
+  check_datum "error-object-irritants" (Datum.Bool true)
+    (eval "(equal? '(1 2) (error-object-irritants (%make-error \"test\" 1 2)))")
+
+let test_raise_handle () =
+  check_datum "basic raise/handle" (Datum.Fixnum 42)
+    (eval "(call/cc (lambda (k) \
+             (with-exception-handler \
+               (lambda (e) (k 42)) \
+               (lambda () (raise 'boom)))))");
+  check_datum "handler gets value" (Datum.Symbol "boom")
+    (eval "(call/cc (lambda (k) \
+             (with-exception-handler \
+               (lambda (e) (k e)) \
+               (lambda () (raise 'boom)))))")
+
+let test_nested_handlers () =
+  check_datum "nested handlers" (Datum.Symbol "inner")
+    (eval "(call/cc (lambda (k) \
+             (with-exception-handler \
+               (lambda (e) (k 'outer)) \
+               (lambda () \
+                 (call/cc (lambda (k2) \
+                   (with-exception-handler \
+                     (lambda (e) (k2 'inner)) \
+                     (lambda () (raise 'boom)))))))))")
+
+let test_raise_continuable () =
+  check_datum "raise-continuable" (Datum.Fixnum 99)
+    (eval "(with-exception-handler \
+             (lambda (e) 99) \
+             (lambda () (raise-continuable 'boom)))")
+
+let test_error_raise () =
+  check_datum "error raises" (Datum.Bool true)
+    (eval "(call/cc (lambda (k) \
+             (with-exception-handler \
+               (lambda (e) (k (error-object? e))) \
+               (lambda () (error \"test error\" 1 2)))))");
+  check_datum "error message" (Datum.Bool true)
+    (eval "(call/cc (lambda (k) \
+             (with-exception-handler \
+               (lambda (e) (k (string=? \"test error\" (error-object-message e)))) \
+               (lambda () (error \"test error\")))))")
+
+let test_exception_dw_interaction () =
+  (* handler can escape with call/cc through dynamic-wind *)
+  check_datum "exception + dynamic-wind" (Datum.Fixnum 42)
+    (eval "(call/cc (lambda (k) \
+             (with-exception-handler \
+               (lambda (e) (k 42)) \
+               (lambda () \
+                 (dynamic-wind \
+                   (lambda () #f) \
+                   (lambda () (raise 'boom)) \
+                   (lambda () #f))))))")
+
+let test_unhandled_error () =
+  Alcotest.check_raises "unhandled raise" (Vm.Runtime_error "unhandled exception: boom")
+    (fun () -> ignore (eval "(raise 'boom)"))
+
+(* --- higher-order + write --- *)
+
+let test_map () =
+  check_datum "map basic" (Datum.Bool true)
+    (eval "(equal? '(2 4 6) (map (lambda (x) (* x 2)) '(1 2 3)))");
+  check_datum "map empty" Datum.Nil
+    (eval "(map (lambda (x) x) '())")
+
+let test_for_each () =
+  check_datum "for-each" (Datum.Fixnum 6)
+    (eval "(let ((sum 0)) \
+             (for-each (lambda (x) (set! sum (+ sum x))) '(1 2 3)) \
+             sum)")
+
+let test_string_map () =
+  check_datum "string-map" (Datum.Bool true)
+    (eval "(string=? \"ABC\" (string-map char-upcase \"abc\"))")
+
+let test_string_for_each () =
+  check_datum "string-for-each" (Datum.Fixnum 3)
+    (eval "(let ((count 0)) \
+             (string-for-each (lambda (c) (set! count (+ count 1))) \"abc\") \
+             count)")
+
+let test_vector_map () =
+  check_datum "vector-map" (Datum.Bool true)
+    (eval "(equal? '#(2 4 6) (vector-map (lambda (x) (* x 2)) '#(1 2 3)))")
+
+let test_vector_for_each () =
+  check_datum "vector-for-each" (Datum.Fixnum 6)
+    (eval "(let ((sum 0)) \
+             (vector-for-each (lambda (x) (set! sum (+ sum x))) '#(1 2 3)) \
+             sum)")
+
+let test_write () =
+  (* write puts quotes on strings, display doesn't *)
+  check_datum "write returns void" Datum.Void
+    (eval "(write 42)")
 
 let () =
   Alcotest.run "VM"
@@ -800,5 +1345,92 @@ let () =
        ; Alcotest.test_case "escape nested" `Quick test_dw_escape_nested
        ; Alcotest.test_case "first class" `Quick test_dw_first_class
        ; Alcotest.test_case "thunk result" `Quick test_dw_thunk_result
+       ])
+    ; ("numeric",
+       [ Alcotest.test_case "division" `Quick test_division
+       ; Alcotest.test_case "abs" `Quick test_abs
+       ; Alcotest.test_case "min/max" `Quick test_min_max
+       ; Alcotest.test_case "quotient/remainder/modulo" `Quick test_quotient_remainder_modulo
+       ; Alcotest.test_case "floor/ceiling/truncate/round" `Quick test_floor_ceil_trunc_round
+       ; Alcotest.test_case "gcd/lcm" `Quick test_gcd_lcm
+       ; Alcotest.test_case "exact/inexact" `Quick test_exact_inexact
+       ; Alcotest.test_case "expt/sqrt" `Quick test_expt_sqrt
+       ; Alcotest.test_case "chain comparisons" `Quick test_chain_compare
+       ; Alcotest.test_case "number->string/string->number" `Quick test_number_string
+       ])
+    ; ("pair & list",
+       [ Alcotest.test_case "set-car!/set-cdr!" `Quick test_set_car_cdr
+       ; Alcotest.test_case "caar/cadr/cdar/cddr" `Quick test_cxxr
+       ; Alcotest.test_case "make-list" `Quick test_make_list
+       ; Alcotest.test_case "length" `Quick test_length
+       ; Alcotest.test_case "append" `Quick test_append
+       ; Alcotest.test_case "reverse" `Quick test_reverse
+       ; Alcotest.test_case "list-tail/list-ref/list-set!" `Quick test_list_tail_ref_set
+       ; Alcotest.test_case "list-copy" `Quick test_list_copy
+       ; Alcotest.test_case "memq/memv/member" `Quick test_memq_member
+       ; Alcotest.test_case "assq/assv/assoc" `Quick test_assq_assoc
+       ])
+    ; ("character",
+       [ Alcotest.test_case "char comparisons" `Quick test_char_compare
+       ; Alcotest.test_case "char-ci comparisons" `Quick test_char_ci_compare
+       ; Alcotest.test_case "char->integer/integer->char" `Quick test_char_integer
+       ; Alcotest.test_case "char case conversion" `Quick test_char_case
+       ; Alcotest.test_case "char classification" `Quick test_char_classification
+       ; Alcotest.test_case "digit-value" `Quick test_digit_value
+       ])
+    ; ("string",
+       [ Alcotest.test_case "construction" `Quick test_string_construct
+       ; Alcotest.test_case "ref/set!" `Quick test_string_ref_set
+       ; Alcotest.test_case "comparisons" `Quick test_string_compare
+       ; Alcotest.test_case "ci comparisons" `Quick test_string_ci_compare
+       ; Alcotest.test_case "substring" `Quick test_substring
+       ; Alcotest.test_case "string-append" `Quick test_string_append
+       ; Alcotest.test_case "string<->list" `Quick test_string_list_conv
+       ; Alcotest.test_case "copy/copy!/fill!" `Quick test_string_copy_fill
+       ; Alcotest.test_case "case conversion" `Quick test_string_case
+       ])
+    ; ("vector",
+       [ Alcotest.test_case "construction" `Quick test_vector_construct
+       ; Alcotest.test_case "ref/set!" `Quick test_vector_ref_set
+       ; Alcotest.test_case "conversions" `Quick test_vector_conversions
+       ; Alcotest.test_case "copy/copy!/append/fill!" `Quick test_vector_copy_append
+       ])
+    ; ("bytevector",
+       [ Alcotest.test_case "construction" `Quick test_bytevector_construct
+       ; Alcotest.test_case "ref/set!" `Quick test_bytevector_ref_set
+       ; Alcotest.test_case "copy/append" `Quick test_bytevector_copy_append
+       ; Alcotest.test_case "utf8<->string" `Quick test_utf8_string
+       ])
+    ; ("exceptions",
+       [ Alcotest.test_case "error objects" `Quick test_error_objects
+       ; Alcotest.test_case "raise/handle" `Quick test_raise_handle
+       ; Alcotest.test_case "nested handlers" `Quick test_nested_handlers
+       ; Alcotest.test_case "raise-continuable" `Quick test_raise_continuable
+       ; Alcotest.test_case "error raises" `Quick test_error_raise
+       ; Alcotest.test_case "exception + dw" `Quick test_exception_dw_interaction
+       ; Alcotest.test_case "unhandled error" `Quick test_unhandled_error
+       ])
+    ; ("higher-order",
+       [ Alcotest.test_case "map" `Quick test_map
+       ; Alcotest.test_case "for-each" `Quick test_for_each
+       ; Alcotest.test_case "string-map" `Quick test_string_map
+       ; Alcotest.test_case "string-for-each" `Quick test_string_for_each
+       ; Alcotest.test_case "vector-map" `Quick test_vector_map
+       ; Alcotest.test_case "vector-for-each" `Quick test_vector_for_each
+       ; Alcotest.test_case "write" `Quick test_write
+       ])
+    ; ("equal?",
+       [ Alcotest.test_case "equal? basic" `Quick test_equal_basic
+       ])
+    ; ("type predicates",
+       [ Alcotest.test_case "boolean?" `Quick test_type_boolean
+       ; Alcotest.test_case "boolean=?" `Quick test_type_boolean_eq
+       ; Alcotest.test_case "number?/complex?/real?/rational?" `Quick test_type_number
+       ; Alcotest.test_case "integer?" `Quick test_type_integer
+       ; Alcotest.test_case "exact?/inexact?/exact-integer?" `Quick test_type_exact
+       ; Alcotest.test_case "zero?/positive?/negative?/odd?/even?" `Quick test_type_numeric_preds
+       ; Alcotest.test_case "symbol?/symbol=?" `Quick test_type_symbol
+       ; Alcotest.test_case "symbol->string/string->symbol" `Quick test_symbol_string
+       ; Alcotest.test_case "char?/string?/vector?/bytevector?/procedure?/list?/eof" `Quick test_type_predicates
        ])
     ]

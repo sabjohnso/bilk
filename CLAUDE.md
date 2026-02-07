@@ -67,7 +67,7 @@ _opam/        # Local opam switch (gitignored)
 | Module | Purpose |
 |---|---|
 | `Char_type` | Character classification for the readtable (6 variants) |
-| `Datum` | Core Scheme value type (16 variants + code/env/closure/continuation types, structural equality, printer) |
+| `Datum` | Core Scheme value type (17 variants + code/env/closure/continuation types, structural equality, printer) |
 | `Readtable` | Immutable readtable with functional updates, R7RS default table |
 
 **Milestone 1 (Reader)** — complete.
@@ -116,7 +116,20 @@ Changes to existing modules:
 - `Vm`: Stack-copying `call/cc`, intrinsic dispatch for `apply`/`call-with-values`/`dynamic-wind`, internal `vm_frame` type for multi-step operations, wind stack for continuation invocation
 - `Instance`: Added `winds` field; registered 6 new primitives/intrinsics: `apply`, `call/cc`, `call-with-current-continuation`, `values`, `call-with-values`, `dynamic-wind` (25 total)
 
-**Next: Milestone 6** — TBD.
+**Milestone 6 (R7RS Standard Library)** — complete.
+
+Adds ~160 new primitives and 10 self-hosted boot definitions covering the
+R7RS (scheme base) standard library.
+
+Changes to existing modules:
+- `Datum`: Mutable `Pair` (inline record), `Str of bytes`, `Error_object`
+  variant with `error_tag`/`error_obj` types; updated `equal`/`pp` for all
+- `Instance`: 180 registered primitives/intrinsics (up from 25), 10 boot
+  definitions (self-hosted Scheme), `handlers` field for exception stack;
+  covers type predicates, equivalence, numbers, pairs/lists, characters,
+  strings, vectors, bytevectors, exceptions, and higher-order procedures
+- `Syntax`: Updated `to_datum` for mutable Pair
+- `Vm`: Updated for mutable Pair
 
 ## Development Workflow
 
@@ -156,7 +169,7 @@ Tests live in `test/` as per-topic files and are run via `dune test`.
 | `test/test_instance.ml` | Instance (8 tests) |
 | `test/test_opcode.ml`   | Opcode (4 tests) |
 | `test/test_compiler.ml` | Compiler (14 tests) |
-| `test/test_vm.ml`       | VM (122 tests: end-to-end via Instance.eval_string) |
+| `test/test_vm.ml`       | VM (189 tests: end-to-end via Instance.eval_string) |
 
 Test dependencies:
 - **alcotest** — unit test framework with readable output

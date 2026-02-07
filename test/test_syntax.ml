@@ -30,7 +30,7 @@ let test_syntax_to_datum_atoms () =
     (Syntax.to_datum (Syntax.make loc1 (Syntax.Flonum 3.14)));
   check_datum "char" (Datum.Char (Uchar.of_int 65))
     (Syntax.to_datum (Syntax.make loc1 (Syntax.Char (Uchar.of_int 65))));
-  check_datum "string" (Datum.Str "hello")
+  check_datum "string" (Datum.Str (Bytes.of_string "hello"))
     (Syntax.to_datum (Syntax.make loc1 (Syntax.Str "hello")));
   check_datum "symbol" (Datum.Symbol "foo")
     (Syntax.to_datum (Syntax.make loc1 (Syntax.Symbol "foo")));
@@ -45,7 +45,7 @@ let test_syntax_to_datum_pair () =
   let car = Syntax.make loc1 (Syntax.Fixnum 1) in
   let cdr = Syntax.make loc1 (Syntax.Fixnum 2) in
   let pair = Syntax.make loc1 (Syntax.Pair (car, cdr)) in
-  check_datum "pair" (Datum.Pair (Datum.Fixnum 1, Datum.Fixnum 2))
+  check_datum "pair" (Datum.Pair { car = Datum.Fixnum 1; cdr = Datum.Fixnum 2 })
     (Syntax.to_datum pair)
 
 let test_syntax_to_datum_vector () =
@@ -75,13 +75,13 @@ let test_syntax_to_datum_nested () =
     Syntax.make loc1 (Syntax.Fixnum 1),
     outer_cdr
   )) in
-  let expected = Datum.Pair (
-    Datum.Fixnum 1,
-    Datum.Pair (
-      Datum.Pair (Datum.Fixnum 2, Datum.Pair (Datum.Fixnum 3, Datum.Nil)),
+  let expected = Datum.Pair { car =
+    Datum.Fixnum 1; cdr =
+    Datum.Pair { car =
+      Datum.Pair { car = Datum.Fixnum 2; cdr = Datum.Pair { car = Datum.Fixnum 3; cdr = Datum.Nil } }; cdr =
       Datum.Nil
-    )
-  ) in
+    }
+  } in
   check_datum "nested" expected (Syntax.to_datum outer)
 
 let test_syntax_equal_datum () =

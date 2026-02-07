@@ -123,27 +123,27 @@ let test_reader_characters () =
   check_datum "#\\) (rparen)" (Datum.Char (Uchar.of_char ')')) (read_one "#\\)")
 
 let test_reader_strings () =
-  check_datum "simple" (Datum.Str "hello") (read_one "\"hello\"");
-  check_datum "empty" (Datum.Str "") (read_one "\"\"");
-  check_datum "spaces" (Datum.Str "hello world") (read_one "\"hello world\"");
-  check_datum "\\n" (Datum.Str "a\nb") (read_one "\"a\\nb\"");
-  check_datum "\\t" (Datum.Str "a\tb") (read_one "\"a\\tb\"");
-  check_datum "\\r" (Datum.Str "a\rb") (read_one "\"a\\rb\"");
-  check_datum "\\\"" (Datum.Str "a\"b") (read_one "\"a\\\"b\"");
-  check_datum "\\\\" (Datum.Str "a\\b") (read_one "\"a\\\\b\"");
-  check_datum "\\a" (Datum.Str "a\007b") (read_one "\"a\\ab\"");
-  check_datum "\\b" (Datum.Str "a\008b") (read_one "\"a\\bb\"");
-  check_datum "\\x41;" (Datum.Str "A") (read_one "\"\\x41;\"");
-  check_datum "\\x3BB;" (Datum.Str "\xCE\xBB") (read_one "\"\\x3BB;\"");
+  check_datum "simple" (Datum.Str (Bytes.of_string "hello")) (read_one "\"hello\"");
+  check_datum "empty" (Datum.Str (Bytes.of_string "")) (read_one "\"\"");
+  check_datum "spaces" (Datum.Str (Bytes.of_string "hello world")) (read_one "\"hello world\"");
+  check_datum "\\n" (Datum.Str (Bytes.of_string "a\nb")) (read_one "\"a\\nb\"");
+  check_datum "\\t" (Datum.Str (Bytes.of_string "a\tb")) (read_one "\"a\\tb\"");
+  check_datum "\\r" (Datum.Str (Bytes.of_string "a\rb")) (read_one "\"a\\rb\"");
+  check_datum "\\\"" (Datum.Str (Bytes.of_string "a\"b")) (read_one "\"a\\\"b\"");
+  check_datum "\\\\" (Datum.Str (Bytes.of_string "a\\b")) (read_one "\"a\\\\b\"");
+  check_datum "\\a" (Datum.Str (Bytes.of_string "a\007b")) (read_one "\"a\\ab\"");
+  check_datum "\\b" (Datum.Str (Bytes.of_string "a\008b")) (read_one "\"a\\bb\"");
+  check_datum "\\x41;" (Datum.Str (Bytes.of_string "A")) (read_one "\"\\x41;\"");
+  check_datum "\\x3BB;" (Datum.Str (Bytes.of_string "\xCE\xBB")) (read_one "\"\\x3BB;\"");
   (* Line continuation: \<intraline-ws>*<line-ending><intraline-ws>* *)
-  check_datum "line cont \\<LF>" (Datum.Str "ab") (read_one "\"a\\\n   b\"");
-  check_datum "line cont \\<sp><LF>" (Datum.Str "ab") (read_one "\"a\\  \n   b\"");
-  check_datum "line cont \\<tab><LF>" (Datum.Str "ab") (read_one "\"a\\\t\n   b\"");
-  check_datum "line cont \\<CR><LF>" (Datum.Str "ab") (read_one "\"a\\\r\n   b\"");
-  check_datum "line cont \\<sp><CR><LF>" (Datum.Str "ab") (read_one "\"a\\  \r\n   b\"");
+  check_datum "line cont \\<LF>" (Datum.Str (Bytes.of_string "ab")) (read_one "\"a\\\n   b\"");
+  check_datum "line cont \\<sp><LF>" (Datum.Str (Bytes.of_string "ab")) (read_one "\"a\\  \n   b\"");
+  check_datum "line cont \\<tab><LF>" (Datum.Str (Bytes.of_string "ab")) (read_one "\"a\\\t\n   b\"");
+  check_datum "line cont \\<CR><LF>" (Datum.Str (Bytes.of_string "ab")) (read_one "\"a\\\r\n   b\"");
+  check_datum "line cont \\<sp><CR><LF>" (Datum.Str (Bytes.of_string "ab")) (read_one "\"a\\  \r\n   b\"");
   (* Bare line endings normalize to \n *)
-  check_datum "bare CR" (Datum.Str "a\nb") (read_one "\"a\rb\"");
-  check_datum "bare CRLF" (Datum.Str "a\nb") (read_one "\"a\r\nb\"")
+  check_datum "bare CR" (Datum.Str (Bytes.of_string "a\nb")) (read_one "\"a\rb\"");
+  check_datum "bare CRLF" (Datum.Str (Bytes.of_string "a\nb")) (read_one "\"a\r\nb\"")
 
 (* Compound data *)
 
@@ -153,24 +153,24 @@ let test_reader_empty_list () =
   check_datum "(\n)" Datum.Nil (read_one "(\n)")
 
 let test_reader_proper_list () =
-  let expected = Datum.Pair (Datum.Fixnum 1,
-    Datum.Pair (Datum.Fixnum 2,
-      Datum.Pair (Datum.Fixnum 3, Datum.Nil))) in
+  let expected = Datum.Pair { car = Datum.Fixnum 1; cdr =
+    Datum.Pair { car = Datum.Fixnum 2; cdr =
+      Datum.Pair { car = Datum.Fixnum 3; cdr = Datum.Nil } } } in
   check_datum "(1 2 3)" expected (read_one "(1 2 3)");
   check_datum "( 1  2  3 )" expected (read_one "( 1  2  3 )")
 
 let test_reader_nested_list () =
-  let inner = Datum.Pair (Datum.Fixnum 2, Datum.Pair (Datum.Fixnum 3, Datum.Nil)) in
-  let expected = Datum.Pair (Datum.Fixnum 1, Datum.Pair (inner, Datum.Nil)) in
+  let inner = Datum.Pair { car = Datum.Fixnum 2; cdr = Datum.Pair { car = Datum.Fixnum 3; cdr = Datum.Nil } } in
+  let expected = Datum.Pair { car = Datum.Fixnum 1; cdr = Datum.Pair { car = inner; cdr = Datum.Nil } } in
   check_datum "(1 (2 3))" expected (read_one "(1 (2 3))")
 
 let test_reader_dotted_pair () =
-  check_datum "(1 . 2)" (Datum.Pair (Datum.Fixnum 1, Datum.Fixnum 2))
+  check_datum "(1 . 2)" (Datum.Pair { car = Datum.Fixnum 1; cdr = Datum.Fixnum 2 })
     (read_one "(1 . 2)")
 
 let test_reader_dotted_list () =
-  let expected = Datum.Pair (Datum.Fixnum 1,
-    Datum.Pair (Datum.Fixnum 2, Datum.Fixnum 3)) in
+  let expected = Datum.Pair { car = Datum.Fixnum 1; cdr =
+    Datum.Pair { car = Datum.Fixnum 2; cdr = Datum.Fixnum 3 } } in
   check_datum "(1 2 . 3)" expected (read_one "(1 2 . 3)")
 
 let test_reader_vector () =
@@ -187,23 +187,23 @@ let test_reader_bytevector () =
 
 let test_reader_quote_shorthands () =
   (* 'x -> (quote x) *)
-  let expected_quote = Datum.Pair (Datum.Symbol "quote",
-    Datum.Pair (Datum.Symbol "x", Datum.Nil)) in
+  let expected_quote = Datum.Pair { car = Datum.Symbol "quote"; cdr =
+    Datum.Pair { car = Datum.Symbol "x"; cdr = Datum.Nil } } in
   check_datum "'x" expected_quote (read_one "'x");
 
   (* `x -> (quasiquote x) *)
-  let expected_quasi = Datum.Pair (Datum.Symbol "quasiquote",
-    Datum.Pair (Datum.Symbol "x", Datum.Nil)) in
+  let expected_quasi = Datum.Pair { car = Datum.Symbol "quasiquote"; cdr =
+    Datum.Pair { car = Datum.Symbol "x"; cdr = Datum.Nil } } in
   check_datum "`x" expected_quasi (read_one "`x");
 
   (* ,x -> (unquote x) *)
-  let expected_unquote = Datum.Pair (Datum.Symbol "unquote",
-    Datum.Pair (Datum.Symbol "x", Datum.Nil)) in
+  let expected_unquote = Datum.Pair { car = Datum.Symbol "unquote"; cdr =
+    Datum.Pair { car = Datum.Symbol "x"; cdr = Datum.Nil } } in
   check_datum ",x" expected_unquote (read_one ",x");
 
   (* ,@x -> (unquote-splicing x) *)
-  let expected_splice = Datum.Pair (Datum.Symbol "unquote-splicing",
-    Datum.Pair (Datum.Symbol "x", Datum.Nil)) in
+  let expected_splice = Datum.Pair { car = Datum.Symbol "unquote-splicing"; cdr =
+    Datum.Pair { car = Datum.Symbol "x"; cdr = Datum.Nil } } in
   check_datum ",@x" expected_splice (read_one ",@x")
 
 (* Comments *)
@@ -221,7 +221,7 @@ let test_reader_datum_comment () =
   check_datum "#;(1 2) 3" (Datum.Fixnum 3) (read_one "#;(1 2) 3");
   check_datum "nested #;" (Datum.Fixnum 3) (read_one "#;#;1 2 3");
   (* Inside list *)
-  let expected = Datum.Pair (Datum.Fixnum 1, Datum.Pair (Datum.Fixnum 3, Datum.Nil)) in
+  let expected = Datum.Pair { car = Datum.Fixnum 1; cdr = Datum.Pair { car = Datum.Fixnum 3; cdr = Datum.Nil } } in
   check_datum "(1 #;2 3)" expected (read_one "(1 #;2 3)")
 
 let test_reader_fold_case_directive () =
@@ -245,12 +245,12 @@ let test_reader_fold_case_directive () =
 let test_reader_datum_labels () =
   check_datum "#0=42 -> 42" (Datum.Fixnum 42) (read_one "#0=42");
   (* Define and reference within same datum *)
-  let expected = Datum.Pair (Datum.Fixnum 42, Datum.Pair (Datum.Fixnum 42, Datum.Nil)) in
+  let expected = Datum.Pair { car = Datum.Fixnum 42; cdr = Datum.Pair { car = Datum.Fixnum 42; cdr = Datum.Nil } } in
   check_datum "(#0=42 #0#)" expected (read_one "(#0=42 #0#)");
   (* Multiple labels *)
-  let expected2 = Datum.Pair (Datum.Symbol "a",
-    Datum.Pair (Datum.Symbol "b",
-      Datum.Pair (Datum.Symbol "a", Datum.Nil))) in
+  let expected2 = Datum.Pair { car = Datum.Symbol "a"; cdr =
+    Datum.Pair { car = Datum.Symbol "b"; cdr =
+      Datum.Pair { car = Datum.Symbol "a"; cdr = Datum.Nil } } } in
   check_datum "(#0=a #1=b #0#)" expected2 (read_one "(#0=a #1=b #0#)")
 
 (* Error cases *)
@@ -308,14 +308,14 @@ let test_reader_complex_expr () =
   let d = read_one code in
   (* Just check it parses and has the right structure *)
   match d with
-  | Datum.Pair (Datum.Symbol "define", _) -> ()
+  | Datum.Pair { car = Datum.Symbol "define"; _ } -> ()
   | _ -> Alcotest.fail "expected (define ...)"
 
 let test_reader_all_types () =
   let code = "(#t #f 42 3.14 #\\a \"str\" sym () #(1) #u8(1))" in
   let d = read_one code in
   match d with
-  | Datum.Pair _ -> () (* It's a list, that's all we check *)
+  | Datum.Pair _ -> ()
   | _ -> Alcotest.fail "expected list"
 
 (* QCheck round-trip tests *)

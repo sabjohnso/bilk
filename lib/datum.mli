@@ -16,15 +16,25 @@ type intrinsic_id =
   | Intrinsic_call_with_values  (** [call-with-values] *)
   | Intrinsic_dynamic_wind      (** [dynamic-wind] *)
 
+(** Tag distinguishing error types. *)
+type error_tag = General_error | Read_error | File_error
+
+(** An R7RS error object. *)
+type error_obj = {
+  err_message : string;        (** The error message *)
+  err_irritants : t list;      (** The irritant values *)
+  err_tag : error_tag;         (** The error type tag *)
+}
+
 (** The Scheme value type.  Exposed so callers can pattern‐match on values. *)
-type t =
+and t =
   | Bool of bool               (** [#t] / [#f] *)
   | Fixnum of int              (** Exact integer (machine word) *)
   | Flonum of float            (** Inexact real *)
   | Char of Uchar.t            (** Unicode character *)
-  | Str of string              (** Immutable string *)
+  | Str of bytes               (** Mutable string (bytes) *)
   | Symbol of string           (** Symbol (uninterned at this level) *)
-  | Pair of t * t              (** Cons cell *)
+  | Pair of { mutable car : t; mutable cdr : t }  (** Mutable cons cell *)
   | Vector of t array          (** Mutable vector *)
   | Bytevector of bytes        (** Mutable bytevector *)
   | Nil                        (** Empty list [()] *)
@@ -34,6 +44,7 @@ type t =
   | Closure of closure         (** User-defined procedure *)
   | Continuation of continuation (** First-class continuation *)
   | Values of t list           (** Multiple return values *)
+  | Error_object of error_obj  (** R7RS error object *)
 
 (** A built-in primitive function. *)
 and primitive = {

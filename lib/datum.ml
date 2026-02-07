@@ -4,14 +4,22 @@ type intrinsic_id =
   | Intrinsic_call_with_values
   | Intrinsic_dynamic_wind
 
-type t =
+type error_tag = General_error | Read_error | File_error
+
+type error_obj = {
+  err_message : string;
+  err_irritants : t list;
+  err_tag : error_tag;
+}
+
+and t =
   | Bool of bool
   | Fixnum of int
   | Flonum of float
   | Char of Uchar.t
-  | Str of string
+  | Str of bytes
   | Symbol of string
-  | Pair of t * t
+  | Pair of { mutable car : t; mutable cdr : t }
   | Vector of t array
   | Bytevector of bytes
   | Nil
@@ -21,6 +29,7 @@ type t =
   | Closure of closure
   | Continuation of continuation
   | Values of t list
+  | Error_object of error_obj
 
 and primitive = {
   prim_name : string;
@@ -75,9 +84,9 @@ let rec equal a b =
   | Fixnum x, Fixnum y -> x = y
   | Flonum x, Flonum y -> Float.equal x y
   | Char x, Char y -> Uchar.equal x y
-  | Str x, Str y -> String.equal x y
+  | Str x, Str y -> Bytes.equal x y
   | Symbol x, Symbol y -> String.equal x y
-  | Pair (a1, a2), Pair (b1, b2) -> equal a1 b1 && equal a2 b2
+  | Pair { car = a1; cdr = a2 }, Pair { car = b1; cdr = b2 } -> equal a1 b1 && equal a2 b2
   | Vector xs, Vector ys ->
     Array.length xs = Array.length ys
     && Array.for_all2 equal xs ys
@@ -91,6 +100,11 @@ let rec equal a b =
   | Values xs, Values ys ->
     List.length xs = List.length ys
     && List.for_all2 equal xs ys
+  | Error_object a, Error_object b ->
+    String.equal a.err_message b.err_message
+    && a.err_tag = b.err_tag
+    && List.length a.err_irritants = List.length b.err_irritants
+    && List.for_all2 equal a.err_irritants b.err_irritants
   | _ -> false
 
 let rec pp fmt = function
@@ -106,9 +120,9 @@ let rec pp fmt = function
       let s = string_of_float f in
       Format.fprintf fmt "%s" s
   | Char c -> Format.fprintf fmt "#\\x%04X" (Uchar.to_int c)
-  | Str s -> Format.fprintf fmt "%S" s
+  | Str s -> Format.fprintf fmt "%S" (Bytes.to_string s)
   | Symbol s -> Format.fprintf fmt "%s" s
-  | Pair (car, cdr) ->
+  | Pair { car; cdr } ->
     Format.fprintf fmt "(";
     pp fmt car;
     pp_tail fmt cdr;
@@ -136,10 +150,11 @@ let rec pp fmt = function
   | Closure c -> Format.fprintf fmt "#<closure %s>" c.clos_name
   | Continuation _ -> Format.fprintf fmt "#<continuation>"
   | Values vs -> Format.fprintf fmt "#<values %d>" (List.length vs)
+  | Error_object e -> Format.fprintf fmt "#<error \"%s\">" e.err_message
 
 and pp_tail fmt = function
   | Nil -> ()
-  | Pair (car, cdr) ->
+  | Pair { car; cdr } ->
     Format.fprintf fmt " ";
     pp fmt car;
     pp_tail fmt cdr
@@ -151,12 +166,12 @@ let to_string d =
   Format.asprintf "%a" pp d
 
 let rec pp_display fmt = function
-  | Str s -> Format.pp_print_string fmt s
+  | Str s -> Format.pp_print_string fmt (Bytes.to_string s)
   | Char c ->
     let buf = Buffer.create 4 in
     Buffer.add_utf_8_uchar buf c;
     Format.pp_print_string fmt (Buffer.contents buf)
-  | Pair (car, cdr) ->
+  | Pair { car; cdr } ->
     Format.fprintf fmt "(";
     pp_display fmt car;
     pp_display_tail fmt cdr;
@@ -173,7 +188,7 @@ let rec pp_display fmt = function
 
 and pp_display_tail fmt = function
   | Nil -> ()
-  | Pair (car, cdr) ->
+  | Pair { car; cdr } ->
     Format.fprintf fmt " ";
     pp_display fmt car;
     pp_display_tail fmt cdr
