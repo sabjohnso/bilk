@@ -73,6 +73,7 @@ type pattern =
   | Pat_const of Syntax.datum
   | Pat_pair of pattern * pattern
   | Pat_ellipsis of pattern list * pattern * pattern list
+  | Pat_ellipsis_dot of pattern list * pattern * pattern list * pattern
   | Pat_vector of pattern list
   | Pat_vector_ellipsis of pattern list * pattern * pattern list
   | Pat_nil
@@ -100,24 +101,34 @@ let rec parse_pattern ~literals (s : Syntax.t) : pattern =
     Pat_const s.datum
   | Syntax.Nil -> Pat_nil
   | Syntax.Pair _ ->
-    let elts = syntax_list_to_list s in
     (* Check for improper list *)
-    let is_proper = (match s.datum with
-      | Syntax.Pair _ ->
-        let rec check s = match s.Syntax.datum with
-          | Syntax.Nil -> true
-          | Syntax.Pair (_, cdr) -> check cdr
-          | _ -> false
-        in check s
-      | _ -> true) in
-    if is_proper then
+    let rec check_proper s = match s.Syntax.datum with
+      | Syntax.Nil -> true
+      | Syntax.Pair (_, cdr) -> check_proper cdr
+      | _ -> false
+    in
+    if check_proper s then
+      let elts = syntax_list_to_list s in
       parse_list_pattern ~literals elts s.loc
-    else
-      (* Dotted pair pattern *)
-      (match s.datum with
-       | Syntax.Pair (car, cdr) ->
-         Pat_pair (parse_pattern ~literals car, parse_pattern ~literals cdr)
-       | _ -> assert false)
+    else begin
+      (* Improper list — collect proper elements and dotted tail *)
+      let rec collect_improper s =
+        match s.Syntax.datum with
+        | Syntax.Pair (car, cdr) ->
+          let (elts, tail) = collect_improper cdr in
+          (car :: elts, tail)
+        | _ -> ([], s)
+      in
+      let (elts, tail) = collect_improper s in
+      let has_ell = List.exists is_ellipsis elts in
+      if has_ell then
+        parse_dotted_ellipsis_pattern ~literals elts tail s.loc
+      else
+        (* No ellipsis — build nested pairs ending with tail *)
+        List.fold_right (fun elt acc ->
+          Pat_pair (parse_pattern ~literals elt, acc)
+        ) elts (parse_pattern ~literals tail)
+    end
   | Syntax.Vector elts ->
     let pats = Array.to_list (Array.map (parse_pattern ~literals) elts) in
     (* Check for ellipsis in vector *)
@@ -176,6 +187,26 @@ and parse_vector_ellipsis_pattern ~literals:_ pats =
   let (pre, rep, post) = find_ell [] pats in
   Pat_vector_ellipsis (pre, rep, post)
 
+and parse_dotted_ellipsis_pattern ~literals elts tail loc =
+  let rec find_ell pre = function
+    | [] -> assert false
+    | elt :: rest ->
+      if is_ellipsis elt then
+        (match pre with
+         | [] ->
+           compile_error loc "ellipsis must follow a pattern"
+         | last :: before ->
+           (List.rev before, last, rest))
+      else
+        find_ell (elt :: pre) rest
+  in
+  let (before, repeated_syn, after) = find_ell [] elts in
+  let pre_pats = List.map (parse_pattern ~literals) before in
+  let rep_pat = parse_pattern ~literals repeated_syn in
+  let post_pats = List.map (parse_pattern ~literals) after in
+  let tail_pat = parse_pattern ~literals tail in
+  Pat_ellipsis_dot (pre_pats, rep_pat, post_pats, tail_pat)
+
 (* --- Pattern matching --- *)
 
 let rec match_pattern (pat : pattern) (s : Syntax.t) (env : match_env) : bool =
@@ -198,6 +229,8 @@ let rec match_pattern (pat : pattern) (s : Syntax.t) (env : match_env) : bool =
      | _ -> false)
   | Pat_ellipsis (pre, rep, post) ->
     match_ellipsis pre rep post s env
+  | Pat_ellipsis_dot (pre, rep, post, tail) ->
+    match_ellipsis_dot pre rep post tail s env
   | Pat_vector pats ->
     (match s.datum with
      | Syntax.Vector elts ->
@@ -312,6 +345,59 @@ and match_ellipsis pre rep post (s : Syntax.t) env =
     end
   end
 
+and match_ellipsis_dot pre rep post tail (s : Syntax.t) env =
+  (* Collect proper elements and the improper tail *)
+  let rec collect s =
+    match s.Syntax.datum with
+    | Syntax.Pair (car, cdr) ->
+      let (elts, tl) = collect cdr in
+      (car :: elts, tl)
+    | _ -> ([], s)
+  in
+  let (elts, tail_syn) = collect s in
+  let n_pre = List.length pre in
+  let n_post = List.length post in
+  let n_total = List.length elts in
+  if n_total < n_pre + n_post then false
+  else begin
+    let pre_elts = List.filteri (fun i _ -> i < n_pre) elts in
+    let ok = List.for_all2 (fun p e -> match_pattern p e env) pre pre_elts in
+    if not ok then false
+    else begin
+      let post_elts = List.filteri (fun i _ -> i >= n_total - n_post) elts in
+      let ok2 = List.for_all2 (fun p e -> match_pattern p e env) post post_elts in
+      if not ok2 then false
+      else begin
+        let rep_elts = List.filteri (fun i _ ->
+          i >= n_pre && i < n_total - n_post) elts in
+        let rep_vars = collect_pattern_vars rep in
+        List.iter (fun name ->
+          if not (Hashtbl.mem env name) then
+            Hashtbl.replace env name (Repeated [])
+        ) rep_vars;
+        let sub_envs = List.map (fun elt ->
+          let sub = Hashtbl.create 8 in
+          let ok = match_pattern rep elt sub in
+          (ok, sub)
+        ) rep_elts in
+        let all_ok = List.for_all fst sub_envs in
+        if not all_ok then false
+        else begin
+          List.iter (fun name ->
+            let vals = List.map (fun (_, sub) ->
+              match Hashtbl.find_opt sub name with
+              | Some v -> v
+              | None -> Single { Syntax.datum = Syntax.Nil; loc = Loc.none }
+            ) sub_envs in
+            Hashtbl.replace env name (Repeated vals)
+          ) rep_vars;
+          (* Match the dotted tail *)
+          match_pattern tail tail_syn env
+        end
+      end
+    end
+  end
+
 and collect_pattern_vars pat =
   match pat with
   | Pat_var name -> [name]
@@ -321,6 +407,11 @@ and collect_pattern_vars pat =
     List.concat_map collect_pattern_vars pre
     @ collect_pattern_vars rep2
     @ List.concat_map collect_pattern_vars post
+  | Pat_ellipsis_dot (pre, rep2, post, tail) ->
+    List.concat_map collect_pattern_vars pre
+    @ collect_pattern_vars rep2
+    @ List.concat_map collect_pattern_vars post
+    @ collect_pattern_vars tail
   | Pat_vector pats ->
     List.concat_map collect_pattern_vars pats
   | Pat_vector_ellipsis (pre, rep2, post) ->
@@ -1298,9 +1389,17 @@ and expand_core ~syn_env ~gensym name (s : Syntax.t) : Syntax.t =
   | _ -> expand_application ~syn_env ~gensym s
 
 and expand_application ~syn_env ~gensym (s : Syntax.t) : Syntax.t =
-  let args = syntax_list_to_list s in
-  let args' = List.map (expand ~syn_env ~gensym) args in
-  list_to_syntax s.loc args'
+  (* Walk pairs directly to preserve improper tails from macro output *)
+  let rec walk s =
+    match s.Syntax.datum with
+    | Syntax.Nil -> s
+    | Syntax.Pair (car, cdr) ->
+      let car' = expand ~syn_env ~gensym car in
+      let cdr' = walk cdr in
+      { s with datum = Syntax.Pair (car', cdr') }
+    | _ -> expand ~syn_env ~gensym s
+  in
+  walk s
 
 and expand_bindings ~syn_env ~gensym bindings_syn =
   let bindings = syntax_list_to_list bindings_syn in

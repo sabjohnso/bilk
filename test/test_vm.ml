@@ -1590,6 +1590,125 @@ let test_internal_define_syntax_scope () =
          (local-mac 5))";
       "(local-mac 10)"])
 
+(* --- Coverage: ellipsis with pre/post elements --- *)
+
+let test_ellipsis_pre_post () =
+  check_datum "ellipsis pre/post" (Datum.Fixnum 15)
+    (eval_seq [
+      "(define-syntax mid \
+         (syntax-rules () \
+           ((_ a x ... b) (+ a b x ...))))";
+      "(mid 1 2 3 4 5)"])
+
+let test_ellipsis_pre_post_zero () =
+  check_datum "ellipsis pre/post zero reps"
+    (Datum.Fixnum 30)
+    (eval_seq [
+      "(define-syntax wrap \
+         (syntax-rules () \
+           ((_ a x ... b) (+ a b))))";
+      "(wrap 10 20)"])
+
+(* --- Coverage: vector pre/post ellipsis --- *)
+
+let test_vector_pre_post_ellipsis () =
+  check_datum "vector pre/post ellipsis"
+    (Datum.Fixnum 100)
+    (eval_seq [
+      "(define-syntax vec-mid \
+         (syntax-rules () \
+           ((_ #(a x ... b)) (+ a b x ...))))";
+      "(vec-mid #(10 20 30 40))"])
+
+let test_vector_pre_post_ellipsis_zero () =
+  check_datum "vector pre/post zero reps"
+    (Datum.Fixnum 30)
+    (eval_seq [
+      "(define-syntax vec-wrap \
+         (syntax-rules () \
+           ((_ #(a x ... b)) (+ a b))))";
+      "(vec-wrap #(10 20))"])
+
+(* --- Coverage: quasiquote splicing edge cases --- *)
+
+let test_quasiquote_splice_empty () =
+  check_datum "quasiquote splice empty list"
+    (eval "(quote (1 2))")
+    (eval "(let ((xs '())) `(1 ,@xs 2))")
+
+let test_quasiquote_splice_tail () =
+  check_datum "quasiquote splice at end"
+    (eval "(quote (1 2 3 4))")
+    (eval "(let ((xs '(3 4))) `(1 2 ,@xs))")
+
+(* --- Coverage: quasiquote inside syntax-rules template --- *)
+
+let test_quasiquote_in_macro () =
+  check_datum "quasiquote in macro template"
+    (eval "(quote (+ 5 1))")
+    (eval_seq [
+      "(define-syntax make-expr \
+         (syntax-rules () \
+           ((_ n) `(+ ,n 1))))";
+      "(make-expr 5)"])
+
+(* --- Coverage: macro-generating macros --- *)
+
+let test_macro_generating_macro () =
+  check_datum "macro-generating macro" (Datum.Fixnum 10)
+    (eval_seq [
+      "(define-syntax def-const \
+         (syntax-rules () \
+           ((_ name val) \
+            (define-syntax name \
+              (syntax-rules () \
+                ((_ ) val))))))";
+      "(def-const ten 10)";
+      "(ten)"])
+
+(* --- Coverage: use-site shadowing hygiene --- *)
+
+let test_hygiene_use_site_shadow () =
+  check_datum "use-site shadow macro-introduced"
+    (Datum.Fixnum 99)
+    (eval_seq [
+      "(define-syntax my-let1 \
+         (syntax-rules () \
+           ((_ val body) \
+            (let ((x val)) body))))";
+      "(let ((x 99)) (my-let1 42 x))"])
+
+(* --- Coverage: multiple ellipsis vars (zip) --- *)
+
+let test_ellipsis_zip () =
+  check_datum "zip two ellipsis vars"
+    (eval "(quote ((1 4) (2 5) (3 6)))")
+    (eval_seq [
+      "(define-syntax zip \
+         (syntax-rules () \
+           ((_ (a ...) (b ...)) \
+            (list (list a b) ...))))";
+      "(zip (1 2 3) (4 5 6))"])
+
+(* --- Coverage: improper list pattern with ellipsis --- *)
+
+let test_ellipsis_dot_pattern () =
+  check_datum "ellipsis dot pattern" (Datum.Fixnum 6)
+    (eval_seq [
+      "(define-syntax ell-dot \
+         (syntax-rules () \
+           ((_ x ... . rest) (+ x ...))))";
+      "(ell-dot 1 2 3)"])
+
+(* --- Coverage: multiple define-syntax in same body --- *)
+
+let test_multi_define_syntax_body () =
+  check_datum "multiple define-syntax in body" (Datum.Fixnum 10)
+    (eval "(let () \
+             (define-syntax inc (syntax-rules () ((inc x) (+ x 1)))) \
+             (define-syntax dec (syntax-rules () ((dec x) (- x 1)))) \
+             (+ (inc 5) (dec 5)))")
+
 let () =
   Alcotest.run "VM"
     [ ("self-evaluating",
@@ -1924,5 +2043,17 @@ let () =
        ; Alcotest.test_case "dotted pair rest" `Quick test_macro_dotted_pair_rest
        ; Alcotest.test_case "nested ellipsis" `Quick test_macro_nested_ellipsis
        ; Alcotest.test_case "internal define-syntax scope" `Quick test_internal_define_syntax_scope
+       ; Alcotest.test_case "ellipsis pre/post" `Quick test_ellipsis_pre_post
+       ; Alcotest.test_case "ellipsis pre/post zero" `Quick test_ellipsis_pre_post_zero
+       ; Alcotest.test_case "vector pre/post ellipsis" `Quick test_vector_pre_post_ellipsis
+       ; Alcotest.test_case "vector pre/post zero" `Quick test_vector_pre_post_ellipsis_zero
+       ; Alcotest.test_case "splice empty list" `Quick test_quasiquote_splice_empty
+       ; Alcotest.test_case "splice at tail" `Quick test_quasiquote_splice_tail
+       ; Alcotest.test_case "quasiquote in macro" `Quick test_quasiquote_in_macro
+       ; Alcotest.test_case "macro-generating macro" `Quick test_macro_generating_macro
+       ; Alcotest.test_case "use-site shadow hygiene" `Quick test_hygiene_use_site_shadow
+       ; Alcotest.test_case "ellipsis zip" `Quick test_ellipsis_zip
+       ; Alcotest.test_case "ellipsis dot pattern" `Quick test_ellipsis_dot_pattern
+       ; Alcotest.test_case "multi define-syntax body" `Quick test_multi_define_syntax_body
        ])
     ]
