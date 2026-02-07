@@ -76,6 +76,30 @@ val read_lib_fasl : Symbol.table -> string -> lib_fasl
 (** [read_lib_fasl symbols path] reads a library FASL from a file.
     @raise Fasl_error on format or I/O errors. *)
 
+(** {1 Program FASL} *)
+
+(** A serialized program (ahead-of-time compiled top-level forms). *)
+type program_fasl = {
+  declarations : lib_declaration list;
+  (** The program's top-level declarations (imports and code) in order. *)
+}
+
+val write_program_fasl : string -> program_fasl -> unit
+(** [write_program_fasl path prog] writes a program FASL to a file.
+    @raise Fasl_error if any code object contains unserializable constants. *)
+
+val read_program_fasl : Symbol.table -> string -> program_fasl
+(** [read_program_fasl symbols path] reads a program FASL from a file.
+    @raise Fasl_error on format or I/O errors. *)
+
+val write_program_bytes : program_fasl -> bytes
+(** [write_program_bytes prog] serializes a program FASL to bytes.
+    @raise Fasl_error if any code object contains unserializable constants. *)
+
+val read_program_bytes : Symbol.table -> bytes -> program_fasl
+(** [read_program_bytes symbols data] deserializes a program FASL from bytes.
+    @raise Fasl_error on format or version errors. *)
+
 (** {1 Cache helpers} *)
 
 val fasl_path_for : string -> string

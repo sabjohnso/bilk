@@ -2264,3 +2264,41 @@ let load_file inst path =
 let load_fasl inst path =
   let code = Fasl.read_code_from_file inst.symbols path in
   ignore (Vm.execute ~winds:inst.winds inst.global_env code)
+
+(* --- Ahead-of-time compilation --- *)
+
+let compile_port inst port =
+  let decls = ref [] in
+  let rec loop () =
+    let expr = Reader.read_syntax inst.readtable port in
+    match expr with
+    | { Syntax.datum = Syntax.Eof; _ } -> ()
+    | _ ->
+      (match classify_top_level expr with
+       | Import import_sets ->
+         List.iter (fun iset_syntax ->
+           let iset = Library.parse_import_set iset_syntax in
+           process_import_set inst iset;
+           decls := Fasl.Lib_import iset :: !decls
+         ) import_sets
+       | Define_library (name_syn, lib_decls) ->
+         process_define_library inst name_syn lib_decls
+       | Expression ->
+         let expanded = expand_with_callbacks inst expr in
+         let code = Compiler.compile inst.symbols expanded in
+         decls := Fasl.Lib_code code :: !decls);
+      loop ()
+  in
+  loop ();
+  { Fasl.declarations = List.rev !decls }
+
+let run_program inst prog =
+  let last = ref Datum.Void in
+  List.iter (fun decl ->
+    match decl with
+    | Fasl.Lib_import iset ->
+      process_import_set inst iset
+    | Fasl.Lib_code code ->
+      last := Vm.execute ~winds:inst.winds inst.global_env code
+  ) prog.Fasl.declarations;
+  !last

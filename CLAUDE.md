@@ -204,6 +204,22 @@ Changes to existing modules:
   `load_fasl` (load and execute a pre-compiled FASL file)
 - `Expander`: Added `var_binding` (variable binding for registration)
 
+**Milestone 12 (Ahead-of-Time Compiler)** — complete.
+
+No new modules.  Adds `wile compile` and `wile run` CLI subcommands for
+ahead-of-time compilation and execution of program FASL files.
+
+Changes to existing modules:
+- `Fasl`: Added `program_fasl` type (format_type=2), `write_program_fasl`,
+  `read_program_fasl`, `write_program_bytes`, `read_program_bytes`
+- `Instance`: Added `compile_port` (reads all top-level forms, processes
+  imports at compile time, records declarations without executing),
+  `run_program` (replays a program FASL: processes imports and executes code)
+- `bin/main.ml`: Restructured CLI with `Cmd.group`; added `compile`
+  subcommand (`wile compile file.scm [-o out.fasl] [--exe]`) and `run`
+  subcommand (`wile run file.fasl`); `--exe` generates standalone native
+  executable via `ocamlfind ocamlopt`
+
 ## Development Workflow
 
 **This project uses TDD (Test-Driven Development).** Follow this cycle:
@@ -247,6 +263,7 @@ Tests live in `test/` as per-topic files and are run via `dune test`.
 | `test/test_expander.ml` | Expander (11 tests) |
 | `test/test_library.ml` | Library (25 tests) |
 | `test/test_fasl.ml` | Fasl (40 tests) |
+| `test/test_aot.ml` | AOT compiler (22 tests) |
 
 Test dependencies:
 - **alcotest** — unit test framework with readable output

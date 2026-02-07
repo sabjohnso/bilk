@@ -21,6 +21,7 @@ let handle_errors f =
   | Reader.Read_error (loc, msg) -> format_loc_error loc msg; 1
   | Compiler.Compile_error (loc, msg) -> format_loc_error loc msg; 1
   | Vm.Runtime_error msg -> format_error msg; 1
+  | Fasl.Fasl_error msg -> format_error msg; 1
   | Sys_error msg -> format_error msg; 1
 
 (* --- Instance setup --- *)
@@ -29,6 +30,12 @@ let make_instance () =
   let inst = Instance.create () in
   inst.fasl_cache := true;
   inst
+
+let dir_for_path path =
+  Filename.dirname (
+    if Filename.is_relative path then Filename.concat (Sys.getcwd ()) path
+    else path
+  )
 
 (* --- Expression mode (-e) --- *)
 
@@ -46,14 +53,86 @@ let run_expr expr =
 
 let run_file path =
   let inst = make_instance () in
-  let dir = Filename.dirname (
-    if Filename.is_relative path then Filename.concat (Sys.getcwd ()) path
-    else path
-  ) in
-  inst.search_paths := [dir];
+  inst.search_paths := [dir_for_path path];
   handle_errors (fun () ->
     let port = Port.of_file path in
     ignore (Instance.eval_port inst port))
+
+(* --- Compile subcommand --- *)
+
+let escape_string_literal s =
+  let buf = Buffer.create (String.length s * 4) in
+  String.iter (fun c ->
+    let code = Char.code c in
+    if code < 32 || code > 126 || c = '\\' || c = '"' then
+      Buffer.add_string buf (Printf.sprintf "\\x%02x" code)
+    else
+      Buffer.add_char buf c
+  ) s;
+  Buffer.contents buf
+
+let generate_executable prog output_path =
+  let fasl_bytes = Fasl.write_program_bytes prog in
+  let escaped = escape_string_literal (Bytes.to_string fasl_bytes) in
+  let ocaml_src = Printf.sprintf
+    "let fasl_data = \"%s\"\n\
+     let () =\n\
+     \  let inst = Wile.Instance.create () in\n\
+     \  inst.Wile.Instance.fasl_cache := true;\n\
+     \  let prog = Wile.Fasl.read_program_bytes\n\
+     \    inst.Wile.Instance.symbols (Bytes.of_string fasl_data) in\n\
+     \  ignore (Wile.Instance.run_program inst prog)\n"
+    escaped
+  in
+  let tmp_ml = Filename.temp_file "wile_aot_" ".ml" in
+  Fun.protect ~finally:(fun () ->
+    (try Sys.remove tmp_ml with Sys_error _ -> ()))
+    (fun () ->
+      let oc = open_out tmp_ml in
+      Fun.protect ~finally:(fun () -> close_out oc) (fun () ->
+        output_string oc ocaml_src);
+      let cmd = Printf.sprintf
+        "ocamlfind ocamlopt -package wile -linkpkg %s -o %s 2>&1"
+        (Filename.quote tmp_ml) (Filename.quote output_path)
+      in
+      let exit_code = Sys.command cmd in
+      if exit_code <> 0 then
+        failwith (Printf.sprintf
+          "ocamlfind ocamlopt failed (exit %d). \
+           Ensure wile is installed: opam install ."
+          exit_code))
+
+let compile_file path output exe =
+  let inst = make_instance () in
+  inst.search_paths := [dir_for_path path];
+  handle_errors (fun () ->
+    let port = Port.of_file path in
+    let prog = Instance.compile_port inst port in
+    if exe then begin
+      let out = match output with
+        | Some o -> o
+        | None -> Filename.chop_extension path
+      in
+      generate_executable prog out
+    end else begin
+      let out = match output with
+        | Some o -> o
+        | None -> Filename.chop_extension path ^ ".fasl"
+      in
+      Fasl.write_program_fasl out prog
+    end)
+
+(* --- Run FASL subcommand --- *)
+
+let run_fasl path =
+  let inst = make_instance () in
+  inst.search_paths := [dir_for_path path];
+  handle_errors (fun () ->
+    let prog = Fasl.read_program_fasl inst.symbols path in
+    let result = Instance.run_program inst prog in
+    match result with
+    | Datum.Void -> ()
+    | v -> print_endline (Datum.to_string v))
 
 (* --- REPL commands --- *)
 
@@ -196,6 +275,7 @@ let run_repl () =
 
 let () =
   let open Cmdliner in
+  (* Default command: REPL / file / -e *)
   let expr_opt =
     Arg.(value & opt (some string) None &
          info ["e"] ~docv:"EXPR" ~doc:"Evaluate expression and print result.")
@@ -204,17 +284,66 @@ let () =
     Arg.(value & pos 0 (some string) None &
          info [] ~docv:"FILE" ~doc:"Scheme source file to execute.")
   in
-  let main_cmd expr file =
+  let default_cmd expr file =
     match expr, file with
     | Some e, _ -> exit (run_expr e)
     | _, Some f -> exit (run_file f)
     | None, None -> run_repl ()
   in
-  let term = Term.(const main_cmd $ expr_opt $ file_arg) in
-  let info =
+  let default_term = Term.(const default_cmd $ expr_opt $ file_arg) in
+  (* compile subcommand *)
+  let compile_output =
+    Arg.(value & opt (some string) None &
+         info ["o"] ~docv:"OUTPUT" ~doc:"Output file path.")
+  in
+  let compile_exe =
+    Arg.(value & flag &
+         info ["exe"] ~doc:"Generate a standalone native executable \
+           (requires wile to be installed as an opam package).")
+  in
+  let compile_file_arg =
+    Arg.(required & pos 0 (some string) None &
+         info [] ~docv:"FILE" ~doc:"Scheme source file to compile.")
+  in
+  let compile_cmd_fn file output exe =
+    exit (compile_file file output exe)
+  in
+  let compile_term = Term.(const compile_cmd_fn $ compile_file_arg $ compile_output $ compile_exe) in
+  let compile_info =
+    Cmd.info "compile" ~version
+      ~doc:"Compile a Scheme source file to a program FASL"
+      ~man:[`S "DESCRIPTION";
+            `P "Reads a Scheme source file, processes it through Reader, \
+                Expander, and Compiler, and writes a program FASL file. \
+                Use $(b,--exe) to generate a standalone native executable."]
+  in
+  let compile_sub = Cmd.v compile_info compile_term in
+  (* run subcommand *)
+  let run_file_arg =
+    Arg.(required & pos 0 (some string) None &
+         info [] ~docv:"FILE" ~doc:"Program FASL file to execute.")
+  in
+  let run_cmd_fn file =
+    exit (run_fasl file)
+  in
+  let run_term = Term.(const run_cmd_fn $ run_file_arg) in
+  let run_info =
+    Cmd.info "run" ~version
+      ~doc:"Execute a program FASL file"
+      ~man:[`S "DESCRIPTION";
+            `P "Loads and executes a program FASL file produced by \
+                $(b,wile compile)."]
+  in
+  let run_sub = Cmd.v run_info run_term in
+  (* Group *)
+  let group_info =
     Cmd.info "wile" ~version
       ~doc:"Wile Scheme — an R7RS implementation"
       ~man:[`S "DESCRIPTION";
-            `P "Run Scheme code interactively, from a file, or from a command-line expression."]
+            `P "Run Scheme code interactively, from a file, or from a \
+                command-line expression.";
+            `S "COMMANDS";
+            `P "Use $(b,wile compile) to ahead-of-time compile Scheme source.";
+            `P "Use $(b,wile run) to execute a compiled program FASL."]
   in
-  exit (Cmd.eval (Cmd.v info term))
+  exit (Cmd.eval (Cmd.group ~default:default_term group_info [compile_sub; run_sub]))

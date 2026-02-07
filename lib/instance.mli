@@ -117,3 +117,20 @@ val eval_port : t -> Port.t -> Datum.t
     @raise Reader.Read_error on malformed input.
     @raise Compiler.Compile_error on malformed syntax or macro expansion error.
     @raise Vm.Runtime_error on runtime errors. *)
+
+(** {1 Ahead-of-time compilation} *)
+
+val compile_port : t -> Port.t -> Fasl.program_fasl
+(** [compile_port inst port] reads all top-level forms from [port] and
+    compiles them into a program FASL.  Imports are processed at compile time
+    for binding resolution and recorded as [Lib_import] declarations.
+    [define-library] forms are processed at compile time but not recorded.
+    Expressions are expanded, compiled, and recorded as [Lib_code] declarations.
+    @raise Reader.Read_error on malformed input.
+    @raise Compiler.Compile_error on malformed syntax or macro expansion error. *)
+
+val run_program : t -> Fasl.program_fasl -> Datum.t
+(** [run_program inst prog] replays a program FASL: processes each import
+    and executes each code object in order.  Returns the last result, or
+    [Void] if the program is empty.
+    @raise Vm.Runtime_error on runtime errors. *)

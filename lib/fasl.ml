@@ -436,6 +436,44 @@ let read_lib_fasl symbols path =
     read_lib_declaration symbols data pos) in
   { lib_name; has_syntax_exports; exports; declarations }
 
+(* --- Program FASL --- *)
+
+type program_fasl = {
+  declarations : lib_declaration list;
+}
+
+let write_program_fasl_to_buf buf prog =
+  write_header buf 2;
+  write_u16 buf (List.length prog.declarations);
+  List.iter (write_lib_declaration buf) prog.declarations
+
+let write_program_fasl path prog =
+  let buf = Buffer.create 512 in
+  write_program_fasl_to_buf buf prog;
+  write_to_file path (Buffer.to_bytes buf)
+
+let read_program_fasl_from_data symbols data =
+  let pos = ref 0 in
+  let fmt = read_header data pos in
+  if fmt <> 2 then
+    fasl_error (Printf.sprintf "expected program FASL (type 2), got type %d" fmt);
+  let decl_count = read_u16 data pos in
+  let declarations = List.init decl_count (fun _ ->
+    read_lib_declaration symbols data pos) in
+  { declarations }
+
+let read_program_fasl symbols path =
+  let data = read_from_file path in
+  read_program_fasl_from_data symbols data
+
+let write_program_bytes prog =
+  let buf = Buffer.create 512 in
+  write_program_fasl_to_buf buf prog;
+  Buffer.to_bytes buf
+
+let read_program_bytes symbols data =
+  read_program_fasl_from_data symbols data
+
 (* --- Cache helpers --- *)
 
 let fasl_path_for sld_path =
