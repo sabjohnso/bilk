@@ -52,3 +52,6 @@ val pp : Format.formatter -> t -> unit
 
 val to_string : t -> string
 (** [to_string sym] is the symbol's name. *)
+
+val all : table -> t list
+(** [all tbl] returns all symbols interned in [tbl]. *)

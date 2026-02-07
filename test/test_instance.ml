@@ -82,6 +82,26 @@ let test_features () =
   Alcotest.(check bool) "has r7rs" true (List.mem "r7rs" inst.features);
   Alcotest.(check bool) "has wile" true (List.mem "wile" inst.features)
 
+let test_eval_port_multiple () =
+  let inst = Instance.create () in
+  let port = Port.of_string "(define x 10) (define y 20) (+ x y)" in
+  check_datum "last result" (Datum.Fixnum 30) (Instance.eval_port inst port)
+
+let test_eval_port_empty () =
+  let inst = Instance.create () in
+  let port = Port.of_string "" in
+  check_datum "empty port" Datum.Void (Instance.eval_port inst port)
+
+let test_eval_port_define_use () =
+  let inst = Instance.create () in
+  let port = Port.of_string "(define (square x) (* x x)) (square 7)" in
+  check_datum "define+use" (Datum.Fixnum 49) (Instance.eval_port inst port)
+
+let test_eval_port_import () =
+  let inst = Instance.create () in
+  let port = Port.of_string "(import (scheme base)) (+ 1 2)" in
+  check_datum "import+expr" (Datum.Fixnum 3) (Instance.eval_port inst port)
+
 let () =
   Alcotest.run "Instance"
     [ ("Instance",
@@ -98,5 +118,11 @@ let () =
        [ Alcotest.test_case "(scheme base) registered" `Quick test_scheme_base_registered
        ; Alcotest.test_case "(scheme char) registered" `Quick test_scheme_char_registered
        ; Alcotest.test_case "features" `Quick test_features
+       ])
+    ; ("eval_port",
+       [ Alcotest.test_case "multiple expressions" `Quick test_eval_port_multiple
+       ; Alcotest.test_case "empty port" `Quick test_eval_port_empty
+       ; Alcotest.test_case "define + use" `Quick test_eval_port_define_use
+       ; Alcotest.test_case "import + expr" `Quick test_eval_port_import
        ])
     ]

@@ -26,3 +26,4 @@ let compare a b = Int.compare a.id b.id
 let hash sym = sym.id
 let pp fmt sym = Format.pp_print_string fmt sym.name
 let to_string sym = sym.name
+let all table = Hashtbl.fold (fun _ sym acc -> sym :: acc) table.tbl []

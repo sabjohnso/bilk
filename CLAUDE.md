@@ -56,7 +56,7 @@ PLAN.md       # Development plan and milestones
 _opam/        # Local opam switch (gitignored)
 ```
 
-- `bin/dune` — declares the `wile` executable, depends on the `wile` library
+- `bin/dune` — declares the `wile` executable, depends on `wile`, `cmdliner`, `linenoise`
 - `lib/dune` — declares the `wile` library
 - `test/dune` — declares test executables
 
@@ -175,6 +175,20 @@ Changes to existing modules:
   replays from FASL when valid, falling back to source compilation when
   stale or when library has syntax exports
 
+**Milestone 10 (REPL & CLI)** — complete.
+
+No new modules.  All REPL/CLI code lives in `bin/main.ml`.
+
+Changes to existing modules:
+- `Instance`: Added `eval_port` — reads and evaluates all expressions from a
+  port until EOF, returning the last result (or `Void` if empty)
+- `Symbol`: Added `all` — returns all interned symbols from a table
+- `bin/main.ml`: Replaced placeholder with cmdliner-based CLI supporting
+  three modes: interactive REPL (`wile`), file execution (`wile file.scm`),
+  and expression evaluation (`wile -e '(+ 1 2)'`).  REPL features: linenoise
+  line editing, multiline input, history (`~/.wile_history`), REPL commands
+  (`,help`, `,quit`, `,load`, `,env`), SIGINT handling, FASL cache enabled
+
 ## Development Workflow
 
 **This project uses TDD (Test-Driven Development).** Follow this cycle:
@@ -210,7 +224,7 @@ Tests live in `test/` as per-topic files and are run via `dune test`.
 | `test/test_reader.ml` | Reader (31 tests: 30 unit + 1 QCheck) |
 | `test/test_symbol.ml` | Symbol (8 tests: 6 unit + 2 QCheck) |
 | `test/test_env.ml` | Env (14 tests) |
-| `test/test_instance.ml` | Instance (11 tests) |
+| `test/test_instance.ml` | Instance (15 tests) |
 | `test/test_opcode.ml`   | Opcode (4 tests) |
 | `test/test_compiler.ml` | Compiler (14 tests) |
 | `test/test_vm.ml`       | VM (296 tests: end-to-end via Instance.eval_string) |
@@ -261,6 +275,11 @@ dune build @doc
 ```
 
 Output is in `_build/default/_doc/_html/`.
+
+## Runtime Dependencies
+
+- **cmdliner** — command-line argument parsing
+- **linenoise** — lightweight readline alternative for REPL line editing
 
 ## Documentation Dependencies
 

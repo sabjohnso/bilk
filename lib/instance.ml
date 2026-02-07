@@ -2214,3 +2214,12 @@ let eval_string inst src =
   let port = Port.of_string src in
   let expr = Reader.read_syntax inst.readtable port in
   eval_syntax inst expr
+
+let eval_port inst port =
+  let rec loop last =
+    let expr = Reader.read_syntax inst.readtable port in
+    match expr with
+    | { Syntax.datum = Syntax.Eof; _ } -> last
+    | _ -> loop (eval_syntax inst expr)
+  in
+  loop Datum.Void

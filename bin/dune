@@ -1,4 +1,4 @@
 (executable
  (public_name wile)
  (name main)
- (libraries wile))
+ (libraries wile cmdliner linenoise))

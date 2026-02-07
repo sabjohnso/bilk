@@ -69,3 +69,11 @@ val eval_string : t -> string -> Datum.t
     @raise Reader.Read_error on malformed input.
     @raise Compiler.Compile_error on malformed syntax or macro expansion error.
     @raise Vm.Runtime_error on runtime errors. *)
+
+val eval_port : t -> Port.t -> Datum.t
+(** [eval_port inst port] evaluates all expressions from [port] until EOF.
+    Returns the last result, or [Void] if the port was empty.
+    Handles [import] and [define-library] forms at top level.
+    @raise Reader.Read_error on malformed input.
+    @raise Compiler.Compile_error on malformed syntax or macro expansion error.
+    @raise Vm.Runtime_error on runtime errors. *)
