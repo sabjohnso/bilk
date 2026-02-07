@@ -1194,10 +1194,6 @@ let rec expand_impl ~syn_env ~gensym ~ctx (s : Syntax.t) : Syntax.t =
        expand_application ~syn_env ~gensym ~ctx s)
 
 and expand_core ~syn_env ~gensym ~ctx name (s : Syntax.t) : Syntax.t =
-  let features = ctx.features in
-  let has_library = ctx.has_library in
-  let read_include = ctx.read_include in
-  ignore (features, has_library, read_include);
   let loc = s.loc in
   match name with
   | "quote" -> s  (* don't expand inside quote *)

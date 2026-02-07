@@ -82,24 +82,24 @@ let rec parse_import_set s =
        match head.datum with
        | Syntax.Symbol "only" ->
          (match rest with
-          | inner :: names ->
+          | inner :: (_ :: _ as names) ->
             let ids = List.map (fun n ->
               match n.Syntax.datum with
               | Syntax.Symbol name -> name
               | _ -> compile_error n.loc "only: expected identifier"
             ) names in
             Import_only (parse_import_set inner, ids)
-          | [] -> compile_error s.loc "only: expected import set and names")
+          | _ -> compile_error s.loc "only: expected import set and identifiers")
        | Syntax.Symbol "except" ->
          (match rest with
-          | inner :: names ->
+          | inner :: (_ :: _ as names) ->
             let ids = List.map (fun n ->
               match n.Syntax.datum with
               | Syntax.Symbol name -> name
               | _ -> compile_error n.loc "except: expected identifier"
             ) names in
             Import_except (parse_import_set inner, ids)
-          | [] -> compile_error s.loc "except: expected import set and names")
+          | _ -> compile_error s.loc "except: expected import set and identifiers")
        | Syntax.Symbol "prefix" ->
          (match rest with
           | [ inner; { datum = Syntax.Symbol prefix; _ } ] ->
@@ -107,7 +107,7 @@ let rec parse_import_set s =
           | _ -> compile_error s.loc "prefix: expected import set and prefix")
        | Syntax.Symbol "rename" ->
          (match rest with
-          | inner :: pairs ->
+          | inner :: (_ :: _ as pairs) ->
             let renames = List.map (fun p ->
               match syntax_to_proper_list p with
               | Some [ { datum = Syntax.Symbol from; _ };
@@ -116,7 +116,7 @@ let rec parse_import_set s =
               | _ -> compile_error p.loc "rename: expected (old new)"
             ) pairs in
             Import_rename (parse_import_set inner, renames)
-          | [] -> compile_error s.loc "rename: expected import set and pairs")
+          | _ -> compile_error s.loc "rename: expected import set and pairs")
        | _ ->
          (* Must be a library name *)
          Import_lib (parse_library_name s))
@@ -168,6 +168,25 @@ let resolve_import lookup_fn iset =
       (rt', syn')
     | Import_rename (inner, renames) ->
       let (rt, syn) = resolve inner in
+      (* Check that all "from" names exist in the export set *)
+      List.iter (fun (from_name, _) ->
+        let in_rt = List.exists (fun (n, _, _) -> n = from_name) rt in
+        let in_syn = List.exists (fun (n, _) -> n = from_name) syn in
+        if not in_rt && not in_syn then
+          failwith ("rename: name not in export set: " ^ from_name)
+      ) renames;
+      (* Check for duplicate "from" names *)
+      let from_names = List.map fst renames in
+      List.iter (fun name ->
+        if List.length (List.filter ((=) name) from_names) > 1 then
+          failwith ("rename: duplicate source name: " ^ name)
+      ) from_names;
+      (* Check for "to" name collisions *)
+      let to_names = List.map snd renames in
+      List.iter (fun name ->
+        if List.length (List.filter ((=) name) to_names) > 1 then
+          failwith ("rename: duplicate target name: " ^ name)
+      ) to_names;
       let rename_name name =
         match List.assoc_opt name renames with
         | Some new_name -> new_name

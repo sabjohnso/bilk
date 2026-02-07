@@ -32,6 +32,9 @@ type t = {
   (** Directories to search for library [.sld] files. *)
   features : string list;
   (** Feature identifiers for [cond-expand] (e.g. ["r7rs"; "wile"; "linux"]). *)
+  loading_libs : string list list ref;
+  (** Libraries currently being loaded from [.sld] files.
+      Used to detect circular dependencies during auto-loading. *)
 }
 
 (** {1 Constructors} *)

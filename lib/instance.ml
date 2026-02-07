@@ -9,6 +9,7 @@ type t = {
   libraries : Library.registry;
   search_paths : string list ref;
   features : string list;
+  loading_libs : string list list ref;
 }
 
 (* --- Primitive helpers --- *)
@@ -1838,9 +1839,14 @@ let register_builtin_libraries inst =
 
 (* --- Expander callbacks --- *)
 
+(* Forward reference for library lookup that supports auto-loading from .sld files.
+   Initialized to basic registry lookup; updated to lookup_or_load after it's defined. *)
+let lib_lookup_ref : (t -> string list -> Library.t option) ref =
+  ref (fun inst name -> Library.lookup inst.libraries name)
+
 let make_expander_callbacks inst =
   let features = inst.features in
-  let has_library name = Library.lookup inst.libraries name <> None in
+  let has_library name = !lib_lookup_ref inst name <> None in
   let read_include ~fold_case filename =
     let port = Port.of_file filename in
     let rt = if fold_case then Readtable.with_fold_case true inst.readtable
@@ -1879,7 +1885,8 @@ let create ?(readtable = Readtable.default) () =
   let features = detect_features () in
   let inst = { symbols; global_env; readtable; winds = ref []; handlers;
                syn_env; gensym_counter; libraries;
-               search_paths = ref []; features } in
+               search_paths = ref []; features;
+               loading_libs = ref [] } in
   List.iter (eval_boot inst) boot_definitions;
   register_builtin_libraries inst;
   inst
@@ -1899,11 +1906,6 @@ let rec syntax_to_proper_list s =
 
 
 (* --- define-library processing --- *)
-
-(* Forward reference for library lookup that supports auto-loading from .sld files.
-   Initialized to basic registry lookup; updated to lookup_or_load after it's defined. *)
-let lib_lookup_ref : (t -> string list -> Library.t option) ref =
-  ref (fun inst name -> Library.lookup inst.libraries name)
 
 let rec syntax_list_to_list s =
   match s.Syntax.datum with
@@ -1925,7 +1927,7 @@ let process_define_library inst name_syn decls =
   in
   let expand_in_lib expr =
     let features = inst.features in
-    let has_library name = Library.lookup inst.libraries name <> None in
+    let has_library name = !lib_lookup_ref inst name <> None in
     let read_include ~fold_case filename =
       let port = Port.of_file filename in
       let rt = if fold_case then Readtable.with_fold_case true inst.readtable
@@ -2071,10 +2073,8 @@ let lib_name_to_path search_dir name =
   Filename.concat search_dir
     (String.concat Filename.dir_sep name ^ ".sld")
 
-let loading_libs : string list list ref = ref []
-
 let try_load_library inst name =
-  if List.mem name !loading_libs then
+  if List.mem name !(inst.loading_libs) then
     failwith ("circular library dependency: " ^ Library.name_to_string name);
   let paths = List.filter_map (fun dir ->
     let path = lib_name_to_path dir name in
@@ -2083,15 +2083,19 @@ let try_load_library inst name =
   match paths with
   | [] -> ()  (* no file found, will fail later at resolve_import *)
   | path :: _ ->
-    loading_libs := name :: !loading_libs;
-    let port = Port.of_file path in
-    let expr = Reader.read_syntax inst.readtable port in
-    (match classify_top_level expr with
-     | Define_library (name_syn, decls) ->
-       process_define_library inst name_syn decls
-     | _ ->
-       failwith (Printf.sprintf "library file %s does not contain define-library" path));
-    loading_libs := List.filter (fun n -> n <> name) !loading_libs
+    inst.loading_libs := name :: !(inst.loading_libs);
+    Fun.protect ~finally:(fun () ->
+      inst.loading_libs :=
+        List.filter (fun n -> n <> name) !(inst.loading_libs))
+      (fun () ->
+        let port = Port.of_file path in
+        let expr = Reader.read_syntax inst.readtable port in
+        match classify_top_level expr with
+        | Define_library (name_syn, decls) ->
+          process_define_library inst name_syn decls
+        | _ ->
+          failwith (Printf.sprintf
+            "library file %s does not contain define-library" path))
 
 let lookup_or_load inst name =
   match Library.lookup inst.libraries name with
