@@ -608,29 +608,31 @@ let collect_introduced_bindings (tmpl : Syntax.t) (pat_var_names : string list) 
   Hashtbl.fold (fun name _ acc -> name :: acc) bindings []
 
 let apply_transformer (tf : transformer) (s : Syntax.t) ~gensym loc : Syntax.t option =
-  let input_elts = syntax_list_to_list s in
-  (* Skip the keyword (first element) *)
-  let input_without_kw = match input_elts with
-    | _ :: rest -> rest
-    | [] -> []
+  (* Strip the keyword (first element) via direct cdr access to preserve
+     dotted-pair structure — syntax_list_to_list would drop improper tails. *)
+  let input_without_kw = match s.datum with
+    | Syntax.Pair (_, cdr) -> cdr
+    | _ -> { Syntax.datum = Syntax.Nil; loc }
   in
-  let input_as_list = list_to_syntax loc input_without_kw in
   let rec try_rules = function
     | [] -> None
     | rule :: rest ->
       let env = Hashtbl.create 16 in
       (* Pattern also skips keyword (first element of pattern is _) *)
-      let pat_elts = syntax_list_to_list rule.pattern in
-      let pat_without_kw = match pat_elts with
-        | _ :: rest -> rest
-        | [] -> []
+      let pat_without_kw = match rule.pattern.datum with
+        | Syntax.Pair (_, cdr) -> cdr
+        | _ -> { Syntax.datum = Syntax.Nil; loc = rule.pattern.loc }
       in
-      let pat_as_list = list_to_syntax loc pat_without_kw in
-      let pat = parse_pattern ~literals:tf.literals pat_as_list in
-      if match_pattern pat input_as_list env then begin
+      let pat = parse_pattern ~literals:tf.literals pat_without_kw in
+      if match_pattern pat input_without_kw env then begin
         (* Collect pattern variable depths *)
+        let rec match_val_depth = function
+          | Single _ -> 0
+          | Repeated [] -> 1
+          | Repeated (first :: _) -> 1 + match_val_depth first
+        in
         let pat_vars = Hashtbl.fold (fun name v acc ->
-          let depth = match v with Repeated _ -> 1 | Single _ -> 0 in
+          let depth = match_val_depth v in
           (name, depth) :: acc
         ) env [] in
         let pat_var_names = List.map fst pat_vars in
@@ -1112,7 +1114,8 @@ and expand_core ~syn_env ~gensym name (s : Syntax.t) : Syntax.t =
     let args = syntax_list_to_list s in
     (match args with
      | kw :: params :: body when body <> [] ->
-       let body' = List.map (expand ~syn_env ~gensym) body in
+       let body_env = Hashtbl.create 8 :: syn_env in
+       let body' = expand_body ~syn_env:body_env ~gensym body in
        list_to_syntax loc (kw :: params :: body')
      | _ -> s)
 
@@ -1126,7 +1129,8 @@ and expand_core ~syn_env ~gensym name (s : Syntax.t) : Syntax.t =
      | kw :: name_syn :: body when
        (match name_syn.datum with Syntax.Pair _ -> true | _ -> false)
        && body <> [] ->
-       let body' = List.map (expand ~syn_env ~gensym) body in
+       let body_env = Hashtbl.create 8 :: syn_env in
+       let body' = expand_body ~syn_env:body_env ~gensym body in
        list_to_syntax loc (kw :: name_syn :: body')
      | _ -> s)
 
@@ -1156,12 +1160,14 @@ and expand_core ~syn_env ~gensym name (s : Syntax.t) : Syntax.t =
           (match body with
            | bindings_syn2 :: body2 when body2 <> [] ->
              let bindings' = expand_bindings ~syn_env ~gensym bindings_syn2 in
-             let body2' = List.map (expand ~syn_env ~gensym) body2 in
+             let body_env = Hashtbl.create 8 :: syn_env in
+             let body2' = expand_body ~syn_env:body_env ~gensym body2 in
              list_to_syntax loc (kw :: bindings_syn :: bindings' :: body2')
            | _ -> s)
         | _ ->
           let bindings' = expand_bindings ~syn_env ~gensym bindings_syn in
-          let body' = expand_body ~syn_env ~gensym body in
+          let body_env = Hashtbl.create 8 :: syn_env in
+          let body' = expand_body ~syn_env:body_env ~gensym body in
           list_to_syntax loc (kw :: bindings' :: body'))
      | _ -> s)
 
@@ -1170,7 +1176,8 @@ and expand_core ~syn_env ~gensym name (s : Syntax.t) : Syntax.t =
     (match args with
      | kw :: bindings_syn :: body when body <> [] ->
        let bindings' = expand_bindings ~syn_env ~gensym bindings_syn in
-       let body' = expand_body ~syn_env ~gensym body in
+       let body_env = Hashtbl.create 8 :: syn_env in
+       let body' = expand_body ~syn_env:body_env ~gensym body in
        list_to_syntax loc (kw :: bindings' :: body')
      | _ -> s)
 

@@ -1547,6 +1547,49 @@ let test_internal_define_syntax () =
              (define-syntax double (syntax-rules () ((double e) (+ e e)))) \
              (double x))")
 
+(* --- Bug fix: dotted-pair patterns --- *)
+
+let test_macro_dotted_pair () =
+  check_datum "dotted pair pattern" (Datum.Fixnum 1)
+    (eval_seq [
+      "(define-syntax dot-test \
+         (syntax-rules () \
+           ((_ a . b) a)))";
+      "(dot-test 1 2 3)"])
+
+let test_macro_dotted_pair_rest () =
+  check_datum "dotted pair rest" (Datum.Fixnum 6)
+    (eval_seq [
+      "(define-syntax dot-apply \
+         (syntax-rules () \
+           ((_ f . args) (f . args))))";
+      "(dot-apply + 1 2 3)"])
+
+(* --- Bug fix: nested ellipsis depth --- *)
+
+let test_macro_nested_ellipsis () =
+  check_datum "nested ellipsis" (Datum.Fixnum 10)
+    (eval_seq [
+      "(define-syntax my-append \
+         (syntax-rules () \
+           ((_ (a ...) ...) \
+            (append (list a ...) ...))))";
+      "(let ((result (my-append (1 2) (3 4)))) \
+         (apply + result))"])
+
+(* --- Bug fix: internal define-syntax scoping --- *)
+
+let test_internal_define_syntax_scope () =
+  check_datum "internal define-syntax does not leak"
+    (Datum.Fixnum 20)
+    (eval_seq [
+      "(define (local-mac x) (* x 2))";
+      "(let () \
+         (define-syntax local-mac \
+           (syntax-rules () ((_ e) (+ e 1)))) \
+         (local-mac 5))";
+      "(local-mac 10)"])
+
 let () =
   Alcotest.run "VM"
     [ ("self-evaluating",
@@ -1875,5 +1918,11 @@ let () =
        [ Alcotest.test_case "syntax-error" `Quick test_syntax_error
        ; Alcotest.test_case "in template" `Quick test_syntax_error_in_template
        ; Alcotest.test_case "internal define-syntax" `Quick test_internal_define_syntax
+       ])
+    ; ("macro bugfixes",
+       [ Alcotest.test_case "dotted pair pattern" `Quick test_macro_dotted_pair
+       ; Alcotest.test_case "dotted pair rest" `Quick test_macro_dotted_pair_rest
+       ; Alcotest.test_case "nested ellipsis" `Quick test_macro_nested_ellipsis
+       ; Alcotest.test_case "internal define-syntax scope" `Quick test_internal_define_syntax_scope
        ])
     ]
