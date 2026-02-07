@@ -43,3 +43,15 @@ val set : t -> Symbol.t -> Datum.t -> unit
 val define : t -> Symbol.t -> Datum.t -> unit
 (** [define env sym value] adds or replaces the binding of [sym] in the
     top (innermost) frame of [env]. *)
+
+val lookup_slot : t -> Symbol.t -> Datum.t ref option
+(** [lookup_slot env sym] searches frames inner-to-outer for a binding
+    of [sym].  Returns [Some slot] with the raw mutable cell if found,
+    [None] otherwise.  Used by the library system to share binding slots
+    across environments. *)
+
+val define_slot : t -> Symbol.t -> Datum.t ref -> unit
+(** [define_slot env sym slot] inserts the pre-existing mutable cell
+    [slot] into the top (innermost) frame under [sym].  This shares the
+    cell rather than copying it, so mutations via one environment are
+    visible in the other.  Used by the library system for imports. *)

@@ -1709,6 +1709,338 @@ let test_multi_define_syntax_body () =
              (define-syntax dec (syntax-rules () ((dec x) (- x 1)))) \
              (+ (inc 5) (dec 5)))")
 
+(* --- Library imports --- *)
+
+let test_import_scheme_base () =
+  check_datum "import scheme base" Datum.Void
+    (eval "(import (scheme base))")
+
+let test_import_only () =
+  check_datum "import only +" (Datum.Fixnum 3)
+    (eval_seq ["(import (only (scheme base) +))"; "(+ 1 2)"])
+
+let test_import_except () =
+  (* After importing except car, + still works *)
+  check_datum "import except car" (Datum.Fixnum 5)
+    (eval_seq ["(import (except (scheme base) car))"; "(+ 2 3)"])
+
+let test_import_prefix () =
+  check_datum "import prefix s:" (Datum.Fixnum 7)
+    (eval_seq ["(import (prefix (scheme base) s:))"; "(s:+ 3 4)"])
+
+let test_import_rename () =
+  check_datum "import rename car->first" (Datum.Fixnum 1)
+    (eval_seq [
+      "(import (rename (scheme base) (car first)))";
+      "(first '(1 2 3))"])
+
+let test_import_multiple () =
+  check_datum "import multiple" (Datum.Fixnum 3)
+    (eval_seq [
+      "(import (scheme base) (scheme char))";
+      "(+ 1 2)"])
+
+let test_import_nested_modifiers () =
+  check_datum "nested only+prefix" (Datum.Fixnum 3)
+    (eval_seq [
+      "(import (only (prefix (scheme base) s:) s:+ s:-))";
+      "(s:+ 1 2)"])
+
+let test_import_syntax () =
+  check_datum "import let syntax" (Datum.Fixnum 3)
+    (eval_seq [
+      "(import (only (scheme base) let +))";
+      "(let ((x 1) (y 2)) (+ x y))"])
+
+let test_import_then_macro () =
+  check_datum "import then define-syntax" (Datum.Fixnum 6)
+    (eval_seq [
+      "(import (scheme base))";
+      "(define-syntax double (syntax-rules () ((double x) (+ x x))))";
+      "(double 3)"])
+
+(* --- cond-expand --- *)
+
+let test_cond_expand_feature () =
+  check_datum "cond-expand r7rs" (Datum.Fixnum 1)
+    (eval "(cond-expand (r7rs 1))")
+
+let test_cond_expand_else () =
+  check_datum "cond-expand else" (Datum.Fixnum 2)
+    (eval "(cond-expand (foo 1) (else 2))")
+
+let test_cond_expand_and () =
+  check_datum "cond-expand and" (Datum.Fixnum 1)
+    (eval "(cond-expand ((and r7rs wile) 1) (else 0))")
+
+let test_cond_expand_or () =
+  check_datum "cond-expand or" (Datum.Fixnum 1)
+    (eval "(cond-expand ((or foo r7rs) 1) (else 0))")
+
+let test_cond_expand_not () =
+  check_datum "cond-expand not" (Datum.Fixnum 1)
+    (eval "(cond-expand ((not foo) 1) (else 0))")
+
+let test_cond_expand_library () =
+  check_datum "cond-expand library" (Datum.Fixnum 1)
+    (eval "(cond-expand ((library (scheme base)) 1) (else 0))")
+
+let test_cond_expand_no_match () =
+  let inst = Instance.create () in
+  Alcotest.check_raises "no match"
+    (Compiler.Compile_error (Loc.make "<string>" 1 1, "cond-expand: no matching clause"))
+    (fun () -> ignore (Instance.eval_string inst "(cond-expand (foo 1))"))
+
+let test_cond_expand_nested () =
+  check_datum "cond-expand nested" (Datum.Fixnum 3)
+    (eval "(cond-expand ((and r7rs (not foo)) (+ 1 2)))")
+
+(* --- include / include-ci --- *)
+
+let test_include_basic () =
+  let tmp = Filename.temp_file "wile_inc" ".scm" in
+  let oc = open_out tmp in
+  output_string oc "(define x 42)";
+  close_out oc;
+  let inst = Instance.create () in
+  ignore (Instance.eval_string inst (Printf.sprintf "(include \"%s\")" tmp));
+  let result = Instance.eval_string inst "x" in
+  check_datum "include basic" (Datum.Fixnum 42) result;
+  Sys.remove tmp
+
+let test_include_multiple () =
+  let tmp1 = Filename.temp_file "wile_inc" ".scm" in
+  let tmp2 = Filename.temp_file "wile_inc" ".scm" in
+  let oc1 = open_out tmp1 in output_string oc1 "(define a 1)"; close_out oc1;
+  let oc2 = open_out tmp2 in output_string oc2 "(define b 2)"; close_out oc2;
+  let inst = Instance.create () in
+  ignore (Instance.eval_string inst
+    (Printf.sprintf "(include \"%s\" \"%s\")" tmp1 tmp2));
+  let result = Instance.eval_string inst "(+ a b)" in
+  check_datum "include multiple" (Datum.Fixnum 3) result;
+  Sys.remove tmp1; Sys.remove tmp2
+
+let test_include_ci () =
+  let tmp = Filename.temp_file "wile_inc" ".scm" in
+  let oc = open_out tmp in
+  output_string oc "(define ABC 99)";
+  close_out oc;
+  let inst = Instance.create () in
+  ignore (Instance.eval_string inst (Printf.sprintf "(include-ci \"%s\")" tmp));
+  (* Case folding means ABC becomes abc *)
+  let result = Instance.eval_string inst "abc" in
+  check_datum "include-ci" (Datum.Fixnum 99) result;
+  Sys.remove tmp
+
+let test_include_not_found () =
+  let inst = Instance.create () in
+  Alcotest.check_raises "include not found"
+    (Sys_error "/tmp/nonexistent_wile_inc.scm: No such file or directory")
+    (fun () -> ignore (Instance.eval_string inst
+      "(include \"/tmp/nonexistent_wile_inc.scm\")"))
+
+(* --- define-library --- *)
+
+let test_deflib_basic () =
+  check_datum "basic define-library" (Datum.Fixnum 42)
+    (eval_seq [
+      "(define-library (mylib) \
+         (export x) \
+         (import (scheme base)) \
+         (begin (define x 42)))";
+      "(import (mylib))";
+      "x"])
+
+let test_deflib_multiple_exports () =
+  check_datum "multiple exports" (Datum.Fixnum 3)
+    (eval_seq [
+      "(define-library (mylib2) \
+         (export x y) \
+         (import (scheme base)) \
+         (begin (define x 1) (define y 2)))";
+      "(import (mylib2))";
+      "(+ x y)"])
+
+let test_deflib_rename_export () =
+  check_datum "rename export" (Datum.Fixnum 42)
+    (eval_seq [
+      "(define-library (mylib3) \
+         (export (rename internal external)) \
+         (import (scheme base)) \
+         (begin (define internal 42)))";
+      "(import (mylib3))";
+      "external"])
+
+let test_deflib_isolation () =
+  let inst = Instance.create () in
+  ignore (Instance.eval_string inst
+    "(define-library (mylib4) \
+       (export pub) \
+       (import (scheme base)) \
+       (begin (define priv 99) (define pub (+ priv 1))))");
+  ignore (Instance.eval_string inst "(import (mylib4))");
+  check_datum "pub visible" (Datum.Fixnum 100)
+    (Instance.eval_string inst "pub")
+
+let test_deflib_import_internal () =
+  check_datum "library imports scheme base" (Datum.Fixnum 6)
+    (eval_seq [
+      "(define-library (math) \
+         (export double) \
+         (import (scheme base)) \
+         (begin (define (double x) (+ x x))))";
+      "(import (math))";
+      "(double 3)"])
+
+let test_deflib_with_syntax () =
+  check_datum "library exports macro" (Datum.Fixnum 6)
+    (eval_seq [
+      "(define-library (mac) \
+         (export double) \
+         (import (scheme base)) \
+         (begin (define-syntax double \
+           (syntax-rules () ((double x) (+ x x))))))";
+      "(import (mac))";
+      "(double 3)"])
+
+let test_deflib_with_include () =
+  let tmp = Filename.temp_file "wile_lib" ".scm" in
+  let oc = open_out tmp in
+  output_string oc "(define x 77)";
+  close_out oc;
+  check_datum "library with include" (Datum.Fixnum 77)
+    (eval_seq [
+      Printf.sprintf
+        "(define-library (inclib) \
+           (export x) \
+           (import (scheme base)) \
+           (include \"%s\"))" tmp;
+      "(import (inclib))";
+      "x"]);
+  Sys.remove tmp
+
+let test_deflib_cond_expand () =
+  check_datum "library with cond-expand" (Datum.Fixnum 1)
+    (eval_seq [
+      "(define-library (condlib) \
+         (export val) \
+         (import (scheme base)) \
+         (cond-expand \
+           (r7rs (begin (define val 1))) \
+           (else (begin (define val 0)))))";
+      "(import (condlib))";
+      "val"])
+
+let test_deflib_two_libs () =
+  check_datum "two libraries" (Datum.Fixnum 30)
+    (eval_seq [
+      "(define-library (lib-a) \
+         (export a) \
+         (import (scheme base)) \
+         (begin (define a 10)))";
+      "(define-library (lib-b) \
+         (export b) \
+         (import (scheme base) (lib-a)) \
+         (begin (define b (* a 3))))";
+      "(import (lib-b))";
+      "b"])
+
+let test_deflib_slot_sharing () =
+  check_datum "slot sharing across imports" (Datum.Fixnum 42)
+    (eval_seq [
+      "(define-library (shared) \
+         (export get-x set-x!) \
+         (import (scheme base)) \
+         (begin \
+           (define x 0) \
+           (define (get-x) x) \
+           (define (set-x! v) (set! x v))))";
+      "(import (shared))";
+      "(set-x! 42)";
+      "(get-x)"])
+
+(* --- Library file loading --- *)
+
+let test_load_from_sld () =
+  let dir = Filename.temp_dir "wile_lib" "" in
+  let sub = Filename.concat dir "myfilelib" in
+  Sys.mkdir sub 0o755;
+  let sld = Filename.concat sub "stuff.sld" in
+  let oc = open_out sld in
+  output_string oc "(define-library (myfilelib stuff) \
+    (export val) \
+    (import (scheme base)) \
+    (begin (define val 99)))";
+  close_out oc;
+  let inst = Instance.create () in
+  inst.search_paths := [dir];
+  ignore (Instance.eval_string inst "(import (myfilelib stuff))");
+  let result = Instance.eval_string inst "val" in
+  check_datum "load from sld" (Datum.Fixnum 99) result;
+  Sys.remove sld; Sys.rmdir sub; Sys.rmdir dir
+
+let test_load_search_path_order () =
+  let dir1 = Filename.temp_dir "wile_lib1" "" in
+  let dir2 = Filename.temp_dir "wile_lib2" "" in
+  let sub1 = Filename.concat dir1 "order" in
+  let sub2 = Filename.concat dir2 "order" in
+  Sys.mkdir sub1 0o755; Sys.mkdir sub2 0o755;
+  let sld1 = Filename.concat sub1 "test.sld" in
+  let sld2 = Filename.concat sub2 "test.sld" in
+  let oc1 = open_out sld1 in
+  output_string oc1 "(define-library (order test) \
+    (export val) \
+    (import (scheme base)) \
+    (begin (define val 1)))";
+  close_out oc1;
+  let oc2 = open_out sld2 in
+  output_string oc2 "(define-library (order test) \
+    (export val) \
+    (import (scheme base)) \
+    (begin (define val 2)))";
+  close_out oc2;
+  let inst = Instance.create () in
+  inst.search_paths := [dir1; dir2];
+  ignore (Instance.eval_string inst "(import (order test))");
+  let result = Instance.eval_string inst "val" in
+  check_datum "search path order" (Datum.Fixnum 1) result;
+  Sys.remove sld1; Sys.remove sld2;
+  Sys.rmdir sub1; Sys.rmdir sub2;
+  Sys.rmdir dir1; Sys.rmdir dir2
+
+let test_load_not_found () =
+  let inst = Instance.create () in
+  inst.search_paths := ["/tmp"];
+  Alcotest.check_raises "unknown lib"
+    (Failure "unknown library: (no such lib)")
+    (fun () -> ignore (Instance.eval_string inst "(import (no such lib))"))
+
+let test_load_transitive () =
+  let dir = Filename.temp_dir "wile_lib" "" in
+  let sub_a = Filename.concat dir "trans" in
+  Sys.mkdir sub_a 0o755;
+  let sld_a = Filename.concat sub_a "a.sld" in
+  let oc_a = open_out sld_a in
+  output_string oc_a "(define-library (trans a) \
+    (export a-val) \
+    (import (scheme base)) \
+    (begin (define a-val 10)))";
+  close_out oc_a;
+  let sld_b = Filename.concat sub_a "b.sld" in
+  let oc_b = open_out sld_b in
+  output_string oc_b "(define-library (trans b) \
+    (export b-val) \
+    (import (scheme base) (trans a)) \
+    (begin (define b-val (* a-val 5))))";
+  close_out oc_b;
+  let inst = Instance.create () in
+  inst.search_paths := [dir];
+  ignore (Instance.eval_string inst "(import (trans b))");
+  let result = Instance.eval_string inst "b-val" in
+  check_datum "transitive load" (Datum.Fixnum 50) result;
+  Sys.remove sld_a; Sys.remove sld_b;
+  Sys.rmdir sub_a; Sys.rmdir dir
+
 let () =
   Alcotest.run "VM"
     [ ("self-evaluating",
@@ -2055,5 +2387,50 @@ let () =
        ; Alcotest.test_case "ellipsis zip" `Quick test_ellipsis_zip
        ; Alcotest.test_case "ellipsis dot pattern" `Quick test_ellipsis_dot_pattern
        ; Alcotest.test_case "multi define-syntax body" `Quick test_multi_define_syntax_body
+       ])
+    ; ("imports",
+       [ Alcotest.test_case "import (scheme base)" `Quick test_import_scheme_base
+       ; Alcotest.test_case "import only" `Quick test_import_only
+       ; Alcotest.test_case "import except" `Quick test_import_except
+       ; Alcotest.test_case "import prefix" `Quick test_import_prefix
+       ; Alcotest.test_case "import rename" `Quick test_import_rename
+       ; Alcotest.test_case "import multiple" `Quick test_import_multiple
+       ; Alcotest.test_case "import nested modifiers" `Quick test_import_nested_modifiers
+       ; Alcotest.test_case "import syntax" `Quick test_import_syntax
+       ; Alcotest.test_case "import then macro" `Quick test_import_then_macro
+       ])
+    ; ("cond-expand",
+       [ Alcotest.test_case "feature match" `Quick test_cond_expand_feature
+       ; Alcotest.test_case "else clause" `Quick test_cond_expand_else
+       ; Alcotest.test_case "and" `Quick test_cond_expand_and
+       ; Alcotest.test_case "or" `Quick test_cond_expand_or
+       ; Alcotest.test_case "not" `Quick test_cond_expand_not
+       ; Alcotest.test_case "library" `Quick test_cond_expand_library
+       ; Alcotest.test_case "no match error" `Quick test_cond_expand_no_match
+       ; Alcotest.test_case "nested" `Quick test_cond_expand_nested
+       ])
+    ; ("include",
+       [ Alcotest.test_case "include basic" `Quick test_include_basic
+       ; Alcotest.test_case "include multiple" `Quick test_include_multiple
+       ; Alcotest.test_case "include-ci" `Quick test_include_ci
+       ; Alcotest.test_case "include not found" `Quick test_include_not_found
+       ])
+    ; ("define-library",
+       [ Alcotest.test_case "basic" `Quick test_deflib_basic
+       ; Alcotest.test_case "multiple exports" `Quick test_deflib_multiple_exports
+       ; Alcotest.test_case "rename export" `Quick test_deflib_rename_export
+       ; Alcotest.test_case "isolation" `Quick test_deflib_isolation
+       ; Alcotest.test_case "import internal" `Quick test_deflib_import_internal
+       ; Alcotest.test_case "with syntax" `Quick test_deflib_with_syntax
+       ; Alcotest.test_case "with include" `Quick test_deflib_with_include
+       ; Alcotest.test_case "cond-expand" `Quick test_deflib_cond_expand
+       ; Alcotest.test_case "two libs" `Quick test_deflib_two_libs
+       ; Alcotest.test_case "slot sharing" `Quick test_deflib_slot_sharing
+       ])
+    ; ("library-loading",
+       [ Alcotest.test_case "load from .sld" `Quick test_load_from_sld
+       ; Alcotest.test_case "search path order" `Quick test_load_search_path_order
+       ; Alcotest.test_case "not found" `Quick test_load_not_found
+       ; Alcotest.test_case "transitive" `Quick test_load_transitive
        ])
     ]

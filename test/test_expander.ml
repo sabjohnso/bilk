@@ -96,6 +96,31 @@ let test_application_expansion () =
      | _ -> Alcotest.fail "expected +")
   | _ -> Alcotest.fail "expected pair"
 
+(* --- Binding API tests --- *)
+
+let test_lookup_binding_core () =
+  let env = syn_env () in
+  match Expander.lookup_binding env "if" with
+  | Some _ -> ()
+  | None -> Alcotest.fail "expected Some for core form 'if'"
+
+let test_lookup_binding_unknown () =
+  let env = syn_env () in
+  match Expander.lookup_binding env "nonexistent" with
+  | None -> ()
+  | Some _ -> Alcotest.fail "expected None for unknown binding"
+
+let test_define_lookup_roundtrip () =
+  let env = syn_env () in
+  let b = match Expander.lookup_binding env "if" with
+    | Some b -> b
+    | None -> Alcotest.fail "expected binding"
+  in
+  Expander.define_binding env "my-if" b;
+  match Expander.lookup_binding env "my-if" with
+  | Some _ -> ()
+  | None -> Alcotest.fail "expected Some after define_binding"
+
 let () =
   Alcotest.run "Expander"
     [ ("identity",
@@ -107,5 +132,10 @@ let () =
        ; Alcotest.test_case "define expansion" `Quick test_define_expansion
        ; Alcotest.test_case "begin expansion" `Quick test_begin_expansion
        ; Alcotest.test_case "application expansion" `Quick test_application_expansion
+       ])
+    ; ("binding-api",
+       [ Alcotest.test_case "lookup core form" `Quick test_lookup_binding_core
+       ; Alcotest.test_case "lookup unknown" `Quick test_lookup_binding_unknown
+       ; Alcotest.test_case "define+lookup roundtrip" `Quick test_define_lookup_roundtrip
        ])
     ]

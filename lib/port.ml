@@ -41,3 +41,7 @@ let read_char t =
 
 let current_loc t =
   Loc.make t.file t.line t.col
+
+let of_file path =
+  let content = In_channel.with_open_bin path In_channel.input_all in
+  of_string ~file:path content

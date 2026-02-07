@@ -142,6 +142,26 @@ Changes to existing modules:
 - `Instance`: Added `syn_env`, `gensym_counter` fields; expander wired into
   `eval_syntax`/`eval_boot` pipeline (Reader → Expander → Compiler → VM)
 
+**Milestone 8 (R7RS Libraries)** — complete.
+
+| Module    | Purpose                                                        |
+|-----------|----------------------------------------------------------------|
+| `Library` | Library types, registry, import-set parsing/resolution         |
+
+Changes to existing modules:
+- `Env`: Added `lookup_slot`, `define_slot` for slot-level sharing between
+  environments (imported bindings share the same mutable cell)
+- `Expander`: Added `cond-expand`, `include`, `include-ci` core forms with
+  callback-based feature/library/file queries; exposed `binding` type and
+  `lookup_binding`/`define_binding`/`binding_names` API; internal refactor
+  to thread `expand_ctx` record through all mutual recursion
+- `Port`: Added `of_file` constructor for file-based input
+- `Instance`: Added `libraries` (registry), `search_paths`, `features`
+  fields; top-level `import` and `define-library` handling; built-in
+  `(scheme base)`, `(scheme char)`, `(scheme write)`, `(scheme cxr)`
+  libraries built at creation; auto-loading of `.sld` library files from
+  search paths with circular dependency detection
+
 ## Development Workflow
 
 **This project uses TDD (Test-Driven Development).** Follow this cycle:
@@ -173,16 +193,17 @@ Tests live in `test/` as per-topic files and are run via `dune test`.
 | `test/test_readtable.ml` | Readtable (24 tests: 20 unit + 4 QCheck) |
 | `test/test_loc.ml` | Loc (4 tests) |
 | `test/test_syntax.ml` | Syntax (12 tests) |
-| `test/test_port.ml` | Port (10 tests: 9 unit + 1 QCheck) |
+| `test/test_port.ml` | Port (13 tests: 12 unit + 1 QCheck) |
 | `test/test_reader.ml` | Reader (31 tests: 30 unit + 1 QCheck) |
 | `test/test_symbol.ml` | Symbol (8 tests: 6 unit + 2 QCheck) |
-| `test/test_env.ml` | Env (10 tests) |
-| `test/test_instance.ml` | Instance (8 tests) |
+| `test/test_env.ml` | Env (14 tests) |
+| `test/test_instance.ml` | Instance (11 tests) |
 | `test/test_opcode.ml`   | Opcode (4 tests) |
 | `test/test_compiler.ml` | Compiler (14 tests) |
-| `test/test_vm.ml`       | VM (255 tests: end-to-end via Instance.eval_string) |
+| `test/test_vm.ml`       | VM (290 tests: end-to-end via Instance.eval_string) |
 | `test/test_m6_review.ml` | M6 bugfix regression (7 tests) |
-| `test/test_expander.ml` | Expander (8 tests) |
+| `test/test_expander.ml` | Expander (11 tests) |
+| `test/test_library.ml` | Library (18 tests) |
 
 Test dependencies:
 - **alcotest** — unit test framework with readable output

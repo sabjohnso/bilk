@@ -90,6 +90,48 @@ let test_define_in_inner_frame () =
   check_datum_opt "inner has new" (Some (Datum.Fixnum 2)) (Env.lookup e2 x);
   check_datum_opt "outer unchanged" (Some (Datum.Fixnum 1)) (Env.lookup e x)
 
+let test_lookup_slot_found () =
+  let e = Env.empty () in
+  let x = sym "x" in
+  Env.define e x (Datum.Fixnum 42);
+  match Env.lookup_slot e x with
+  | Some slot ->
+    Alcotest.(check int) "slot value" 42
+      (match !slot with Datum.Fixnum n -> n | _ -> -1)
+  | None -> Alcotest.fail "expected Some slot"
+
+let test_lookup_slot_not_found () =
+  let e = Env.empty () in
+  match Env.lookup_slot e (sym "z") with
+  | None -> ()
+  | Some _ -> Alcotest.fail "expected None"
+
+let test_define_slot_new () =
+  let e = Env.empty () in
+  let x = sym "x" in
+  let slot = ref (Datum.Fixnum 99) in
+  Env.define_slot e x slot;
+  match Env.lookup_slot e x with
+  | Some s ->
+    Alcotest.(check bool) "same ref" true (s == slot)
+  | None -> Alcotest.fail "expected Some slot"
+
+let test_slot_sharing () =
+  let env_a = Env.empty () in
+  let env_b = Env.empty () in
+  let x_a = sym "x" in
+  let x_b = sym "x" in
+  Env.define env_a x_a (Datum.Fixnum 1);
+  let slot = match Env.lookup_slot env_a x_a with
+    | Some s -> s
+    | None -> Alcotest.fail "expected slot"
+  in
+  Env.define_slot env_b x_b slot;
+  (* mutate via env_a *)
+  Env.set env_a x_a (Datum.Fixnum 42);
+  (* observe via env_b *)
+  check_datum_opt "shared slot" (Some (Datum.Fixnum 42)) (Env.lookup env_b x_b)
+
 let () =
   Alcotest.run "Env"
     [ ("Env",
@@ -103,5 +145,11 @@ let () =
        ; Alcotest.test_case "chain lookup" `Quick test_chain_lookup
        ; Alcotest.test_case "set in outer frame" `Quick test_set_in_outer_frame
        ; Alcotest.test_case "define in inner frame" `Quick test_define_in_inner_frame
+       ])
+    ; ("Slots",
+       [ Alcotest.test_case "lookup_slot found" `Quick test_lookup_slot_found
+       ; Alcotest.test_case "lookup_slot not found" `Quick test_lookup_slot_not_found
+       ; Alcotest.test_case "define_slot new" `Quick test_define_slot_new
+       ; Alcotest.test_case "slot sharing" `Quick test_slot_sharing
        ])
     ]

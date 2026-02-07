@@ -62,6 +62,26 @@ let test_primitives_registered () =
     Alcotest.(check string) "plus name" "+" p.prim_name
   | _ -> Alcotest.fail "expected primitive"
 
+let test_scheme_base_registered () =
+  let inst = Instance.create () in
+  match Library.lookup inst.libraries ["scheme"; "base"] with
+  | Some lib ->
+    Alcotest.(check bool) "has +" true (Hashtbl.mem lib.exports "+");
+    Alcotest.(check bool) "has car" true (Hashtbl.mem lib.exports "car");
+    Alcotest.(check bool) "has define" true (Hashtbl.mem lib.syntax_exports "define")
+  | None -> Alcotest.fail "expected (scheme base) library"
+
+let test_scheme_char_registered () =
+  let inst = Instance.create () in
+  match Library.lookup inst.libraries ["scheme"; "char"] with
+  | Some _ -> ()
+  | None -> Alcotest.fail "expected (scheme char) library"
+
+let test_features () =
+  let inst = Instance.create () in
+  Alcotest.(check bool) "has r7rs" true (List.mem "r7rs" inst.features);
+  Alcotest.(check bool) "has wile" true (List.mem "wile" inst.features)
+
 let () =
   Alcotest.run "Instance"
     [ ("Instance",
@@ -73,5 +93,10 @@ let () =
        ; Alcotest.test_case "eval_string" `Quick test_eval_string
        ; Alcotest.test_case "eval_syntax" `Quick test_eval_syntax
        ; Alcotest.test_case "primitives registered" `Quick test_primitives_registered
+       ])
+    ; ("Libraries",
+       [ Alcotest.test_case "(scheme base) registered" `Quick test_scheme_base_registered
+       ; Alcotest.test_case "(scheme char) registered" `Quick test_scheme_char_registered
+       ; Alcotest.test_case "features" `Quick test_features
        ])
     ]

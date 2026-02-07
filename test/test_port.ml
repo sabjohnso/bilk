@@ -109,6 +109,36 @@ let qcheck_roundtrip =
       in
       Buffer.contents buf = expected)
 
+let test_of_file_basic () =
+  let tmp = Filename.temp_file "wile_test" ".scm" in
+  let () =
+    let oc = open_out tmp in
+    output_string oc "(+ 1 2)";
+    close_out oc
+  in
+  let p = Port.of_file tmp in
+  check_loc "file name" (Loc.make tmp 1 1) (Port.current_loc p);
+  Alcotest.(check (option char)) "first char" (Some '(') (Port.peek_char p);
+  Sys.remove tmp
+
+let test_of_file_not_found () =
+  Alcotest.check_raises "sys_error"
+    (Sys_error "/tmp/nonexistent_wile_test.scm: No such file or directory")
+    (fun () -> ignore (Port.of_file "/tmp/nonexistent_wile_test.scm"))
+
+let test_of_file_loc () =
+  let tmp = Filename.temp_file "wile_test" ".scm" in
+  let () =
+    let oc = open_out tmp in
+    output_string oc "a\nb";
+    close_out oc
+  in
+  let p = Port.of_file tmp in
+  ignore (Port.read_char p);  (* a *)
+  ignore (Port.read_char p);  (* \n *)
+  check_loc "line 2" (Loc.make tmp 2 1) (Port.current_loc p);
+  Sys.remove tmp
+
 let () =
   Alcotest.run "Port"
     [ ("Port",
@@ -122,5 +152,10 @@ let () =
        ; Alcotest.test_case "custom file" `Quick test_port_custom_file
        ; Alcotest.test_case "multiple lines" `Quick test_port_multiple_lines
        ; QCheck_alcotest.to_alcotest qcheck_roundtrip
+       ])
+    ; ("File",
+       [ Alcotest.test_case "of_file basic" `Quick test_of_file_basic
+       ; Alcotest.test_case "of_file not found" `Quick test_of_file_not_found
+       ; Alcotest.test_case "of_file loc" `Quick test_of_file_loc
        ])
     ]

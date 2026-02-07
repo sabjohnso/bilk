@@ -44,6 +44,7 @@ let core_forms = [
   "cond"; "case"; "do"; "and"; "or"; "when"; "unless";
   "define-syntax"; "let-syntax"; "letrec-syntax";
   "quasiquote"; "guard"; "define-record-type"; "syntax-error";
+  "cond-expand"; "include"; "include-ci";
 ]
 
 let core_env () =
@@ -1145,7 +1146,16 @@ let parse_syntax_rules (env : syn_env) loc (s : Syntax.t) : transformer =
 
 (* --- Main expansion --- *)
 
-let rec expand ~syn_env ~gensym (s : Syntax.t) : Syntax.t =
+type expand_ctx = {
+  features : string list;
+  has_library : string list -> bool;
+  read_include : fold_case:bool -> string -> Syntax.t list;
+}
+
+let default_read_include ~fold_case:_ _ =
+  compile_error (Loc.make "<include>" 1 1) "include: not available in this context"
+
+let rec expand_impl ~syn_env ~gensym ~ctx (s : Syntax.t) : Syntax.t =
   match s.datum with
   | Syntax.Bool _ | Syntax.Fixnum _ | Syntax.Flonum _
   | Syntax.Char _ | Syntax.Str _ | Syntax.Bytevector _ | Syntax.Eof ->
@@ -1162,27 +1172,32 @@ let rec expand ~syn_env ~gensym (s : Syntax.t) : Syntax.t =
          (Printf.sprintf "macro %s used as a variable" name))
 
   | Syntax.Vector elts ->
-    { s with datum = Syntax.Vector (Array.map (expand ~syn_env ~gensym) elts) }
+    let expand_e = expand_impl ~syn_env ~gensym ~ctx in
+    { s with datum = Syntax.Vector (Array.map expand_e elts) }
 
   | Syntax.Pair (head, _) ->
     (match head.datum with
      | Syntax.Symbol name ->
        (match syn_lookup syn_env name with
         | Some (Core core_name) ->
-          expand_core ~syn_env ~gensym core_name s
+          expand_core ~syn_env ~gensym ~ctx core_name s
         | Some (Macro tf) ->
           let expanded = apply_transformer tf s ~gensym s.loc in
           (match expanded with
-           | Some result -> expand ~syn_env ~gensym result
+           | Some result -> expand_impl ~syn_env ~gensym ~ctx result
            | None ->
              compile_error s.loc
                (Printf.sprintf "no matching pattern for macro %s" name))
         | Some Var | None ->
-          expand_application ~syn_env ~gensym s)
+          expand_application ~syn_env ~gensym ~ctx s)
      | _ ->
-       expand_application ~syn_env ~gensym s)
+       expand_application ~syn_env ~gensym ~ctx s)
 
-and expand_core ~syn_env ~gensym name (s : Syntax.t) : Syntax.t =
+and expand_core ~syn_env ~gensym ~ctx name (s : Syntax.t) : Syntax.t =
+  let features = ctx.features in
+  let has_library = ctx.has_library in
+  let read_include = ctx.read_include in
+  ignore (features, has_library, read_include);
   let loc = s.loc in
   match name with
   | "quote" -> s  (* don't expand inside quote *)
@@ -1191,13 +1206,13 @@ and expand_core ~syn_env ~gensym name (s : Syntax.t) : Syntax.t =
     let args = syntax_list_to_list s in
     (match args with
      | [kw; test; conseq; alt] ->
-       let test' = expand ~syn_env ~gensym test in
-       let conseq' = expand ~syn_env ~gensym conseq in
-       let alt' = expand ~syn_env ~gensym alt in
+       let test' = expand_impl ~syn_env ~gensym ~ctx test in
+       let conseq' = expand_impl ~syn_env ~gensym ~ctx conseq in
+       let alt' = expand_impl ~syn_env ~gensym ~ctx alt in
        list_to_syntax loc [kw; test'; conseq'; alt']
      | [kw; test; conseq] ->
-       let test' = expand ~syn_env ~gensym test in
-       let conseq' = expand ~syn_env ~gensym conseq in
+       let test' = expand_impl ~syn_env ~gensym ~ctx test in
+       let conseq' = expand_impl ~syn_env ~gensym ~ctx conseq in
        list_to_syntax loc [kw; test'; conseq']
      | _ -> s)
 
@@ -1206,7 +1221,7 @@ and expand_core ~syn_env ~gensym name (s : Syntax.t) : Syntax.t =
     (match args with
      | kw :: params :: body when body <> [] ->
        let body_env = Hashtbl.create 8 :: syn_env in
-       let body' = expand_body ~syn_env:body_env ~gensym body in
+       let body' = expand_body ~syn_env:body_env ~gensym ~ctx body in
        list_to_syntax loc (kw :: params :: body')
      | _ -> s)
 
@@ -1215,13 +1230,13 @@ and expand_core ~syn_env ~gensym name (s : Syntax.t) : Syntax.t =
     (match args with
      | [kw; name_syn; expr] when
        (match name_syn.datum with Syntax.Symbol _ -> true | _ -> false) ->
-       let expr' = expand ~syn_env ~gensym expr in
+       let expr' = expand_impl ~syn_env ~gensym ~ctx expr in
        list_to_syntax loc [kw; name_syn; expr']
      | kw :: name_syn :: body when
        (match name_syn.datum with Syntax.Pair _ -> true | _ -> false)
        && body <> [] ->
        let body_env = Hashtbl.create 8 :: syn_env in
-       let body' = expand_body ~syn_env:body_env ~gensym body in
+       let body' = expand_body ~syn_env:body_env ~gensym ~ctx body in
        list_to_syntax loc (kw :: name_syn :: body')
      | _ -> s)
 
@@ -1229,7 +1244,7 @@ and expand_core ~syn_env ~gensym name (s : Syntax.t) : Syntax.t =
     let args = syntax_list_to_list s in
     (match args with
      | [kw; name_syn; expr] ->
-       let expr' = expand ~syn_env ~gensym expr in
+       let expr' = expand_impl ~syn_env ~gensym ~ctx expr in
        list_to_syntax loc [kw; name_syn; expr']
      | _ -> s)
 
@@ -1237,7 +1252,7 @@ and expand_core ~syn_env ~gensym name (s : Syntax.t) : Syntax.t =
     let args = syntax_list_to_list s in
     (match args with
      | kw :: exprs ->
-       let exprs' = expand_body ~syn_env ~gensym exprs in
+       let exprs' = expand_body ~syn_env ~gensym ~ctx exprs in
        list_to_syntax loc (kw :: exprs')
      | _ -> s)
 
@@ -1250,15 +1265,15 @@ and expand_core ~syn_env ~gensym name (s : Syntax.t) : Syntax.t =
           (* Named let: (let name ((x init) ...) body ...) *)
           (match body with
            | bindings_syn2 :: body2 when body2 <> [] ->
-             let bindings' = expand_bindings ~syn_env ~gensym bindings_syn2 in
+             let bindings' = expand_bindings ~syn_env ~gensym ~ctx bindings_syn2 in
              let body_env = Hashtbl.create 8 :: syn_env in
-             let body2' = expand_body ~syn_env:body_env ~gensym body2 in
+             let body2' = expand_body ~syn_env:body_env ~gensym ~ctx body2 in
              list_to_syntax loc (kw :: bindings_syn :: bindings' :: body2')
            | _ -> s)
         | _ ->
-          let bindings' = expand_bindings ~syn_env ~gensym bindings_syn in
+          let bindings' = expand_bindings ~syn_env ~gensym ~ctx bindings_syn in
           let body_env = Hashtbl.create 8 :: syn_env in
-          let body' = expand_body ~syn_env:body_env ~gensym body in
+          let body' = expand_body ~syn_env:body_env ~gensym ~ctx body in
           list_to_syntax loc (kw :: bindings' :: body'))
      | _ -> s)
 
@@ -1266,9 +1281,9 @@ and expand_core ~syn_env ~gensym name (s : Syntax.t) : Syntax.t =
     let args = syntax_list_to_list s in
     (match args with
      | kw :: bindings_syn :: body when body <> [] ->
-       let bindings' = expand_bindings ~syn_env ~gensym bindings_syn in
+       let bindings' = expand_bindings ~syn_env ~gensym ~ctx bindings_syn in
        let body_env = Hashtbl.create 8 :: syn_env in
-       let body' = expand_body ~syn_env:body_env ~gensym body in
+       let body' = expand_body ~syn_env:body_env ~gensym ~ctx body in
        list_to_syntax loc (kw :: bindings' :: body')
      | _ -> s)
 
@@ -1278,7 +1293,7 @@ and expand_core ~syn_env ~gensym name (s : Syntax.t) : Syntax.t =
      | kw :: clauses ->
        let clauses' = List.map (fun clause ->
          let parts = syntax_list_to_list clause in
-         let parts' = List.map (expand ~syn_env ~gensym) parts in
+         let parts' = List.map (expand_impl ~syn_env ~gensym ~ctx) parts in
          list_to_syntax clause.loc parts'
        ) clauses in
        list_to_syntax loc (kw :: clauses')
@@ -1288,12 +1303,12 @@ and expand_core ~syn_env ~gensym name (s : Syntax.t) : Syntax.t =
     let args = syntax_list_to_list s in
     (match args with
      | kw :: key :: clauses when clauses <> [] ->
-       let key' = expand ~syn_env ~gensym key in
+       let key' = expand_impl ~syn_env ~gensym ~ctx key in
        let clauses' = List.map (fun clause ->
          let parts = syntax_list_to_list clause in
          match parts with
          | datums :: body ->
-           let body' = List.map (expand ~syn_env ~gensym) body in
+           let body' = List.map (expand_impl ~syn_env ~gensym ~ctx) body in
            list_to_syntax clause.loc (datums :: body')
          | _ -> clause
        ) clauses in
@@ -1304,11 +1319,11 @@ and expand_core ~syn_env ~gensym name (s : Syntax.t) : Syntax.t =
     let args = syntax_list_to_list s in
     (match args with
      | kw :: var_clauses :: test_clause :: body ->
-       let var_clauses' = expand_do_vars ~syn_env ~gensym var_clauses in
+       let var_clauses' = expand_do_vars ~syn_env ~gensym ~ctx var_clauses in
        let test_parts = syntax_list_to_list test_clause in
-       let test_parts' = List.map (expand ~syn_env ~gensym) test_parts in
+       let test_parts' = List.map (expand_impl ~syn_env ~gensym ~ctx) test_parts in
        let test_clause' = list_to_syntax test_clause.loc test_parts' in
-       let body' = List.map (expand ~syn_env ~gensym) body in
+       let body' = List.map (expand_impl ~syn_env ~gensym ~ctx) body in
        list_to_syntax loc (kw :: var_clauses' :: test_clause' :: body')
      | _ -> s)
 
@@ -1316,7 +1331,7 @@ and expand_core ~syn_env ~gensym name (s : Syntax.t) : Syntax.t =
     let args = syntax_list_to_list s in
     (match args with
      | kw :: exprs ->
-       let exprs' = List.map (expand ~syn_env ~gensym) exprs in
+       let exprs' = List.map (expand_impl ~syn_env ~gensym ~ctx) exprs in
        list_to_syntax loc (kw :: exprs')
      | _ -> s)
 
@@ -1324,8 +1339,8 @@ and expand_core ~syn_env ~gensym name (s : Syntax.t) : Syntax.t =
     let args = syntax_list_to_list s in
     (match args with
      | kw :: test :: body when body <> [] ->
-       let test' = expand ~syn_env ~gensym test in
-       let body' = List.map (expand ~syn_env ~gensym) body in
+       let test' = expand_impl ~syn_env ~gensym ~ctx test in
+       let body' = List.map (expand_impl ~syn_env ~gensym ~ctx) body in
        list_to_syntax loc (kw :: test' :: body')
      | _ -> s)
 
@@ -1351,25 +1366,25 @@ and expand_core ~syn_env ~gensym name (s : Syntax.t) : Syntax.t =
      | _ -> compile_error loc "define-syntax: expected (define-syntax name transformer)")
 
   | "let-syntax" ->
-    expand_let_syntax ~syn_env ~gensym ~recursive:false s
+    expand_let_syntax ~syn_env ~gensym ~ctx ~recursive:false s
 
   | "letrec-syntax" ->
-    expand_let_syntax ~syn_env ~gensym ~recursive:true s
+    expand_let_syntax ~syn_env ~gensym ~ctx ~recursive:true s
 
   | "quasiquote" ->
     let args = syntax_list_to_list s in
     (match args with
      | [_; expr] ->
-       let expand_fn e = expand ~syn_env ~gensym e in
+       let expand_fn e = expand_impl ~syn_env ~gensym ~ctx e in
        expand_quasiquote ~expand_fn loc expr 0
      | _ -> compile_error loc "quasiquote expects 1 argument")
 
   | "guard" ->
-    let expand_fn e = expand ~syn_env ~gensym e in
+    let expand_fn e = expand_impl ~syn_env ~gensym ~ctx e in
     expand_guard ~expand_fn ~gensym loc s
 
   | "define-record-type" ->
-    let expand_fn e = expand ~syn_env ~gensym e in
+    let expand_fn e = expand_impl ~syn_env ~gensym ~ctx e in
     expand_define_record_type ~expand_fn ~gensym loc s
 
   | "syntax-error" ->
@@ -1386,50 +1401,134 @@ and expand_core ~syn_env ~gensym name (s : Syntax.t) : Syntax.t =
        compile_error loc full_msg
      | _ -> compile_error loc "syntax-error: expected message")
 
-  | _ -> expand_application ~syn_env ~gensym s
+  | "cond-expand" ->
+    expand_cond_expand ~syn_env ~gensym ~ctx loc s
 
-and expand_application ~syn_env ~gensym (s : Syntax.t) : Syntax.t =
+  | "include" ->
+    expand_include ~syn_env ~gensym ~ctx ~fold_case:false loc s
+
+  | "include-ci" ->
+    expand_include ~syn_env ~gensym ~ctx ~fold_case:true loc s
+
+  | _ -> expand_application ~syn_env ~gensym ~ctx s
+
+and expand_application ~syn_env ~gensym ~ctx (s : Syntax.t) : Syntax.t =
   (* Walk pairs directly to preserve improper tails from macro output *)
   let rec walk s =
     match s.Syntax.datum with
     | Syntax.Nil -> s
     | Syntax.Pair (car, cdr) ->
-      let car' = expand ~syn_env ~gensym car in
+      let car' = expand_impl ~syn_env ~gensym ~ctx car in
       let cdr' = walk cdr in
       { s with datum = Syntax.Pair (car', cdr') }
-    | _ -> expand ~syn_env ~gensym s
+    | _ -> expand_impl ~syn_env ~gensym ~ctx s
   in
   walk s
 
-and expand_bindings ~syn_env ~gensym bindings_syn =
+and expand_cond_expand ~syn_env ~gensym ~ctx loc
+    (s : Syntax.t) : Syntax.t =
+  let features = ctx.features in
+  let has_library = ctx.has_library in
+  let args = syntax_list_to_list s in
+  let clauses = match args with
+    | _ :: rest -> rest  (* skip "cond-expand" keyword *)
+    | [] -> compile_error loc "cond-expand: expected clauses"
+  in
+  let rec eval_feature_req (r : Syntax.t) =
+    match r.datum with
+    | Syntax.Symbol name -> List.mem name features
+    | Syntax.Pair _ ->
+      let parts = syntax_list_to_list r in
+      (match parts with
+       | [{ datum = Syntax.Symbol "and"; _ }] -> true
+       | { datum = Syntax.Symbol "and"; _ } :: reqs ->
+         List.for_all eval_feature_req reqs
+       | [{ datum = Syntax.Symbol "or"; _ }] -> false
+       | { datum = Syntax.Symbol "or"; _ } :: reqs ->
+         List.exists eval_feature_req reqs
+       | [{ datum = Syntax.Symbol "not"; _ }; req] ->
+         not (eval_feature_req req)
+       | [{ datum = Syntax.Symbol "library"; _ }; name] ->
+         let lib_name = syntax_to_lib_name name in
+         has_library lib_name
+       | _ -> compile_error r.loc "cond-expand: malformed feature requirement")
+    | _ -> compile_error r.loc "cond-expand: malformed feature requirement"
+  in
+  let rec try_clauses = function
+    | [] -> compile_error loc "cond-expand: no matching clause"
+    | clause :: rest ->
+      let parts = syntax_list_to_list clause in
+      (match parts with
+       | { datum = Syntax.Symbol "else"; _ } :: body when rest = [] ->
+         let body' = List.map (expand_impl ~syn_env ~gensym ~ctx) body in
+         list_to_syntax loc
+           ({ Syntax.datum = Syntax.Symbol "begin"; loc } :: body')
+       | req :: body ->
+         if eval_feature_req req then begin
+           let body' = List.map (expand_impl ~syn_env ~gensym ~ctx) body in
+           list_to_syntax loc
+             ({ Syntax.datum = Syntax.Symbol "begin"; loc } :: body')
+         end else
+           try_clauses rest
+       | [] -> compile_error clause.loc "cond-expand: empty clause")
+  in
+  try_clauses clauses
+
+and syntax_to_lib_name (s : Syntax.t) : string list =
+  let parts = syntax_list_to_list s in
+  List.map (fun p ->
+    match p.Syntax.datum with
+    | Syntax.Symbol name -> name
+    | Syntax.Fixnum n -> string_of_int n
+    | _ -> compile_error p.loc "cond-expand: library name: expected identifier or integer"
+  ) parts
+
+and expand_include ~syn_env ~gensym ~ctx ~fold_case loc
+    (s : Syntax.t) : Syntax.t =
+  let read_include = ctx.read_include in
+  let args = syntax_list_to_list s in
+  let filenames = match args with
+    | _ :: rest -> rest  (* skip "include"/"include-ci" keyword *)
+    | [] -> compile_error loc "include: expected filename"
+  in
+  let all_forms = List.concat_map (fun fn_syn ->
+    match fn_syn.Syntax.datum with
+    | Syntax.Str filename -> read_include ~fold_case filename
+    | _ -> compile_error fn_syn.Syntax.loc "include: expected string filename"
+  ) filenames in
+  let expanded = List.map (expand_impl ~syn_env ~gensym ~ctx) all_forms in
+  list_to_syntax loc
+    ({ Syntax.datum = Syntax.Symbol "begin"; loc } :: expanded)
+
+and expand_bindings ~syn_env ~gensym ~ctx bindings_syn =
   let bindings = syntax_list_to_list bindings_syn in
   let bindings' = List.map (fun b ->
     let parts = syntax_list_to_list b in
     match parts with
     | [name; init] ->
-      let init' = expand ~syn_env ~gensym init in
+      let init' = expand_impl ~syn_env ~gensym ~ctx init in
       list_to_syntax b.loc [name; init']
     | _ -> b
   ) bindings in
   list_to_syntax bindings_syn.loc bindings'
 
-and expand_do_vars ~syn_env ~gensym var_clauses_syn =
+and expand_do_vars ~syn_env ~gensym ~ctx var_clauses_syn =
   let clauses = syntax_list_to_list var_clauses_syn in
   let clauses' = List.map (fun vc ->
     let parts = syntax_list_to_list vc in
     match parts with
     | [name; init; step] ->
-      let init' = expand ~syn_env ~gensym init in
-      let step' = expand ~syn_env ~gensym step in
+      let init' = expand_impl ~syn_env ~gensym ~ctx init in
+      let step' = expand_impl ~syn_env ~gensym ~ctx step in
       list_to_syntax vc.loc [name; init'; step']
     | [name; init] ->
-      let init' = expand ~syn_env ~gensym init in
+      let init' = expand_impl ~syn_env ~gensym ~ctx init in
       list_to_syntax vc.loc [name; init']
     | _ -> vc
   ) clauses in
   list_to_syntax var_clauses_syn.loc clauses'
 
-and expand_body ~syn_env ~gensym forms =
+and expand_body ~syn_env ~gensym ~ctx forms =
   match forms with
   | [] -> []
   | form :: rest ->
@@ -1437,20 +1536,20 @@ and expand_body ~syn_env ~gensym forms =
      | Syntax.Pair ({ datum = Syntax.Symbol name; _ }, _) ->
        (match syn_lookup syn_env name with
         | Some (Core "define-syntax") ->
-          let expanded = expand_core ~syn_env ~gensym "define-syntax" form in
+          let expanded = expand_core ~syn_env ~gensym ~ctx "define-syntax" form in
           (* The define-syntax was processed, skip it in output if it's a (begin) *)
-          let rest' = expand_body ~syn_env ~gensym rest in
+          let rest' = expand_body ~syn_env ~gensym ~ctx rest in
           expanded :: rest'
         | _ ->
-          let form' = expand ~syn_env ~gensym form in
-          let rest' = expand_body ~syn_env ~gensym rest in
+          let form' = expand_impl ~syn_env ~gensym ~ctx form in
+          let rest' = expand_body ~syn_env ~gensym ~ctx rest in
           form' :: rest')
      | _ ->
-       let form' = expand ~syn_env ~gensym form in
-       let rest' = expand_body ~syn_env ~gensym rest in
+       let form' = expand_impl ~syn_env ~gensym ~ctx form in
+       let rest' = expand_body ~syn_env ~gensym ~ctx rest in
        form' :: rest')
 
-and expand_let_syntax ~syn_env ~gensym ~recursive (s : Syntax.t) : Syntax.t =
+and expand_let_syntax ~syn_env ~gensym ~ctx ~recursive (s : Syntax.t) : Syntax.t =
   let loc = s.loc in
   let args = syntax_list_to_list s in
   match args with
@@ -1475,8 +1574,29 @@ and expand_let_syntax ~syn_env ~gensym ~recursive (s : Syntax.t) : Syntax.t =
       | _ -> compile_error loc "let-syntax: malformed binding"
     ) bindings;
     (* Expand body in inner env, wrap in begin *)
-    let body' = List.map (expand ~syn_env:inner_env ~gensym) body in
+    let body' = List.map (fun e -> expand_impl ~syn_env:inner_env ~gensym ~ctx e) body in
     let begin_form = list_to_syntax loc
       ({ Syntax.datum = Syntax.Symbol "begin"; loc } :: body') in
     begin_form
   | _ -> compile_error loc "let-syntax/letrec-syntax: expected bindings and body"
+
+let expand ~syn_env ~gensym
+    ?(features=[]) ?(has_library=fun _ -> false)
+    ?(read_include=default_read_include) s =
+  let ctx = { features; has_library; read_include } in
+  expand_impl ~syn_env ~gensym ~ctx s
+
+(* --- Binding API for library system --- *)
+
+let lookup_binding (env : syn_env) name = syn_lookup env name
+
+let define_binding (env : syn_env) name b =
+  match env with
+  | [] -> failwith "define_binding: empty syn_env (impossible)"
+  | frame :: _ -> Hashtbl.replace frame name b
+
+let binding_names (env : syn_env) =
+  List.fold_left (fun acc frame ->
+    Hashtbl.fold (fun k _ acc -> if List.mem k acc then acc else k :: acc)
+      frame acc
+  ) [] env

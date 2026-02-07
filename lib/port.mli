@@ -14,6 +14,11 @@ val of_string : ?file:string -> string -> t
 (** [of_string ?file s] creates a port that reads from string [s].
     @param file  Source file name for locations (default ["<string>"]). *)
 
+val of_file : string -> t
+(** [of_file path] reads the file at [path] into memory and returns a
+    port.  The file name is used for source locations.
+    Raises [Sys_error] if the file cannot be opened. *)
+
 val peek_char : t -> char option
 (** [peek_char p] returns the next character without consuming it, or
     [None] at end of input.  Idempotent — repeated calls return the same

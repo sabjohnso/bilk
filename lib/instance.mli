@@ -2,8 +2,9 @@
 
     An {!t} value holds all mutable state for one Scheme instance: the symbol
     table, the global environment, the readtable, the syntactic environment
-    for macro expansion, and the dynamic-wind/exception handler stacks.
-    Multiple independent instances can coexist in a single process.
+    for macro expansion, the dynamic-wind/exception handler stacks, and the
+    library registry.  Multiple independent instances can coexist in a
+    single process.
 
     Instances are passed explicitly — never stored in a global ref. *)
 
@@ -25,6 +26,12 @@ type t = {
   (** The syntactic environment for macro expansion. *)
   gensym_counter : int ref;
   (** Counter for generating fresh identifiers during macro expansion. *)
+  libraries : Library.registry;
+  (** The library registry for this instance. *)
+  search_paths : string list ref;
+  (** Directories to search for library [.sld] files. *)
+  features : string list;
+  (** Feature identifiers for [cond-expand] (e.g. ["r7rs"; "wile"; "linux"]). *)
 }
 
 (** {1 Constructors} *)
@@ -32,12 +39,9 @@ type t = {
 val create : ?readtable:Readtable.t -> unit -> t
 (** [create ?readtable ()] returns a fresh instance with an empty symbol table,
     a global environment pre-populated with 182 R7RS (scheme base) primitives
-    and intrinsics covering arithmetic, pairs/lists, characters, strings,
-    vectors, bytevectors, type predicates, equivalence, exceptions, and control,
-    plus 10 self-hosted boot definitions ([with-exception-handler], [raise],
-    [raise-continuable], [error], [map], [for-each], [string-map],
-    [string-for-each], [vector-map], [vector-for-each]), and the given
-    [readtable] (defaults to {!Readtable.default}). *)
+    and intrinsics, 10 self-hosted boot definitions, built-in libraries
+    [(scheme base)], [(scheme char)], [(scheme write)], [(scheme cxr)],
+    and the given [readtable] (defaults to {!Readtable.default}). *)
 
 (** {1 Convenience} *)
 
@@ -48,7 +52,7 @@ val intern : t -> string -> Symbol.t
 
 val eval_syntax : t -> Syntax.t -> Datum.t
 (** [eval_syntax inst expr] expands macros, compiles, and executes a syntax
-    object.
+    object.  Also handles top-level [import] and [define-library] forms.
     @raise Compiler.Compile_error on malformed syntax or macro expansion error.
     @raise Vm.Runtime_error on runtime errors. *)
 

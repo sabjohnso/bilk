@@ -6,6 +6,9 @@ type t = {
   handlers : Datum.t list ref;
   syn_env : Expander.syn_env;
   gensym_counter : int ref;
+  libraries : Library.registry;
+  search_paths : string list ref;
+  features : string list;
 }
 
 (* --- Primitive helpers --- *)
@@ -1706,10 +1709,162 @@ let make_gensym inst () =
   inst.gensym_counter := n + 1;
   Printf.sprintf "%%g%d" n
 
+(* --- Platform features --- *)
+
+let detect_features () =
+  let os = match Sys.os_type with
+    | "Unix" -> "linux"
+    | "Win32" -> "windows"
+    | "Cygwin" -> "cygwin"
+    | s -> String.lowercase_ascii s
+  in
+  ["r7rs"; "wile"; os]
+
+(* --- R7RS export names --- *)
+
+let scheme_base_runtime_names = [
+  (* Arithmetic *)
+  "+"; "-"; "*"; "/"; "="; "<"; ">"; "<="; ">=";
+  "abs"; "min"; "max"; "quotient"; "remainder"; "modulo";
+  "floor"; "ceiling"; "truncate"; "round";
+  "floor-quotient"; "floor-remainder";
+  "truncate-quotient"; "truncate-remainder";
+  "gcd"; "lcm"; "expt"; "sqrt"; "exact-integer-sqrt";
+  "number->string"; "string->number";
+  "exact"; "inexact"; "exact->inexact"; "inexact->exact";
+  (* Type predicates *)
+  "boolean?"; "boolean=?"; "number?"; "complex?"; "real?"; "rational?";
+  "integer?"; "exact?"; "inexact?"; "exact-integer?";
+  "zero?"; "positive?"; "negative?"; "odd?"; "even?";
+  "symbol?"; "symbol=?"; "char?"; "string?"; "vector?";
+  "bytevector?"; "procedure?"; "list?"; "pair?"; "null?";
+  "eof-object?"; "eof-object"; "error-object?";
+  "error-object-message"; "error-object-irritants";
+  "read-error?"; "file-error?";
+  (* Equivalence *)
+  "eq?"; "eqv?"; "equal?"; "not";
+  (* Pairs & lists *)
+  "cons"; "car"; "cdr"; "set-car!"; "set-cdr!";
+  "caar"; "cadr"; "cdar"; "cddr";
+  "list"; "make-list"; "length"; "append"; "reverse";
+  "list-tail"; "list-ref"; "list-set!"; "list-copy";
+  "memq"; "memv"; "member"; "assq"; "assv"; "assoc";
+  (* Symbols *)
+  "symbol->string"; "string->symbol";
+  (* Characters *)
+  "char=?"; "char<?"; "char>?"; "char<=?"; "char>=?";
+  "char->integer"; "integer->char";
+  "char-upcase"; "char-downcase"; "char-foldcase";
+  "char-alphabetic?"; "char-numeric?"; "char-whitespace?";
+  "char-upper-case?"; "char-lower-case?"; "digit-value";
+  (* Strings *)
+  "make-string"; "string"; "string-length"; "string-ref"; "string-set!";
+  "string=?"; "string<?"; "string>?"; "string<=?"; "string>=?";
+  "substring"; "string-append"; "string->list"; "list->string";
+  "string-copy"; "string-copy!"; "string-fill!";
+  "string-upcase"; "string-downcase"; "string-foldcase";
+  (* Vectors *)
+  "make-vector"; "vector"; "vector-length"; "vector-ref"; "vector-set!";
+  "vector->list"; "list->vector"; "vector-copy"; "vector-copy!";
+  "vector-append"; "vector-fill!"; "vector->string"; "string->vector";
+  (* Bytevectors *)
+  "make-bytevector"; "bytevector"; "bytevector-length";
+  "bytevector-u8-ref"; "bytevector-u8-set!";
+  "bytevector-copy"; "bytevector-copy!"; "bytevector-append";
+  "utf8->string"; "string->utf8";
+  (* I/O *)
+  "display"; "write"; "newline";
+  (* Control *)
+  "apply"; "call/cc"; "call-with-current-continuation";
+  "call-with-values"; "values"; "dynamic-wind";
+  (* Exceptions (boot-defined) *)
+  "with-exception-handler"; "raise"; "raise-continuable"; "error";
+  (* Higher-order (boot-defined) *)
+  "map"; "for-each"; "string-map"; "string-for-each";
+  "vector-map"; "vector-for-each";
+]
+
+let scheme_base_syntax_names = [
+  "if"; "lambda"; "define"; "set!"; "begin"; "quote";
+  "let"; "let*"; "letrec"; "letrec*";
+  "cond"; "case"; "do"; "and"; "or"; "when"; "unless";
+  "define-syntax"; "let-syntax"; "letrec-syntax";
+  "quasiquote"; "guard"; "define-record-type"; "syntax-error";
+]
+
+let scheme_char_names = [
+  "char-ci=?"; "char-ci<?"; "char-ci>?"; "char-ci<=?"; "char-ci>=?";
+  "char-alphabetic?"; "char-numeric?"; "char-whitespace?";
+  "char-upper-case?"; "char-lower-case?";
+  "char-upcase"; "char-downcase"; "char-foldcase";
+  "digit-value";
+]
+
+let scheme_write_names = [ "display"; "write"; "newline" ]
+
+let scheme_cxr_names = [ "caar"; "cadr"; "cdar"; "cddr" ]
+
+let build_library inst name runtime_names syntax_names =
+  let exports = Hashtbl.create (List.length runtime_names) in
+  List.iter (fun rname ->
+    let sym = Symbol.intern inst.symbols rname in
+    match Env.lookup_slot inst.global_env sym with
+    | Some slot -> Hashtbl.replace exports rname (Symbol.id sym, slot)
+    | None -> ()  (* silently skip unimplemented *)
+  ) runtime_names;
+  let syntax_exports = Hashtbl.create (List.length syntax_names) in
+  List.iter (fun sname ->
+    match Expander.lookup_binding inst.syn_env sname with
+    | Some b -> Hashtbl.replace syntax_exports sname b
+    | None -> ()  (* silently skip *)
+  ) syntax_names;
+  let lib : Library.t = {
+    name;
+    env = inst.global_env;
+    exports;
+    syntax_exports;
+  } in
+  Library.register inst.libraries lib
+
+let register_builtin_libraries inst =
+  build_library inst ["scheme"; "base"]
+    scheme_base_runtime_names scheme_base_syntax_names;
+  build_library inst ["scheme"; "char"]
+    scheme_char_names [];
+  build_library inst ["scheme"; "write"]
+    scheme_write_names [];
+  build_library inst ["scheme"; "cxr"]
+    scheme_cxr_names []
+
+(* --- Expander callbacks --- *)
+
+let make_expander_callbacks inst =
+  let features = inst.features in
+  let has_library name = Library.lookup inst.libraries name <> None in
+  let read_include ~fold_case filename =
+    let port = Port.of_file filename in
+    let rt = if fold_case then Readtable.with_fold_case true inst.readtable
+             else inst.readtable in
+    let rec read_all acc =
+      let s = Reader.read_syntax rt port in
+      if s.datum = Syntax.Eof then List.rev acc
+      else read_all (s :: acc)
+    in
+    read_all []
+  in
+  (features, has_library, read_include)
+
+let expand_with_callbacks inst expr =
+  let (features, has_library, read_include) = make_expander_callbacks inst in
+  Expander.expand ~syn_env:inst.syn_env ~gensym:(make_gensym inst)
+    ~features ~has_library ~read_include expr
+
+(* --- Evaluation --- *)
+
 let eval_boot inst src =
   let port = Port.of_string src in
   let expr = Reader.read_syntax inst.readtable port in
-  let expanded = Expander.expand ~syn_env:inst.syn_env ~gensym:(make_gensym inst) expr in
+  let expanded = expand_with_callbacks inst expr in
   let code = Compiler.compile inst.symbols expanded in
   ignore (Vm.execute ~winds:inst.winds inst.global_env code)
 
@@ -1720,19 +1875,264 @@ let create ?(readtable = Readtable.default) () =
   register_primitives symbols global_env handlers;
   let syn_env = Expander.core_env () in
   let gensym_counter = ref 0 in
+  let libraries = Library.create_registry () in
+  let features = detect_features () in
   let inst = { symbols; global_env; readtable; winds = ref []; handlers;
-               syn_env; gensym_counter } in
+               syn_env; gensym_counter; libraries;
+               search_paths = ref []; features } in
   List.iter (eval_boot inst) boot_definitions;
+  register_builtin_libraries inst;
   inst
 
 let intern inst name = Symbol.intern inst.symbols name
 
+(* --- Import processing --- *)
+
+let rec syntax_to_proper_list s =
+  match s.Syntax.datum with
+  | Syntax.Nil -> Some []
+  | Syntax.Pair (car, cdr) ->
+    (match syntax_to_proper_list cdr with
+     | Some rest -> Some (car :: rest)
+     | None -> None)
+  | _ -> None
+
+
+(* --- define-library processing --- *)
+
+(* Forward reference for library lookup that supports auto-loading from .sld files.
+   Initialized to basic registry lookup; updated to lookup_or_load after it's defined. *)
+let lib_lookup_ref : (t -> string list -> Library.t option) ref =
+  ref (fun inst name -> Library.lookup inst.libraries name)
+
+let rec syntax_list_to_list s =
+  match s.Syntax.datum with
+  | Syntax.Nil -> []
+  | Syntax.Pair (car, cdr) -> car :: syntax_list_to_list cdr
+  | _ -> [s]
+
+let process_define_library inst name_syn decls =
+  let loc = name_syn.Syntax.loc in
+  let lib_name = Library.parse_library_name name_syn in
+  (* Create a fresh env and syn_env for the library *)
+  let lib_env = Env.empty () in
+  let lib_syn_env = Expander.core_env () in
+  let lib_gensym_counter = ref 0 in
+  let make_lib_gensym () =
+    let n = !lib_gensym_counter in
+    lib_gensym_counter := n + 1;
+    Printf.sprintf "%%lib%d" n
+  in
+  let expand_in_lib expr =
+    let features = inst.features in
+    let has_library name = Library.lookup inst.libraries name <> None in
+    let read_include ~fold_case filename =
+      let port = Port.of_file filename in
+      let rt = if fold_case then Readtable.with_fold_case true inst.readtable
+               else inst.readtable in
+      let rec read_all acc =
+        let s = Reader.read_syntax rt port in
+        if s.datum = Syntax.Eof then List.rev acc
+        else read_all (s :: acc)
+      in
+      read_all []
+    in
+    Expander.expand ~syn_env:lib_syn_env ~gensym:make_lib_gensym
+      ~features ~has_library ~read_include expr
+  in
+  let eval_in_lib expr =
+    let expanded = expand_in_lib expr in
+    let code = Compiler.compile inst.symbols expanded in
+    ignore (Vm.execute ~winds:inst.winds lib_env code)
+  in
+  let eval_forms_in_lib forms =
+    List.iter eval_in_lib forms
+  in
+  (* Collect export specs and process declarations *)
+  let export_specs = ref [] in
+  let rec process_decl decl =
+    let parts = syntax_list_to_list decl in
+    match parts with
+    | { datum = Syntax.Symbol "export"; _ } :: specs ->
+      List.iter (fun spec ->
+        export_specs := Library.parse_export_spec spec :: !export_specs
+      ) specs
+    | { datum = Syntax.Symbol "import"; _ } :: import_sets ->
+      (* Import into the library env *)
+      List.iter (fun iset_syntax ->
+        let iset = Library.parse_import_set iset_syntax in
+        let lookup_fn name = !lib_lookup_ref inst name in
+        let (rt_bindings, syn_bindings) = Library.resolve_import lookup_fn iset in
+        List.iter (fun (name, _id, slot) ->
+          let sym = Symbol.intern inst.symbols name in
+          Env.define_slot lib_env sym slot
+        ) rt_bindings;
+        List.iter (fun (name, binding) ->
+          Expander.define_binding lib_syn_env name binding
+        ) syn_bindings
+      ) import_sets
+    | { datum = Syntax.Symbol "begin"; _ } :: body ->
+      eval_forms_in_lib body
+    | { datum = Syntax.Symbol "include"; _ } :: filenames ->
+      let forms = List.concat_map (fun fn ->
+        match fn.Syntax.datum with
+        | Syntax.Str filename ->
+          let port = Port.of_file filename in
+          let rec read_all acc =
+            let s = Reader.read_syntax inst.readtable port in
+            if s.datum = Syntax.Eof then List.rev acc
+            else read_all (s :: acc)
+          in
+          read_all []
+        | _ -> raise (Compiler.Compile_error (fn.Syntax.loc,
+            "include: expected string filename"))
+      ) filenames in
+      eval_forms_in_lib forms
+    | { datum = Syntax.Symbol "include-ci"; _ } :: filenames ->
+      let rt = Readtable.with_fold_case true inst.readtable in
+      let forms = List.concat_map (fun fn ->
+        match fn.Syntax.datum with
+        | Syntax.Str filename ->
+          let port = Port.of_file filename in
+          let rec read_all acc =
+            let s = Reader.read_syntax rt port in
+            if s.datum = Syntax.Eof then List.rev acc
+            else read_all (s :: acc)
+          in
+          read_all []
+        | _ -> raise (Compiler.Compile_error (fn.Syntax.loc,
+            "include-ci: expected string filename"))
+      ) filenames in
+      eval_forms_in_lib forms
+    | { datum = Syntax.Symbol "cond-expand"; _ } :: _ ->
+      (* Expand cond-expand, then process each resulting declaration *)
+      let expanded = expand_in_lib decl in
+      (* The result should be (begin decl ...) *)
+      let inner = syntax_list_to_list expanded in
+      (match inner with
+       | { datum = Syntax.Symbol "begin"; _ } :: rest ->
+         List.iter process_decl rest
+       | _ -> process_decl expanded)
+    | _ ->
+      raise (Compiler.Compile_error (loc,
+        "define-library: unknown declaration"))
+  in
+  List.iter process_decl decls;
+  (* Build export tables *)
+  let exports = Hashtbl.create 16 in
+  let syntax_exports = Hashtbl.create 16 in
+  List.iter (fun spec ->
+    let (internal_name, external_name) = match spec with
+      | Library.Export_id name -> (name, name)
+      | Library.Export_rename (internal, external_) -> (internal, external_)
+    in
+    let sym = Symbol.intern inst.symbols internal_name in
+    (match Env.lookup_slot lib_env sym with
+     | Some slot -> Hashtbl.replace exports external_name (Symbol.id sym, slot)
+     | None ->
+       (match Expander.lookup_binding lib_syn_env internal_name with
+        | Some b -> Hashtbl.replace syntax_exports external_name b
+        | None ->
+          raise (Compiler.Compile_error (loc,
+            Printf.sprintf "define-library: exported name not defined: %s"
+              internal_name))))
+  ) !export_specs;
+  (* Register the library *)
+  let lib : Library.t = {
+    name = lib_name;
+    env = lib_env;
+    exports;
+    syntax_exports;
+  } in
+  Library.register inst.libraries lib
+
+(* --- Top-level form classification --- *)
+
+type top_level_form =
+  | Import of Syntax.t list
+  | Define_library of Syntax.t * Syntax.t list
+  | Expression
+
+let classify_top_level (expr : Syntax.t) =
+  match expr.datum with
+  | Syntax.Pair ({ datum = Syntax.Symbol "import"; _ }, rest) ->
+    (match syntax_to_proper_list rest with
+     | Some sets when sets <> [] -> Import sets
+     | _ -> Expression)
+  | Syntax.Pair ({ datum = Syntax.Symbol "define-library"; _ }, rest) ->
+    (match syntax_to_proper_list rest with
+     | Some (name :: decls) -> Define_library (name, decls)
+     | _ -> Expression)
+  | _ -> Expression
+
+(* --- Import processing with auto-loading --- *)
+
+let lib_name_to_path search_dir name =
+  Filename.concat search_dir
+    (String.concat Filename.dir_sep name ^ ".sld")
+
+let loading_libs : string list list ref = ref []
+
+let try_load_library inst name =
+  if List.mem name !loading_libs then
+    failwith ("circular library dependency: " ^ Library.name_to_string name);
+  let paths = List.filter_map (fun dir ->
+    let path = lib_name_to_path dir name in
+    if Sys.file_exists path then Some path else None
+  ) !(inst.search_paths) in
+  match paths with
+  | [] -> ()  (* no file found, will fail later at resolve_import *)
+  | path :: _ ->
+    loading_libs := name :: !loading_libs;
+    let port = Port.of_file path in
+    let expr = Reader.read_syntax inst.readtable port in
+    (match classify_top_level expr with
+     | Define_library (name_syn, decls) ->
+       process_define_library inst name_syn decls
+     | _ ->
+       failwith (Printf.sprintf "library file %s does not contain define-library" path));
+    loading_libs := List.filter (fun n -> n <> name) !loading_libs
+
+let lookup_or_load inst name =
+  match Library.lookup inst.libraries name with
+  | Some lib -> Some lib
+  | None ->
+    try_load_library inst name;
+    Library.lookup inst.libraries name
+
+let () = lib_lookup_ref := lookup_or_load
+
+let process_import_set inst iset =
+  let lookup_fn name = lookup_or_load inst name in
+  let (rt_bindings, syn_bindings) = Library.resolve_import lookup_fn iset in
+  List.iter (fun (name, _id, slot) ->
+    let sym = Symbol.intern inst.symbols name in
+    Env.define_slot inst.global_env sym slot
+  ) rt_bindings;
+  List.iter (fun (name, binding) ->
+    Expander.define_binding inst.syn_env name binding
+  ) syn_bindings
+
+let process_imports inst import_sets =
+  List.iter (fun iset_syntax ->
+    let iset = Library.parse_import_set iset_syntax in
+    process_import_set inst iset
+  ) import_sets
+
 (* --- Evaluation --- *)
 
 let eval_syntax inst expr =
-  let expanded = Expander.expand ~syn_env:inst.syn_env ~gensym:(make_gensym inst) expr in
-  let code = Compiler.compile inst.symbols expanded in
-  Vm.execute ~winds:inst.winds inst.global_env code
+  match classify_top_level expr with
+  | Import import_sets ->
+    process_imports inst import_sets;
+    Datum.Void
+  | Define_library (name_syn, decls) ->
+    process_define_library inst name_syn decls;
+    Datum.Void
+  | Expression ->
+    let expanded = expand_with_callbacks inst expr in
+    let code = Compiler.compile inst.symbols expanded in
+    Vm.execute ~winds:inst.winds inst.global_env code
 
 let eval_string inst src =
   let port = Port.of_string src in

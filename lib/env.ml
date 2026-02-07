@@ -40,3 +40,19 @@ let define env sym value =
     match Hashtbl.find_opt frame (Symbol.id sym) with
     | Some slot -> slot := value
     | None -> Hashtbl.replace frame (Symbol.id sym) (ref value)
+
+let lookup_slot env sym =
+  let id = Symbol.id sym in
+  let rec search = function
+    | [] -> None
+    | frame :: rest ->
+      match Hashtbl.find_opt frame id with
+      | Some slot -> Some slot
+      | None -> search rest
+  in
+  search env
+
+let define_slot env sym slot =
+  match env with
+  | [] -> failwith "Env.define_slot: empty environment (impossible)"
+  | frame :: _ -> Hashtbl.replace frame (Symbol.id sym) slot
