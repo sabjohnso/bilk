@@ -1255,6 +1255,13 @@ let test_macro_underscore () =
       "(define-syntax always-42 (syntax-rules () ((always-42 _ _) 42)))";
       "(always-42 hello world)"])
 
+let test_macro_vector_ellipsis () =
+  check_datum "vector ellipsis" (Datum.Bool true)
+    (eval_seq [
+      "(define-syntax vec-list (syntax-rules () \
+         ((vec-list #(x ...)) (list x ...))))";
+      "(equal? '(1 2 3) (vec-list #(1 2 3)))"])
+
 (* --- let-syntax / letrec-syntax --- *)
 
 let test_let_syntax_basic () =
@@ -1326,6 +1333,13 @@ let test_quasiquote_expr () =
   check_datum "qq expr" (Datum.Bool true)
     (eval "(equal? '(1 4 3) `(1 ,(+ 2 2) 3))")
 
+let test_quasiquote_nested_splicing () =
+  (* Nested quasiquote preserves unquote-splicing at depth > 0 *)
+  check_datum "qq nested splicing" (Datum.Bool true)
+    (eval "(let ((x '(1 2))) \
+             (equal? `(a `(b ,@x c) d) \
+                     '(a (quasiquote (b (unquote-splicing x) c)) d)))")
+
 (* --- guard --- *)
 
 let test_guard_basic () =
@@ -1363,6 +1377,18 @@ let test_guard_multi_clause () =
               ((= exn 2) 'second) \
               ((= exn 3) 'third)) \
              (raise 2))")
+
+let test_guard_test_only_clause () =
+  (* (guard (exn (exn)) ...) — test-only clause returns the test value *)
+  check_datum "guard test-only" (Datum.Fixnum 42)
+    (eval "(guard (exn (exn)) (raise 42))")
+
+let test_guard_arrow_clause () =
+  (* => clause: test value is passed to proc.
+     (and (error-object? exn) exn) returns exn when true. *)
+  check_datum "guard arrow" (Datum.Str (Bytes.of_string "oops"))
+    (eval "(guard (exn ((and (error-object? exn) exn) => error-object-message)) \
+             (error \"oops\"))")
 
 (* --- define-record-type --- *)
 
@@ -1413,6 +1439,14 @@ let test_record_r7rs_example () =
       "(let ((p (kons 1 2))) \
          (set-kar! p 3) \
          (kar p))"])
+
+let test_record_partial_ctor () =
+  (* Constructor with subset of fields — uninitialized field *)
+  check_datum "partial ctor" (Datum.Fixnum 1)
+    (eval_seq [
+      "(define-record-type <node> (make-leaf val) node? \
+         (val node-val) (left node-left) (right node-right))";
+      "(node-val (make-leaf 1))"])
 
 (* --- syntax-error --- *)
 
@@ -1724,6 +1758,7 @@ let () =
        ; Alcotest.test_case "no match" `Quick test_macro_no_match
        ; Alcotest.test_case "literal" `Quick test_macro_literal
        ; Alcotest.test_case "underscore" `Quick test_macro_underscore
+       ; Alcotest.test_case "vector ellipsis" `Quick test_macro_vector_ellipsis
        ])
     ; ("let-syntax",
        [ Alcotest.test_case "basic" `Quick test_let_syntax_basic
@@ -1740,6 +1775,7 @@ let () =
        ; Alcotest.test_case "nested" `Quick test_quasiquote_nested
        ; Alcotest.test_case "no unquote" `Quick test_quasiquote_no_unquote
        ; Alcotest.test_case "expr" `Quick test_quasiquote_expr
+       ; Alcotest.test_case "nested splicing" `Quick test_quasiquote_nested_splicing
        ])
     ; ("guard",
        [ Alcotest.test_case "basic" `Quick test_guard_basic
@@ -1748,6 +1784,8 @@ let () =
        ; Alcotest.test_case "error object" `Quick test_guard_error_object
        ; Alcotest.test_case "body value" `Quick test_guard_body
        ; Alcotest.test_case "multi clause" `Quick test_guard_multi_clause
+       ; Alcotest.test_case "test-only clause" `Quick test_guard_test_only_clause
+       ; Alcotest.test_case "arrow clause" `Quick test_guard_arrow_clause
        ])
     ; ("define-record-type",
        [ Alcotest.test_case "basic" `Quick test_record_basic
@@ -1756,6 +1794,7 @@ let () =
        ; Alcotest.test_case "mutator" `Quick test_record_mutator
        ; Alcotest.test_case "distinct types" `Quick test_record_distinct_types
        ; Alcotest.test_case "R7RS pare" `Quick test_record_r7rs_example
+       ; Alcotest.test_case "partial ctor" `Quick test_record_partial_ctor
        ])
     ; ("syntax-error",
        [ Alcotest.test_case "syntax-error" `Quick test_syntax_error

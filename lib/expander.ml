@@ -161,7 +161,20 @@ and parse_list_pattern ~literals elts loc =
   end
 
 and parse_vector_ellipsis_pattern ~literals:_ pats =
-  Pat_vector_ellipsis ([], Pat_underscore, pats)  (* placeholder *)
+  (* pats includes Pat_var "..." for the ellipsis — find it and split *)
+  let is_ell_pat = function Pat_var "..." -> true | _ -> false in
+  let rec find_ell pre = function
+    | [] -> failwith "internal: no ellipsis found in vector pattern"
+    | p :: rest ->
+      if is_ell_pat p then
+        (match pre with
+         | [] -> failwith "ellipsis must follow a pattern in vector"
+         | last :: before -> (List.rev before, last, rest))
+      else
+        find_ell (p :: pre) rest
+  in
+  let (pre, rep, post) = find_ell [] pats in
+  Pat_vector_ellipsis (pre, rep, post)
 
 (* --- Pattern matching --- *)
 
@@ -192,8 +205,55 @@ let rec match_pattern (pat : pattern) (s : Syntax.t) (env : match_env) : bool =
        else
          List.for_all2 (fun p e -> match_pattern p e env) pats (Array.to_list elts)
      | _ -> false)
-  | Pat_vector_ellipsis _ ->
-    false  (* placeholder *)
+  | Pat_vector_ellipsis (pre, rep, post) ->
+    (match s.datum with
+     | Syntax.Vector elts ->
+       let n_pre = List.length pre in
+       let n_post = List.length post in
+       let n_total = Array.length elts in
+       if n_total < n_pre + n_post then false
+       else begin
+         let elts_list = Array.to_list elts in
+         (* Match prefix *)
+         let pre_elts = List.filteri (fun i _ -> i < n_pre) elts_list in
+         let ok = List.for_all2 (fun p e -> match_pattern p e env) pre pre_elts in
+         if not ok then false
+         else begin
+           (* Match suffix *)
+           let post_elts = List.filteri (fun i _ -> i >= n_total - n_post) elts_list in
+           let ok2 = List.for_all2 (fun p e -> match_pattern p e env) post post_elts in
+           if not ok2 then false
+           else begin
+             (* Match repeated elements *)
+             let rep_elts = List.filteri (fun i _ ->
+               i >= n_pre && i < n_total - n_post) elts_list in
+             let rep_vars = collect_pattern_vars rep in
+             List.iter (fun name ->
+               if not (Hashtbl.mem env name) then
+                 Hashtbl.replace env name (Repeated [])
+             ) rep_vars;
+             let sub_envs = List.map (fun elt ->
+               let sub = Hashtbl.create 8 in
+               let ok = match_pattern rep elt sub in
+               (ok, sub)
+             ) rep_elts in
+             let all_ok = List.for_all fst sub_envs in
+             if not all_ok then false
+             else begin
+               List.iter (fun name ->
+                 let vals = List.map (fun (_, sub) ->
+                   match Hashtbl.find_opt sub name with
+                   | Some v -> v
+                   | None -> Single { Syntax.datum = Syntax.Nil; loc = Loc.none }
+                 ) sub_envs in
+                 Hashtbl.replace env name (Repeated vals)
+               ) rep_vars;
+               true
+             end
+           end
+         end
+       end
+     | _ -> false)
 
 and match_ellipsis pre rep post (s : Syntax.t) env =
   (* Collect all elements into a list *)
@@ -222,7 +282,7 @@ and match_ellipsis pre rep post (s : Syntax.t) env =
         (* Match repeated elements *)
         let rep_elts = List.filteri (fun i _ -> i >= n_pre && i < n_total - n_post) elts in
         (* Collect pattern variable names from repeated pattern *)
-        let rep_vars = collect_pattern_vars rep rep in
+        let rep_vars = collect_pattern_vars rep in
         (* Initialize repeated bindings *)
         List.iter (fun name ->
           if not (Hashtbl.mem env name) then
@@ -252,21 +312,21 @@ and match_ellipsis pre rep post (s : Syntax.t) env =
     end
   end
 
-and collect_pattern_vars _rep pat =
+and collect_pattern_vars pat =
   match pat with
   | Pat_var name -> [name]
   | Pat_pair (a, b) ->
-    collect_pattern_vars _rep a @ collect_pattern_vars _rep b
+    collect_pattern_vars a @ collect_pattern_vars b
   | Pat_ellipsis (pre, rep2, post) ->
-    List.concat_map (collect_pattern_vars _rep) pre
-    @ collect_pattern_vars _rep rep2
-    @ List.concat_map (collect_pattern_vars _rep) post
+    List.concat_map collect_pattern_vars pre
+    @ collect_pattern_vars rep2
+    @ List.concat_map collect_pattern_vars post
   | Pat_vector pats ->
-    List.concat_map (collect_pattern_vars _rep) pats
+    List.concat_map collect_pattern_vars pats
   | Pat_vector_ellipsis (pre, rep2, post) ->
-    List.concat_map (collect_pattern_vars _rep) pre
-    @ collect_pattern_vars _rep rep2
-    @ List.concat_map (collect_pattern_vars _rep) post
+    List.concat_map collect_pattern_vars pre
+    @ collect_pattern_vars rep2
+    @ List.concat_map collect_pattern_vars post
   | _ -> []
 
 (* --- Template types --- *)
@@ -457,6 +517,34 @@ let collect_introduced_bindings (tmpl : Syntax.t) (pat_var_names : string list) 
              | _ -> ());
             List.iter walk (List.tl args)
           | _ -> ())
+       | Syntax.Symbol "do" ->
+         (* (do ((var init step) ...) (test expr ...) body ...) *)
+         let args = syntax_list_to_list rest in
+         (match args with
+          | var_clauses :: test_clause :: body ->
+            let clauses = syntax_list_to_list var_clauses in
+            List.iter (fun vc ->
+              let parts = syntax_list_to_list vc in
+              (match parts with
+               | name_syn :: inits -> scan_binding_names name_syn; List.iter walk inits
+               | _ -> ())
+            ) clauses;
+            List.iter walk (syntax_list_to_list test_clause);
+            List.iter walk body
+          | _ -> ())
+       | Syntax.Symbol "guard" ->
+         (* (guard (var clause ...) body ...) *)
+         let args = syntax_list_to_list rest in
+         (match args with
+          | clause_syn :: body ->
+            let parts = syntax_list_to_list clause_syn in
+            (match parts with
+             | var_syn :: clauses ->
+               scan_binding_names var_syn;
+               List.iter (fun c -> List.iter walk (syntax_list_to_list c)) clauses
+             | _ -> ());
+            List.iter walk body
+          | _ -> ())
        | _ ->
          List.iter walk (syntax_list_to_list s))
     | _ -> ()
@@ -602,6 +690,33 @@ and expand_quasiquote_list ~expand_fn loc (s : Syntax.t) depth : Syntax.t =
               { Syntax.datum = Syntax.Pair (rest,
                 { Syntax.datum = Syntax.Nil; loc }); loc }); loc }); loc }
         | _ -> compile_error loc "unquote-splicing expects 1 argument")
+     | Syntax.Pair (uqs, args_cdr) when
+       (match uqs.datum with Syntax.Symbol "unquote-splicing" -> true | _ -> false)
+       && depth > 0 ->
+       let args = syntax_list_to_list args_cdr in
+       (match args with
+        | [inner] ->
+          let expanded = expand_quasiquote ~expand_fn loc inner (depth - 1) in
+          let rest = expand_quasiquote_list ~expand_fn loc cdr depth in
+          (* Reconstruct (unquote-splicing expanded) as car element *)
+          let splice_form =
+            let qq_sym = { Syntax.datum = Syntax.Symbol "list"; loc } in
+            let quoted_uqs = { Syntax.datum = Syntax.Pair (
+              { Syntax.datum = Syntax.Symbol "quote"; loc },
+              { Syntax.datum = Syntax.Pair (
+                { Syntax.datum = Syntax.Symbol "unquote-splicing"; loc },
+                { Syntax.datum = Syntax.Nil; loc }); loc }); loc } in
+            { Syntax.datum = Syntax.Pair (qq_sym,
+              { Syntax.datum = Syntax.Pair (quoted_uqs,
+                { Syntax.datum = Syntax.Pair (expanded,
+                  { Syntax.datum = Syntax.Nil; loc }); loc }); loc }); loc }
+          in
+          let cons_sym = { Syntax.datum = Syntax.Symbol "cons"; loc } in
+          { Syntax.datum = Syntax.Pair (cons_sym,
+            { Syntax.datum = Syntax.Pair (splice_form,
+              { Syntax.datum = Syntax.Pair (rest,
+                { Syntax.datum = Syntax.Nil; loc }); loc }); loc }); loc }
+        | _ -> compile_error loc "unquote-splicing expects 1 argument")
      | _ ->
        let expanded_car = expand_quasiquote ~expand_fn loc car depth in
        let expanded_cdr = expand_quasiquote_list ~expand_fn loc cdr depth in
@@ -648,21 +763,22 @@ let expand_guard ~expand_fn ~gensym loc (s : Syntax.t) : Syntax.t =
                     list_to_syntax loc [
                       { Syntax.datum = Syntax.Symbol guard_k; loc }; expr]]
                 | [test; { Syntax.datum = Syntax.Symbol "=>"; _ }; proc] ->
-                  let result = gensym () in
+                  (* (test => proc) → (test (guard-k (proc test))) *)
                   list_to_syntax loc [test;
-                    { Syntax.datum = Syntax.Symbol "=>"; loc };
                     list_to_syntax loc [
-                      { Syntax.datum = Syntax.Symbol "lambda"; loc };
-                      list_to_syntax loc [{ Syntax.datum = Syntax.Symbol result; loc }];
-                      list_to_syntax loc [
-                        { Syntax.datum = Syntax.Symbol guard_k; loc };
-                        list_to_syntax loc [proc; { Syntax.datum = Syntax.Symbol result; loc }]]]]
+                      { Syntax.datum = Syntax.Symbol guard_k; loc };
+                      list_to_syntax loc [proc; test]]]
                 | test :: exprs when exprs <> [] ->
                   let last = List.nth exprs (List.length exprs - 1) in
                   let init = List.filteri (fun i _ -> i < List.length exprs - 1) exprs in
                   list_to_syntax loc (test :: init @ [
                     list_to_syntax loc [
                       { Syntax.datum = Syntax.Symbol guard_k; loc }; last]])
+                | [test] ->
+                  (* Test-only clause: (test) → (test (guard-k test)) *)
+                  list_to_syntax loc [test;
+                    list_to_syntax loc [
+                      { Syntax.datum = Syntax.Symbol guard_k; loc }; test]]
                 | _ -> clause
               ) cond_clauses in
               list_to_syntax loc
@@ -673,27 +789,26 @@ let expand_guard ~expand_fn ~gensym loc (s : Syntax.t) : Syntax.t =
                 let parts = syntax_list_to_list clause in
                 match parts with
                 | [test; { Syntax.datum = Syntax.Symbol "=>"; _ }; proc] ->
-                  let result = gensym () in
                   list_to_syntax loc [test;
-                    { Syntax.datum = Syntax.Symbol "=>"; loc };
                     list_to_syntax loc [
-                      { Syntax.datum = Syntax.Symbol "lambda"; loc };
-                      list_to_syntax loc [{ Syntax.datum = Syntax.Symbol result; loc }];
-                      list_to_syntax loc [
-                        { Syntax.datum = Syntax.Symbol guard_k; loc };
-                        list_to_syntax loc [proc; { Syntax.datum = Syntax.Symbol result; loc }]]]]
+                      { Syntax.datum = Syntax.Symbol guard_k; loc };
+                      list_to_syntax loc [proc; test]]]
                 | test :: exprs when exprs <> [] ->
                   let last = List.nth exprs (List.length exprs - 1) in
                   let init = List.filteri (fun i _ -> i < List.length exprs - 1) exprs in
                   list_to_syntax loc (test :: init @ [
                     list_to_syntax loc [
                       { Syntax.datum = Syntax.Symbol guard_k; loc }; last]])
+                | [test] ->
+                  list_to_syntax loc [test;
+                    list_to_syntax loc [
+                      { Syntax.datum = Syntax.Symbol guard_k; loc }; test]]
                 | _ -> clause
               ) cond_clauses in
               let else_clause = list_to_syntax loc [
                 { Syntax.datum = Syntax.Symbol "else"; loc };
                 list_to_syntax loc [
-                  { Syntax.datum = Syntax.Symbol "raise"; loc };
+                  { Syntax.datum = Syntax.Symbol "raise-continuable"; loc };
                   { Syntax.datum = Syntax.Symbol var_name; loc }]]
               in
               list_to_syntax loc
@@ -793,7 +908,10 @@ let expand_define_record_type ~expand_fn ~gensym loc (s : Syntax.t) : Syntax.t =
     let ctor_params = list_to_syntax loc (List.map mk_sym ctor_fields) in
     let ctor_header = { Syntax.datum = Syntax.Pair (mk_sym ctor_name, ctor_params); loc } in
     let vector_args = mk_sym tag_name :: List.map (fun fn ->
-      mk_sym fn
+      if List.mem fn ctor_fields then mk_sym fn
+      else (* uninitialized field — unspecified per R7RS *)
+        list_to_syntax loc [mk_sym "if"; { Syntax.datum = Syntax.Bool false; loc };
+                            { Syntax.datum = Syntax.Bool false; loc }]
     ) all_field_names in
     let ctor_body = list_to_syntax loc (mk_sym "vector" :: vector_args) in
     let ctor_def = list_to_syntax loc [mk_sym "define"; ctor_header; ctor_body] in
@@ -1060,7 +1178,7 @@ and expand_core ~syn_env ~gensym name (s : Syntax.t) : Syntax.t =
              (* Bind in the top-level frame of syn_env *)
              (match syn_env with
               | frame :: _ -> Hashtbl.replace frame macro_name (Macro tf)
-              | [] -> ());
+              | [] -> compile_error loc "define-syntax: empty syntactic environment");
              (* Return void *)
              { Syntax.datum = Syntax.Pair (
                { Syntax.datum = Syntax.Symbol "begin"; loc },

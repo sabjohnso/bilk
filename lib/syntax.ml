@@ -38,7 +38,7 @@ let rec from_datum loc (d : Datum.t) =
     | Datum.Symbol s -> Symbol s
     | Datum.Pair { car; cdr } -> Pair (from_datum loc car, from_datum loc cdr)
     | Datum.Vector elts -> Vector (Array.map (from_datum loc) elts)
-    | Datum.Bytevector bv -> Bytevector bv
+    | Datum.Bytevector bv -> Bytevector (Bytes.copy bv)
     | Datum.Nil -> Nil
     | Datum.Eof -> Eof
     | Datum.Void -> Symbol "#<void>"
