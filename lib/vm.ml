@@ -76,9 +76,25 @@ let rec execute ?(winds : Datum.wind list ref option) (env : Datum.env) (code : 
     | DW_thunk (f, _, _) | DW_after (f, _) -> f
   in
 
+  let vm_frame_to_cont_frame = function
+    | Standard f -> Datum.CF_standard f
+    | CWV_pending (f, consumer) -> Datum.CF_cwv_pending (f, consumer)
+    | DW_before (f, before, thunk, after) -> Datum.CF_dw_before (f, before, thunk, after)
+    | DW_thunk (f, before, after) -> Datum.CF_dw_thunk (f, before, after)
+    | DW_after (f, result) -> Datum.CF_dw_after (f, result)
+  in
+
+  let cont_frame_to_vm_frame = function
+    | Datum.CF_standard f -> Standard f
+    | Datum.CF_cwv_pending (f, consumer) -> CWV_pending (f, consumer)
+    | Datum.CF_dw_before (f, before, thunk, after) -> DW_before (f, before, thunk, after)
+    | Datum.CF_dw_thunk (f, before, after) -> DW_thunk (f, before, after)
+    | Datum.CF_dw_after (f, result) -> DW_after (f, result)
+  in
+
   let capture_continuation () =
     let saved_stack = Array.sub stack 0 !sp in
-    let saved_frames = List.map extract_call_frame !frames in
+    let saved_frames = List.map vm_frame_to_cont_frame !frames in
     Datum.Continuation {
       cont_stack = saved_stack;
       cont_sp = !sp;
@@ -126,7 +142,7 @@ let rec execute ?(winds : Datum.wind list ref option) (env : Datum.env) (code : 
       do_wind_switch !winds cont.cont_winds;
     Array.blit cont.cont_stack 0 stack 0 cont.cont_sp;
     sp := cont.cont_sp;
-    frames := List.map (fun f -> Standard f) cont.cont_frames;
+    frames := List.map cont_frame_to_vm_frame cont.cont_frames;
     cur_code := cont.cont_code;
     pc := cont.cont_pc;
     cur_env := cont.cont_env;
@@ -225,9 +241,15 @@ let rec execute ?(winds : Datum.wind list ref option) (env : Datum.env) (code : 
            let cont = capture_continuation () in
            perform_call proc [cont] ~is_tail
          end else begin
+           (* Capture continuation BEFORE pushing frame.  The continuation
+              represents "resume after call/cc returns".  The frame is only
+              needed for the normal return path (lambda returns without
+              calling k).  Including the frame in the continuation would
+              cause double-return when k is invoked and the result is
+              tail-called (e.g. the ((call/cc ...)) pattern). *)
+           let cont = capture_continuation () in
            let frame = make_call_frame () in
            frames := Standard frame :: !frames;
-           let cont = capture_continuation () in
            (match proc with
             | Datum.Closure clos ->
               let new_env = bind_params clos.clos_code [cont] clos.clos_env in

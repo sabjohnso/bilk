@@ -180,7 +180,7 @@ Tests live in `test/` as per-topic files and are run via `dune test`.
 | `test/test_instance.ml` | Instance (8 tests) |
 | `test/test_opcode.ml`   | Opcode (4 tests) |
 | `test/test_compiler.ml` | Compiler (14 tests) |
-| `test/test_vm.ml`       | VM (236 tests: end-to-end via Instance.eval_string) |
+| `test/test_vm.ml`       | VM (239 tests: end-to-end via Instance.eval_string) |
 | `test/test_m6_review.ml` | M6 bugfix regression (7 tests) |
 | `test/test_expander.ml` | Expander (8 tests) |
 

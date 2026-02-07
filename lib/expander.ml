@@ -796,83 +796,119 @@ let expand_guard ~expand_fn ~gensym loc (s : Syntax.t) : Syntax.t =
        (match var_syn.datum with
         | Syntax.Symbol var_name ->
           let guard_k = gensym () in
+          let handler_k = gensym () in
           let condition = gensym () in
-          (* Build nested if/let forms from clauses — each test evaluated once *)
+          let args_var = gensym () in
           let mk_sym n = { Syntax.datum = Syntax.Symbol n; loc } in
-          let mk_guard_k e = list_to_syntax loc [mk_sym guard_k; e] in
+          (* R7RS §4.2.7 / §7.3 double-call/cc pattern.
+             The inner handler-k continuation captures the dynamic
+             environment of the original raise.  When no clause matches,
+             (handler-k thunk) jumps back to that environment before
+             re-raising.  The body uses call-with-values to propagate
+             multiple return values. *)
           let cond_with_reraise =
+            let reraise =
+              list_to_syntax loc [mk_sym handler_k;
+                list_to_syntax loc [mk_sym "lambda";
+                  { Syntax.datum = Syntax.Nil; loc };
+                  (* dynamic-wind re-entry pushes the guard handler back;
+                     pop it so raise-continuable finds the outer handler *)
+                  list_to_syntax loc [mk_sym "begin";
+                    list_to_syntax loc [mk_sym "%pop-handler!"];
+                    list_to_syntax loc [mk_sym "raise-continuable";
+                      mk_sym condition]]]]
+            in
             let rec build_clauses = function
-              | [] ->
-                (* No match — re-raise with raise-continuable *)
-                list_to_syntax loc [mk_sym "raise-continuable"; mk_sym var_name]
+              | [] -> reraise
               | clause :: rest ->
                 let parts = syntax_list_to_list clause in
                 let fallthrough = build_clauses rest in
                 (match parts with
                  | { Syntax.datum = Syntax.Symbol "else"; _ } :: exprs when exprs <> [] ->
-                   mk_guard_k (list_to_syntax loc (mk_sym "begin" :: exprs))
+                   list_to_syntax loc (mk_sym "begin" :: exprs)
                  | [test; { Syntax.datum = Syntax.Symbol "=>"; _ }; proc] ->
-                   (* (test => proc): bind test once, pass value to proc *)
                    let v = gensym () in
                    list_to_syntax loc [mk_sym "let";
                      list_to_syntax loc [
                        list_to_syntax loc [mk_sym v; test]];
                      list_to_syntax loc [mk_sym "if"; mk_sym v;
-                       mk_guard_k (list_to_syntax loc [proc; mk_sym v]);
+                       list_to_syntax loc [proc; mk_sym v];
                        fallthrough]]
                  | [test] ->
-                   (* Test-only: bind test once, return value if truthy *)
                    let v = gensym () in
                    list_to_syntax loc [mk_sym "let";
                      list_to_syntax loc [
                        list_to_syntax loc [mk_sym v; test]];
                      list_to_syntax loc [mk_sym "if"; mk_sym v;
-                       mk_guard_k (mk_sym v);
+                       mk_sym v;
                        fallthrough]]
                  | test :: exprs when exprs <> [] ->
-                   (* Regular clause: test not needed in body *)
                    list_to_syntax loc [mk_sym "if"; test;
-                     mk_guard_k (list_to_syntax loc (mk_sym "begin" :: exprs));
+                     list_to_syntax loc (mk_sym "begin" :: exprs);
                      fallthrough]
                  | _ -> fallthrough)
             in
             build_clauses cond_clauses
           in
-          (* Build: (call/cc (lambda (guard-k)
-               (with-exception-handler
-                 (lambda (condition) (let ((var condition)) cond-expr))
-                 (lambda () body...)))) *)
-          let body_thunk = list_to_syntax loc [
-            { Syntax.datum = Syntax.Symbol "lambda"; loc };
+          (* Handler thunk passed to guard-k: evaluates clauses *)
+          let handler_inner_thunk = list_to_syntax loc [
+            mk_sym "lambda";
             { Syntax.datum = Syntax.Nil; loc };
-            list_to_syntax loc
-              ({ Syntax.datum = Syntax.Symbol "begin"; loc } :: body)
-          ] in
-          let handler = list_to_syntax loc [
-            { Syntax.datum = Syntax.Symbol "lambda"; loc };
-            list_to_syntax loc [{ Syntax.datum = Syntax.Symbol condition; loc }];
-            list_to_syntax loc [
-              { Syntax.datum = Syntax.Symbol "let"; loc };
+            list_to_syntax loc [mk_sym "let";
               list_to_syntax loc [
-                list_to_syntax loc [
-                  { Syntax.datum = Syntax.Symbol var_name; loc };
-                  { Syntax.datum = Syntax.Symbol condition; loc }]];
-              cond_with_reraise]
-          ] in
+                list_to_syntax loc [mk_sym var_name; mk_sym condition]];
+              cond_with_reraise]]
+          in
+          (* Handler: (lambda (condition)
+               ((call/cc (lambda (handler-k)
+                  (guard-k handler-inner-thunk))))) *)
+          let handler = list_to_syntax loc [
+            mk_sym "lambda";
+            list_to_syntax loc [mk_sym condition];
+            list_to_syntax loc [
+              list_to_syntax loc [mk_sym "call/cc";
+                list_to_syntax loc [mk_sym "lambda";
+                  list_to_syntax loc [mk_sym handler_k];
+                  list_to_syntax loc [mk_sym guard_k;
+                    handler_inner_thunk]]]]]
+          in
+          (* Body thunk: (lambda ()
+               (call-with-values
+                 (lambda () e1 e2 ...)
+                 (lambda args
+                   (guard-k (lambda () (apply values args)))))) *)
+          let body_thunk = list_to_syntax loc [
+            mk_sym "lambda";
+            { Syntax.datum = Syntax.Nil; loc };
+            list_to_syntax loc [
+              mk_sym "call-with-values";
+              list_to_syntax loc [
+                mk_sym "lambda";
+                { Syntax.datum = Syntax.Nil; loc };
+                list_to_syntax loc (mk_sym "begin" :: body)];
+              list_to_syntax loc [
+                mk_sym "lambda";
+                mk_sym args_var;
+                list_to_syntax loc [mk_sym guard_k;
+                  list_to_syntax loc [mk_sym "lambda";
+                    { Syntax.datum = Syntax.Nil; loc };
+                    list_to_syntax loc [mk_sym "apply";
+                      mk_sym "values"; mk_sym args_var]]]]]]
+          in
+          (* Full: ((call/cc (lambda (guard-k)
+                      (with-exception-handler handler body-thunk)))) *)
           let weh = list_to_syntax loc [
-            { Syntax.datum = Syntax.Symbol "with-exception-handler"; loc };
+            mk_sym "with-exception-handler";
             handler;
             body_thunk
           ] in
-          let callcc_body = list_to_syntax loc [
-            { Syntax.datum = Syntax.Symbol "lambda"; loc };
-            list_to_syntax loc [{ Syntax.datum = Syntax.Symbol guard_k; loc }];
-            weh
-          ] in
-          let result = list_to_syntax loc [
-            { Syntax.datum = Syntax.Symbol "call/cc"; loc };
-            callcc_body
-          ] in
+          let callcc = list_to_syntax loc [mk_sym "call/cc";
+            list_to_syntax loc [mk_sym "lambda";
+              list_to_syntax loc [mk_sym guard_k];
+              weh]]
+          in
+          (* ((call/cc ...)) — invoke the returned thunk *)
+          let result = list_to_syntax loc [callcc] in
           expand_fn result
         | _ -> compile_error loc "guard: expected variable name")
      | _ -> compile_error loc "guard: expected (var clause ...) body ...")
@@ -883,7 +919,7 @@ let expand_guard ~expand_fn ~gensym loc (s : Syntax.t) : Syntax.t =
 let expand_define_record_type ~expand_fn ~gensym loc (s : Syntax.t) : Syntax.t =
   let args = syntax_list_to_list s in
   match args with
-  | _ :: _name_syn :: ctor_syn :: pred_syn :: field_specs ->
+  | _ :: name_syn :: ctor_syn :: pred_syn :: field_specs ->
     (* Parse constructor: (ctor-name field ...) *)
     let ctor_parts = syntax_list_to_list ctor_syn in
     let (ctor_name, ctor_fields) = match ctor_parts with
@@ -896,6 +932,10 @@ let expand_define_record_type ~expand_fn ~gensym loc (s : Syntax.t) : Syntax.t =
           | _ -> compile_error loc "define-record-type: expected field name") fields in
         (cn, fs)
       | [] -> compile_error loc "define-record-type: empty constructor"
+    in
+    let type_name = match name_syn.datum with
+      | Syntax.Symbol n -> n
+      | _ -> compile_error loc "define-record-type: expected type name"
     in
     let pred_name = match pred_syn.datum with
       | Syntax.Symbol n -> n
@@ -982,7 +1022,10 @@ let expand_define_record_type ~expand_fn ~gensym loc (s : Syntax.t) : Syntax.t =
         in
         [acc_def; mut_def]
     ) fields |> List.concat in
-    let all_defs = tag_def :: ctor_def :: pred_def :: accessor_defs in
+    (* Bind record type name to tag per R7RS §5.5 *)
+    let name_def = list_to_syntax loc [mk_sym "define"; mk_sym type_name;
+      list_to_syntax loc [mk_sym "quote"; mk_sym tag_name]] in
+    let all_defs = tag_def :: name_def :: ctor_def :: pred_def :: accessor_defs in
     let begin_form = list_to_syntax loc (mk_sym "begin" :: all_defs) in
     expand_fn begin_form
   | _ -> compile_error loc "define-record-type: malformed"

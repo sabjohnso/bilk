@@ -93,11 +93,21 @@ and wind = {
   wind_after : t;       (** Thunk called on exit *)
 }
 
+(** A saved call frame in a continuation, preserving its frame type.
+    Standard frames are normal call/return frames.  The other variants
+    track multi-step intrinsic operations (call-with-values, dynamic-wind). *)
+and cont_frame =
+  | CF_standard of call_frame
+  | CF_cwv_pending of call_frame * t    (** call-with-values: pending consumer *)
+  | CF_dw_before of call_frame * t * t * t  (** dynamic-wind: before, thunk, after *)
+  | CF_dw_thunk of call_frame * t * t   (** dynamic-wind: before, after *)
+  | CF_dw_after of call_frame * t       (** dynamic-wind: saved result *)
+
 (** A captured first-class continuation. *)
 and continuation = {
   cont_stack : t array;          (** Snapshot of the value stack *)
   cont_sp : int;                 (** Stack pointer at capture time *)
-  cont_frames : call_frame list; (** Saved call frames *)
+  cont_frames : cont_frame list; (** Saved call frames with frame types *)
   cont_code : code;              (** Code at capture site *)
   cont_pc : int;                 (** Program counter at capture site *)
   cont_env : env;                (** Environment at capture site *)

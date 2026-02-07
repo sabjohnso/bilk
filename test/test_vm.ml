@@ -1302,6 +1302,28 @@ let test_guard_single_eval () =
        (raise 42))";
       "counter"])
 
+let test_guard_multi_values () =
+  (* Guard body should propagate multiple return values *)
+  check_datum "guard multi values" (Datum.Bool true)
+    (eval "(equal? '(1 2 3) \
+             (call-with-values \
+               (lambda () (guard (exn (else 'error)) (values 1 2 3))) \
+               list))")
+
+let test_guard_reraise_dyn_env () =
+  (* Re-raise should happen in the original raise's dynamic environment.
+     The dynamic-wind after thunk should fire exactly once on exit. *)
+  check_datum "guard reraise dyn env" (Datum.Bool true)
+    (eval_seq [
+      "(define log '())";
+      "(guard (exn (#t 'caught)) \
+         (guard (exn (#f)) \
+           (dynamic-wind \
+             (lambda () (set! log (cons 'in log))) \
+             (lambda () (raise 'boom)) \
+             (lambda () (set! log (cons 'out log))))))";
+      "(equal? '(out in out in) log)"])
+
 (* --- let-syntax / letrec-syntax --- *)
 
 let test_let_syntax_basic () =
@@ -1487,6 +1509,13 @@ let test_record_partial_ctor () =
       "(define-record-type <node> (make-leaf val) node? \
          (val node-val) (left node-left) (right node-right))";
       "(node-val (make-leaf 1))"])
+
+let test_record_type_name () =
+  (* R7RS §5.5: <name> is bound to a representation of the record type *)
+  check_datum "record type name bound" (Datum.Bool true)
+    (eval_seq [
+      "(define-record-type <point> (make-point x y) point? (x point-x) (y point-y))";
+      "(symbol? <point>)"])
 
 (* --- syntax-error --- *)
 
@@ -1829,6 +1858,8 @@ let () =
        ; Alcotest.test_case "test-only clause" `Quick test_guard_test_only_clause
        ; Alcotest.test_case "arrow clause" `Quick test_guard_arrow_clause
        ; Alcotest.test_case "single eval" `Quick test_guard_single_eval
+       ; Alcotest.test_case "multi values" `Quick test_guard_multi_values
+       ; Alcotest.test_case "reraise dyn env" `Quick test_guard_reraise_dyn_env
        ])
     ; ("define-record-type",
        [ Alcotest.test_case "basic" `Quick test_record_basic
@@ -1838,6 +1869,7 @@ let () =
        ; Alcotest.test_case "distinct types" `Quick test_record_distinct_types
        ; Alcotest.test_case "R7RS pare" `Quick test_record_r7rs_example
        ; Alcotest.test_case "partial ctor" `Quick test_record_partial_ctor
+       ; Alcotest.test_case "type name" `Quick test_record_type_name
        ])
     ; ("syntax-error",
        [ Alcotest.test_case "syntax-error" `Quick test_syntax_error

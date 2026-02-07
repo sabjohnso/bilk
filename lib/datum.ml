@@ -68,10 +68,17 @@ and wind = {
   wind_after : t;
 }
 
+and cont_frame =
+  | CF_standard of call_frame
+  | CF_cwv_pending of call_frame * t
+  | CF_dw_before of call_frame * t * t * t
+  | CF_dw_thunk of call_frame * t * t
+  | CF_dw_after of call_frame * t
+
 and continuation = {
   cont_stack : t array;
   cont_sp : int;
-  cont_frames : call_frame list;
+  cont_frames : cont_frame list;
   cont_code : code;
   cont_pc : int;
   cont_env : env;
