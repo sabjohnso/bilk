@@ -55,7 +55,33 @@ val create : ?readtable:Readtable.t -> unit -> t
 val intern : t -> string -> Symbol.t
 (** [intern inst name] is [Symbol.intern inst.symbols name]. *)
 
+(** {1 Lookup and registration} *)
+
+val lookup : t -> string -> Datum.t option
+(** [lookup inst name] looks up a binding by name in the global environment.
+    Returns [Some v] if bound, [None] otherwise. *)
+
+val define_primitive : t -> string -> (Datum.t list -> Datum.t) -> unit
+(** [define_primitive inst name fn] registers an OCaml function as a Scheme
+    primitive in the global environment and syntactic environment, making it
+    available to both compiled code and the macro expander. *)
+
+(** {1 Calling} *)
+
+val call : t -> Datum.t -> Datum.t list -> Datum.t
+(** [call inst proc args] calls a Scheme procedure (closure, primitive, or
+    continuation) with the given arguments.  Uses synthetic bytecode —
+    no compiler or reader involved.
+    @raise Vm.Runtime_error if [proc] is not callable or arity mismatch. *)
+
 (** {1 Evaluation} *)
+
+val eval_datum : t -> Datum.t -> Datum.t
+(** [eval_datum inst d] evaluates a runtime datum as an expression.
+    Self-evaluating values (numbers, booleans, strings) return themselves.
+    Symbols are looked up.  Lists are treated as procedure calls.
+    @raise Compiler.Compile_error on malformed syntax.
+    @raise Vm.Runtime_error on runtime errors. *)
 
 val eval_syntax : t -> Syntax.t -> Datum.t
 (** [eval_syntax inst expr] expands macros, compiles, and executes a syntax
@@ -68,6 +94,20 @@ val eval_string : t -> string -> Datum.t
     compiles, and executes it.  Returns the result.
     @raise Reader.Read_error on malformed input.
     @raise Compiler.Compile_error on malformed syntax or macro expansion error.
+    @raise Vm.Runtime_error on runtime errors. *)
+
+val load_file : t -> string -> unit
+(** [load_file inst path] loads and executes all expressions from a Scheme
+    source file.  Equivalent to opening the file as a port and calling
+    {!eval_port}, discarding the result.
+    Raises [Sys_error] if the file cannot be opened.
+    @raise Reader.Read_error on malformed input.
+    @raise Compiler.Compile_error on malformed syntax.
+    @raise Vm.Runtime_error on runtime errors. *)
+
+val load_fasl : t -> string -> unit
+(** [load_fasl inst path] loads and executes a pre-compiled FASL file.
+    @raise Fasl.Fasl_error on format or I/O errors.
     @raise Vm.Runtime_error on runtime errors. *)
 
 val eval_port : t -> Port.t -> Datum.t

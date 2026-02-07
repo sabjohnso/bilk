@@ -205,3 +205,18 @@ and pp_display_tail fmt = function
 
 let to_display_string d =
   Format.asprintf "%a" pp_display d
+
+let is_true = function
+  | Bool false -> false
+  | _ -> true
+
+let list_of xs =
+  List.fold_right (fun x acc -> Pair { car = x; cdr = acc }) xs Nil
+
+let rec to_list = function
+  | Nil -> Some []
+  | Pair { car; cdr } ->
+    (match to_list cdr with
+     | Some rest -> Some (car :: rest)
+     | None -> None)
+  | _ -> None

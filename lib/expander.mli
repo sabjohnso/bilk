@@ -56,6 +56,10 @@ val define_binding : syn_env -> string -> binding -> unit
 (** [define_binding env name b] adds or replaces the binding for [name]
     in the top (innermost) frame of [env]. *)
 
+val var_binding : binding
+(** A variable binding, suitable for registering user-defined primitives
+    so the expander does not reject them as unbound. *)
+
 val binding_names : syn_env -> string list
 (** [binding_names env] returns the list of all bound names visible in
     [env], with no duplicates.  Inner frames shadow outer frames. *)

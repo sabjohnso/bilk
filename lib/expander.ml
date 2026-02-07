@@ -1591,6 +1591,8 @@ let define_binding (env : syn_env) name b =
   | [] -> failwith "define_binding: empty syn_env (impossible)"
   | frame :: _ -> Hashtbl.replace frame name b
 
+let var_binding = Var
+
 let binding_names (env : syn_env) =
   List.fold_left (fun acc frame ->
     Hashtbl.fold (fun k _ acc -> if List.mem k acc then acc else k :: acc)

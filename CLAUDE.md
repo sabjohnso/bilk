@@ -189,6 +189,21 @@ Changes to existing modules:
   line editing, multiline input, history (`~/.wile_history`), REPL commands
   (`,help`, `,quit`, `,load`, `,env`), SIGINT handling, FASL cache enabled
 
+**Milestone 11 (OCaml Embedding API)** — complete.
+
+No new modules.  Adds a clean OCaml embedding API for host applications.
+
+Changes to existing modules:
+- `Datum`: Added `is_true` (R7RS truthiness), `list_of` (build proper list),
+  `to_list` (extract proper list)
+- `Instance`: Added `lookup` (global env lookup by name),
+  `define_primitive` (register OCaml function as Scheme primitive),
+  `call` (call Scheme procedure via synthetic bytecode),
+  `eval_datum` (evaluate a runtime datum as expression),
+  `load_file` (load and execute a `.scm` file),
+  `load_fasl` (load and execute a pre-compiled FASL file)
+- `Expander`: Added `var_binding` (variable binding for registration)
+
 ## Development Workflow
 
 **This project uses TDD (Test-Driven Development).** Follow this cycle:
@@ -216,7 +231,7 @@ Tests live in `test/` as per-topic files and are run via `dune test`.
 | File | Scope |
 |---|---|
 | `test/test_char_type.ml` | Char_type (4 tests) |
-| `test/test_datum.ml` | Datum (17 tests) |
+| `test/test_datum.ml` | Datum (20 tests) |
 | `test/test_readtable.ml` | Readtable (24 tests: 20 unit + 4 QCheck) |
 | `test/test_loc.ml` | Loc (4 tests) |
 | `test/test_syntax.ml` | Syntax (12 tests) |
@@ -224,13 +239,13 @@ Tests live in `test/` as per-topic files and are run via `dune test`.
 | `test/test_reader.ml` | Reader (31 tests: 30 unit + 1 QCheck) |
 | `test/test_symbol.ml` | Symbol (8 tests: 6 unit + 2 QCheck) |
 | `test/test_env.ml` | Env (14 tests) |
-| `test/test_instance.ml` | Instance (15 tests) |
+| `test/test_instance.ml` | Instance (28 tests) |
 | `test/test_opcode.ml`   | Opcode (4 tests) |
 | `test/test_compiler.ml` | Compiler (14 tests) |
 | `test/test_vm.ml`       | VM (296 tests: end-to-end via Instance.eval_string) |
 | `test/test_m6_review.ml` | M6 bugfix regression (7 tests) |
 | `test/test_expander.ml` | Expander (11 tests) |
-| `test/test_library.ml` | Library (24 tests) |
+| `test/test_library.ml` | Library (25 tests) |
 | `test/test_fasl.ml` | Fasl (40 tests) |
 
 Test dependencies:

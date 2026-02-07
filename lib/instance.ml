@@ -2197,6 +2197,35 @@ let process_imports inst import_sets =
 
 (* --- Evaluation --- *)
 
+let lookup inst name =
+  let sym = Symbol.intern inst.symbols name in
+  Env.lookup inst.global_env sym
+
+let define_primitive inst name fn =
+  let sym = Symbol.intern inst.symbols name in
+  let prim = Datum.Primitive { prim_name = name; prim_fn = fn; prim_intrinsic = None } in
+  Env.define inst.global_env sym prim;
+  Expander.define_binding inst.syn_env name (Expander.var_binding)
+
+let call inst proc args =
+  let n = List.length args in
+  let constants = Array.of_list (args @ [proc]) in
+  let instrs =
+    let buf = Array.make (2 * n + 3) Opcode.Halt in
+    List.iteri (fun i _ ->
+      buf.(2 * i) <- Opcode.Const i;
+      buf.(2 * i + 1) <- Opcode.Push) args;
+    buf.(2 * n) <- Opcode.Const n;
+    buf.(2 * n + 1) <- Opcode.Call n;
+    (* buf.(2 * n + 2) is already Halt *)
+    buf
+  in
+  let code : Datum.code = {
+    instructions = instrs; constants; symbols = [||]; children = [||];
+    params = [||]; variadic = false; name = "<call>";
+  } in
+  Vm.execute ~winds:inst.winds inst.global_env code
+
 let eval_syntax inst expr =
   match classify_top_level expr with
   | Import import_sets ->
@@ -2209,6 +2238,10 @@ let eval_syntax inst expr =
     let expanded = expand_with_callbacks inst expr in
     let code = Compiler.compile inst.symbols expanded in
     Vm.execute ~winds:inst.winds inst.global_env code
+
+let eval_datum inst d =
+  let expr = Syntax.from_datum Loc.none d in
+  eval_syntax inst expr
 
 let eval_string inst src =
   let port = Port.of_string src in
@@ -2223,3 +2256,11 @@ let eval_port inst port =
     | _ -> loop (eval_syntax inst expr)
   in
   loop Datum.Void
+
+let load_file inst path =
+  let port = Port.of_file path in
+  ignore (eval_port inst port)
+
+let load_fasl inst path =
+  let code = Fasl.read_code_from_file inst.symbols path in
+  ignore (Vm.execute ~winds:inst.winds inst.global_env code)

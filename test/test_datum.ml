@@ -136,6 +136,37 @@ let test_datum_values () =
   let v4 = Datum.Values [] in
   Alcotest.(check string) "values 0 pp" "#<values 0>" (Datum.to_string v4)
 
+let test_is_true () =
+  Alcotest.(check bool) "#f is false" false (Datum.is_true (Datum.Bool false));
+  Alcotest.(check bool) "#t is true" true (Datum.is_true (Datum.Bool true));
+  Alcotest.(check bool) "0 is true" true (Datum.is_true (Datum.Fixnum 0));
+  Alcotest.(check bool) "empty string is true" true (Datum.is_true (Datum.Str (Bytes.of_string "")));
+  Alcotest.(check bool) "nil is true" true (Datum.is_true Datum.Nil);
+  Alcotest.(check bool) "void is true" true (Datum.is_true Datum.Void)
+
+let test_list_of () =
+  check_datum "empty" Datum.Nil (Datum.list_of []);
+  check_datum "single" (Datum.Pair { car = Datum.Fixnum 1; cdr = Datum.Nil })
+    (Datum.list_of [Datum.Fixnum 1]);
+  check_datum "multiple"
+    (Datum.Pair { car = Datum.Fixnum 1;
+                  cdr = Datum.Pair { car = Datum.Fixnum 2;
+                                     cdr = Datum.Pair { car = Datum.Fixnum 3;
+                                                        cdr = Datum.Nil } } })
+    (Datum.list_of [Datum.Fixnum 1; Datum.Fixnum 2; Datum.Fixnum 3])
+
+let test_to_list () =
+  Alcotest.(check (option (list (Alcotest.testable Datum.pp Datum.equal))))
+    "empty list" (Some []) (Datum.to_list Datum.Nil);
+  Alcotest.(check (option (list (Alcotest.testable Datum.pp Datum.equal))))
+    "proper list" (Some [Datum.Fixnum 1; Datum.Fixnum 2])
+    (Datum.to_list (Datum.list_of [Datum.Fixnum 1; Datum.Fixnum 2]));
+  Alcotest.(check (option (list (Alcotest.testable Datum.pp Datum.equal))))
+    "improper list" None
+    (Datum.to_list (Datum.Pair { car = Datum.Fixnum 1; cdr = Datum.Fixnum 2 }));
+  Alcotest.(check (option (list (Alcotest.testable Datum.pp Datum.equal))))
+    "non-list" None (Datum.to_list (Datum.Fixnum 42))
+
 let test_datum_pp () =
   Alcotest.(check string) "#t" "#t" (Datum.to_string (Bool true));
   Alcotest.(check string) "#f" "#f" (Datum.to_string (Bool false));
@@ -178,5 +209,10 @@ let () =
        ; Alcotest.test_case "closure" `Quick test_datum_closure
        ; Alcotest.test_case "continuation" `Quick test_datum_continuation
        ; Alcotest.test_case "values" `Quick test_datum_values
+       ])
+    ; ("Helpers",
+       [ Alcotest.test_case "is_true" `Quick test_is_true
+       ; Alcotest.test_case "list_of" `Quick test_list_of
+       ; Alcotest.test_case "to_list" `Quick test_to_list
        ])
     ]

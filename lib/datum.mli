@@ -142,3 +142,18 @@ val pp_display : Format.formatter -> t -> unit
 
 val to_display_string : t -> string
 (** [to_display_string d] is [Format.asprintf "%a" pp_display d]. *)
+
+(** {1 Helpers} *)
+
+val is_true : t -> bool
+(** [is_true d] is R7RS truthiness: only [Bool false] is false.
+    All other values, including [Nil], [Void], [Fixnum 0], and the empty
+    string, are true. *)
+
+val list_of : t list -> t
+(** [list_of xs] builds a proper Scheme list from an OCaml list. *)
+
+val to_list : t -> t list option
+(** [to_list d] extracts a proper Scheme list as an OCaml list.
+    Returns [Some xs] for proper lists (including [Nil] → [Some \[\]]),
+    [None] for improper lists or non-list values. *)

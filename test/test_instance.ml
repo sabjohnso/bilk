@@ -97,6 +97,103 @@ let test_eval_port_define_use () =
   let port = Port.of_string "(define (square x) (* x x)) (square 7)" in
   check_datum "define+use" (Datum.Fixnum 49) (Instance.eval_port inst port)
 
+let test_lookup_known () =
+  let inst = Instance.create () in
+  match Instance.lookup inst "+" with
+  | Some (Datum.Primitive p) ->
+    Alcotest.(check string) "name" "+" p.prim_name
+  | _ -> Alcotest.fail "expected primitive for +"
+
+let test_lookup_unknown () =
+  let inst = Instance.create () in
+  Alcotest.(check bool) "not bound" true
+    (Option.is_none (Instance.lookup inst "no-such-thing"))
+
+let test_define_primitive () =
+  let inst = Instance.create () in
+  Instance.define_primitive inst "my-add" (fun args ->
+    match args with
+    | [Datum.Fixnum a; Datum.Fixnum b] -> Datum.Fixnum (a + b)
+    | _ -> Datum.Void);
+  check_datum "call from Scheme" (Datum.Fixnum 5)
+    (Instance.eval_string inst "(my-add 2 3)")
+
+let test_define_primitive_override () =
+  let inst = Instance.create () in
+  Instance.define_primitive inst "zero" (fun _ -> Datum.Fixnum 0);
+  check_datum "first" (Datum.Fixnum 0) (Instance.eval_string inst "(zero)");
+  Instance.define_primitive inst "zero" (fun _ -> Datum.Fixnum 99);
+  check_datum "override" (Datum.Fixnum 99) (Instance.eval_string inst "(zero)")
+
+let test_call_primitive () =
+  let inst = Instance.create () in
+  let plus = Option.get (Instance.lookup inst "+") in
+  check_datum "call +" (Datum.Fixnum 6)
+    (Instance.call inst plus [Datum.Fixnum 1; Datum.Fixnum 2; Datum.Fixnum 3])
+
+let test_call_closure () =
+  let inst = Instance.create () in
+  ignore (Instance.eval_string inst "(define (square x) (* x x))");
+  let square = Option.get (Instance.lookup inst "square") in
+  check_datum "call square" (Datum.Fixnum 49)
+    (Instance.call inst square [Datum.Fixnum 7])
+
+let test_call_zero_args () =
+  let inst = Instance.create () in
+  Instance.define_primitive inst "forty-two" (fun _ -> Datum.Fixnum 42);
+  let f = Option.get (Instance.lookup inst "forty-two") in
+  check_datum "call zero args" (Datum.Fixnum 42)
+    (Instance.call inst f [])
+
+let test_call_non_procedure () =
+  let inst = Instance.create () in
+  Alcotest.check_raises "call non-proc" (Vm.Runtime_error "not a procedure: 42")
+    (fun () -> ignore (Instance.call inst (Datum.Fixnum 42) []))
+
+let test_eval_datum_self () =
+  let inst = Instance.create () in
+  check_datum "fixnum" (Datum.Fixnum 42) (Instance.eval_datum inst (Datum.Fixnum 42));
+  check_datum "bool" (Datum.Bool true) (Instance.eval_datum inst (Datum.Bool true));
+  check_datum "string" (Datum.Str (Bytes.of_string "hi"))
+    (Instance.eval_datum inst (Datum.Str (Bytes.of_string "hi")))
+
+let test_eval_datum_symbol () =
+  let inst = Instance.create () in
+  ignore (Instance.eval_string inst "(define x 99)");
+  check_datum "symbol lookup" (Datum.Fixnum 99)
+    (Instance.eval_datum inst (Datum.Symbol "x"))
+
+let test_eval_datum_call () =
+  let inst = Instance.create () in
+  (* Build (+ 1 2) as a Datum *)
+  let expr = Datum.list_of [Datum.Symbol "+"; Datum.Fixnum 1; Datum.Fixnum 2] in
+  check_datum "call form" (Datum.Fixnum 3) (Instance.eval_datum inst expr)
+
+let test_load_file () =
+  let inst = Instance.create () in
+  let path = Filename.temp_file "wile_test" ".scm" in
+  Fun.protect ~finally:(fun () -> Sys.remove path) (fun () ->
+    let oc = open_out path in
+    output_string oc "(define load-test-var 123)";
+    close_out oc;
+    Instance.load_file inst path;
+    check_datum "loaded define" (Datum.Fixnum 123)
+      (Option.get (Instance.lookup inst "load-test-var")))
+
+let test_load_fasl () =
+  let inst = Instance.create () in
+  let path = Filename.temp_file "wile_test" ".fasl" in
+  Fun.protect ~finally:(fun () -> Sys.remove path) (fun () ->
+    (* Compile a simple expression to a code object and serialize it *)
+    let code = Compiler.compile inst.symbols
+      (Syntax.from_datum Loc.none
+        (Datum.list_of [Datum.Symbol "define"; Datum.Symbol "fasl-var";
+                        Datum.Fixnum 456])) in
+    Fasl.write_code_to_file path code;
+    Instance.load_fasl inst path;
+    check_datum "loaded fasl define" (Datum.Fixnum 456)
+      (Option.get (Instance.lookup inst "fasl-var")))
+
 let test_eval_port_import () =
   let inst = Instance.create () in
   let port = Port.of_string "(import (scheme base)) (+ 1 2)" in
@@ -118,6 +215,21 @@ let () =
        [ Alcotest.test_case "(scheme base) registered" `Quick test_scheme_base_registered
        ; Alcotest.test_case "(scheme char) registered" `Quick test_scheme_char_registered
        ; Alcotest.test_case "features" `Quick test_features
+       ])
+    ; ("Embedding",
+       [ Alcotest.test_case "lookup known" `Quick test_lookup_known
+       ; Alcotest.test_case "lookup unknown" `Quick test_lookup_unknown
+       ; Alcotest.test_case "define_primitive" `Quick test_define_primitive
+       ; Alcotest.test_case "define_primitive override" `Quick test_define_primitive_override
+       ; Alcotest.test_case "call primitive" `Quick test_call_primitive
+       ; Alcotest.test_case "call closure" `Quick test_call_closure
+       ; Alcotest.test_case "call zero args" `Quick test_call_zero_args
+       ; Alcotest.test_case "call non-procedure" `Quick test_call_non_procedure
+       ; Alcotest.test_case "eval_datum self-eval" `Quick test_eval_datum_self
+       ; Alcotest.test_case "eval_datum symbol" `Quick test_eval_datum_symbol
+       ; Alcotest.test_case "eval_datum call" `Quick test_eval_datum_call
+       ; Alcotest.test_case "load_file" `Quick test_load_file
+       ; Alcotest.test_case "load_fasl" `Quick test_load_fasl
        ])
     ; ("eval_port",
        [ Alcotest.test_case "multiple expressions" `Quick test_eval_port_multiple
