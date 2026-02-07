@@ -263,7 +263,11 @@ let read_code symbols data =
   let fmt = read_header data pos in
   if fmt <> 0 then
     fasl_error (Printf.sprintf "expected code FASL (type 0), got type %d" fmt);
-  read_code_obj symbols data pos
+  let code = read_code_obj symbols data pos in
+  if !pos <> Bytes.length data then
+    fasl_error (Printf.sprintf "trailing data: %d bytes remaining"
+      (Bytes.length data - !pos));
+  code
 
 (* --- File I/O --- *)
 
@@ -435,7 +439,13 @@ let read_lib_fasl symbols path =
 (* --- Cache helpers --- *)
 
 let fasl_path_for sld_path =
-  let base = Filename.chop_extension sld_path in
+  let base =
+    match Filename.chop_suffix_opt ~suffix:".sld" sld_path with
+    | Some b -> b
+    | None ->
+      try Filename.chop_extension sld_path
+      with Invalid_argument _ -> sld_path
+  in
   base ^ ".fasl"
 
 let is_cache_valid ~sld_path ~fasl_path =

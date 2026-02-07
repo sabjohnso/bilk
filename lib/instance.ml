@@ -1943,12 +1943,12 @@ let process_define_library ?sld_path inst name_syn decls =
     Expander.expand ~syn_env:lib_syn_env ~gensym:make_lib_gensym
       ~features ~has_library ~read_include expr
   in
-  (* Track declarations for FASL caching *)
+  let tracking = sld_path <> None && !(inst.fasl_cache) in
   let fasl_decls = ref [] in
   let eval_in_lib expr =
     let expanded = expand_in_lib expr in
     let code = Compiler.compile inst.symbols expanded in
-    fasl_decls := Fasl.Lib_code code :: !fasl_decls;
+    if tracking then fasl_decls := Fasl.Lib_code code :: !fasl_decls;
     ignore (Vm.execute ~winds:inst.winds lib_env code)
   in
   let eval_forms_in_lib forms =
@@ -1967,7 +1967,7 @@ let process_define_library ?sld_path inst name_syn decls =
       (* Import into the library env *)
       List.iter (fun iset_syntax ->
         let iset = Library.parse_import_set iset_syntax in
-        fasl_decls := Fasl.Lib_import iset :: !fasl_decls;
+        if tracking then fasl_decls := Fasl.Lib_import iset :: !fasl_decls;
         let lookup_fn name = !lib_lookup_ref inst name in
         let (rt_bindings, syn_bindings) = Library.resolve_import lookup_fn iset in
         List.iter (fun (name, _id, slot) ->
@@ -2097,23 +2097,15 @@ let replay_lib_fasl inst (fasl : Fasl.lib_fasl) =
     match decl with
     | Fasl.Lib_import iset ->
       let lookup_fn name = !lib_lookup_ref inst name in
-      let (rt_bindings, syn_bindings) = Library.resolve_import lookup_fn iset in
+      let (rt_bindings, _syn_bindings) = Library.resolve_import lookup_fn iset in
       List.iter (fun (name, _id, slot) ->
         let sym = Symbol.intern inst.symbols name in
         Env.define_slot lib_env sym slot
-      ) rt_bindings;
-      List.iter (fun (name, binding) ->
-        ignore (name, binding)
-        (* Syntax bindings are not needed for replay — the library
-           env only needs runtime slots for code execution *)
-      ) syn_bindings
+      ) rt_bindings
     | Fasl.Lib_code code ->
       ignore (Vm.execute ~winds:inst.winds lib_env code)
   ) fasl.declarations;
-  (* Build export tables from the fasl export specs *)
   let exports = Hashtbl.create 16 in
-  let syntax_exports = Hashtbl.create 16 in
-  ignore syntax_exports;
   List.iter (fun spec ->
     let (internal_name, external_name) = match spec with
       | Library.Export_id name -> (name, name)
@@ -2122,7 +2114,9 @@ let replay_lib_fasl inst (fasl : Fasl.lib_fasl) =
     let sym = Symbol.intern inst.symbols internal_name in
     match Env.lookup_slot lib_env sym with
     | Some slot -> Hashtbl.replace exports external_name (Symbol.id sym, slot)
-    | None -> ()
+    | None ->
+      failwith (Printf.sprintf
+        "FASL replay: exported name not defined: %s" internal_name)
   ) fasl.exports;
   let lib : Library.t = {
     name = fasl.lib_name;
@@ -2131,6 +2125,24 @@ let replay_lib_fasl inst (fasl : Fasl.lib_fasl) =
     syntax_exports = Hashtbl.create 0;
   } in
   Library.register inst.libraries lib
+
+let with_loading_guard inst name fn =
+  inst.loading_libs := name :: !(inst.loading_libs);
+  Fun.protect ~finally:(fun () ->
+    inst.loading_libs :=
+      List.filter (fun n -> n <> name) !(inst.loading_libs))
+    fn
+
+let load_from_source inst name sld_path =
+  with_loading_guard inst name (fun () ->
+    let port = Port.of_file sld_path in
+    let expr = Reader.read_syntax inst.readtable port in
+    match classify_top_level expr with
+    | Define_library (name_syn, decls) ->
+      process_define_library ~sld_path inst name_syn decls
+    | _ ->
+      failwith (Printf.sprintf
+        "library file %s does not contain define-library" sld_path))
 
 let try_load_library inst name =
   if List.mem name !(inst.loading_libs) then
@@ -2147,58 +2159,15 @@ let try_load_library inst name =
       (* Try loading from FASL cache *)
       try
         let fasl = Fasl.read_lib_fasl inst.symbols fasl_path in
-        if fasl.has_syntax_exports then begin
-          (* Syntax exports cannot be cached; fall back to source *)
-          inst.loading_libs := name :: !(inst.loading_libs);
-          Fun.protect ~finally:(fun () ->
-            inst.loading_libs :=
-              List.filter (fun n -> n <> name) !(inst.loading_libs))
-            (fun () ->
-              let port = Port.of_file sld_path in
-              let expr = Reader.read_syntax inst.readtable port in
-              match classify_top_level expr with
-              | Define_library (name_syn, decls) ->
-                process_define_library ~sld_path inst name_syn decls
-              | _ ->
-                failwith (Printf.sprintf
-                  "library file %s does not contain define-library" sld_path))
-        end else begin
-          inst.loading_libs := name :: !(inst.loading_libs);
-          Fun.protect ~finally:(fun () ->
-            inst.loading_libs :=
-              List.filter (fun n -> n <> name) !(inst.loading_libs))
-            (fun () -> replay_lib_fasl inst fasl)
-        end
+        if fasl.has_syntax_exports then
+          load_from_source inst name sld_path
+        else
+          with_loading_guard inst name (fun () ->
+            replay_lib_fasl inst fasl)
       with Fasl.Fasl_error _ ->
-        (* FASL is corrupt; fall back to source *)
-        inst.loading_libs := name :: !(inst.loading_libs);
-        Fun.protect ~finally:(fun () ->
-          inst.loading_libs :=
-            List.filter (fun n -> n <> name) !(inst.loading_libs))
-          (fun () ->
-            let port = Port.of_file sld_path in
-            let expr = Reader.read_syntax inst.readtable port in
-            match classify_top_level expr with
-            | Define_library (name_syn, decls) ->
-              process_define_library ~sld_path inst name_syn decls
-            | _ ->
-              failwith (Printf.sprintf
-                "library file %s does not contain define-library" sld_path))
-    end else begin
-      inst.loading_libs := name :: !(inst.loading_libs);
-      Fun.protect ~finally:(fun () ->
-        inst.loading_libs :=
-          List.filter (fun n -> n <> name) !(inst.loading_libs))
-        (fun () ->
-          let port = Port.of_file sld_path in
-          let expr = Reader.read_syntax inst.readtable port in
-          match classify_top_level expr with
-          | Define_library (name_syn, decls) ->
-            process_define_library ~sld_path inst name_syn decls
-          | _ ->
-            failwith (Printf.sprintf
-              "library file %s does not contain define-library" sld_path))
-    end
+        load_from_source inst name sld_path
+    end else
+      load_from_source inst name sld_path
 
 let lookup_or_load inst name =
   match Library.lookup inst.libraries name with
