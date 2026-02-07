@@ -1,3 +1,4 @@
 (library
  (name wile)
- (public_name wile))
+ (public_name wile)
+ (libraries unix))

@@ -10,6 +10,7 @@ type t = {
   search_paths : string list ref;
   features : string list;
   loading_libs : string list list ref;
+  fasl_cache : bool ref;
 }
 
 (* --- Primitive helpers --- *)
@@ -1886,7 +1887,7 @@ let create ?(readtable = Readtable.default) () =
   let inst = { symbols; global_env; readtable; winds = ref []; handlers;
                syn_env; gensym_counter; libraries;
                search_paths = ref []; features;
-               loading_libs = ref [] } in
+               loading_libs = ref []; fasl_cache = ref false } in
   List.iter (eval_boot inst) boot_definitions;
   register_builtin_libraries inst;
   inst
@@ -1913,7 +1914,7 @@ let rec syntax_list_to_list s =
   | Syntax.Pair (car, cdr) -> car :: syntax_list_to_list cdr
   | _ -> [s]
 
-let process_define_library inst name_syn decls =
+let process_define_library ?sld_path inst name_syn decls =
   let loc = name_syn.Syntax.loc in
   let lib_name = Library.parse_library_name name_syn in
   (* Create a fresh env and syn_env for the library *)
@@ -1942,9 +1943,12 @@ let process_define_library inst name_syn decls =
     Expander.expand ~syn_env:lib_syn_env ~gensym:make_lib_gensym
       ~features ~has_library ~read_include expr
   in
+  (* Track declarations for FASL caching *)
+  let fasl_decls = ref [] in
   let eval_in_lib expr =
     let expanded = expand_in_lib expr in
     let code = Compiler.compile inst.symbols expanded in
+    fasl_decls := Fasl.Lib_code code :: !fasl_decls;
     ignore (Vm.execute ~winds:inst.winds lib_env code)
   in
   let eval_forms_in_lib forms =
@@ -1963,6 +1967,7 @@ let process_define_library inst name_syn decls =
       (* Import into the library env *)
       List.iter (fun iset_syntax ->
         let iset = Library.parse_import_set iset_syntax in
+        fasl_decls := Fasl.Lib_import iset :: !fasl_decls;
         let lookup_fn name = !lib_lookup_ref inst name in
         let (rt_bindings, syn_bindings) = Library.resolve_import lookup_fn iset in
         List.iter (fun (name, _id, slot) ->
@@ -2046,7 +2051,20 @@ let process_define_library inst name_syn decls =
     exports;
     syntax_exports;
   } in
-  Library.register inst.libraries lib
+  Library.register inst.libraries lib;
+  (* Write FASL cache if loaded from .sld file and caching is enabled *)
+  (match sld_path with
+   | Some path when !(inst.fasl_cache) ->
+     let has_syn = Hashtbl.length syntax_exports > 0 in
+     let fasl : Fasl.lib_fasl = {
+       lib_name;
+       has_syntax_exports = has_syn;
+       exports = List.rev !export_specs;
+       declarations = List.rev !fasl_decls;
+     } in
+     let fasl_path = Fasl.fasl_path_for path in
+     (try Fasl.write_lib_fasl fasl_path fasl with Fasl.Fasl_error _ -> ())
+   | _ -> ())
 
 (* --- Top-level form classification --- *)
 
@@ -2073,6 +2091,47 @@ let lib_name_to_path search_dir name =
   Filename.concat search_dir
     (String.concat Filename.dir_sep name ^ ".sld")
 
+let replay_lib_fasl inst (fasl : Fasl.lib_fasl) =
+  let lib_env = Env.empty () in
+  List.iter (fun decl ->
+    match decl with
+    | Fasl.Lib_import iset ->
+      let lookup_fn name = !lib_lookup_ref inst name in
+      let (rt_bindings, syn_bindings) = Library.resolve_import lookup_fn iset in
+      List.iter (fun (name, _id, slot) ->
+        let sym = Symbol.intern inst.symbols name in
+        Env.define_slot lib_env sym slot
+      ) rt_bindings;
+      List.iter (fun (name, binding) ->
+        ignore (name, binding)
+        (* Syntax bindings are not needed for replay — the library
+           env only needs runtime slots for code execution *)
+      ) syn_bindings
+    | Fasl.Lib_code code ->
+      ignore (Vm.execute ~winds:inst.winds lib_env code)
+  ) fasl.declarations;
+  (* Build export tables from the fasl export specs *)
+  let exports = Hashtbl.create 16 in
+  let syntax_exports = Hashtbl.create 16 in
+  ignore syntax_exports;
+  List.iter (fun spec ->
+    let (internal_name, external_name) = match spec with
+      | Library.Export_id name -> (name, name)
+      | Library.Export_rename (internal, external_) -> (internal, external_)
+    in
+    let sym = Symbol.intern inst.symbols internal_name in
+    match Env.lookup_slot lib_env sym with
+    | Some slot -> Hashtbl.replace exports external_name (Symbol.id sym, slot)
+    | None -> ()
+  ) fasl.exports;
+  let lib : Library.t = {
+    name = fasl.lib_name;
+    env = lib_env;
+    exports;
+    syntax_exports = Hashtbl.create 0;
+  } in
+  Library.register inst.libraries lib
+
 let try_load_library inst name =
   if List.mem name !(inst.loading_libs) then
     failwith ("circular library dependency: " ^ Library.name_to_string name);
@@ -2082,20 +2141,64 @@ let try_load_library inst name =
   ) !(inst.search_paths) in
   match paths with
   | [] -> ()  (* no file found, will fail later at resolve_import *)
-  | path :: _ ->
-    inst.loading_libs := name :: !(inst.loading_libs);
-    Fun.protect ~finally:(fun () ->
-      inst.loading_libs :=
-        List.filter (fun n -> n <> name) !(inst.loading_libs))
-      (fun () ->
-        let port = Port.of_file path in
-        let expr = Reader.read_syntax inst.readtable port in
-        match classify_top_level expr with
-        | Define_library (name_syn, decls) ->
-          process_define_library inst name_syn decls
-        | _ ->
-          failwith (Printf.sprintf
-            "library file %s does not contain define-library" path))
+  | sld_path :: _ ->
+    let fasl_path = Fasl.fasl_path_for sld_path in
+    if !(inst.fasl_cache) && Fasl.is_cache_valid ~sld_path ~fasl_path then begin
+      (* Try loading from FASL cache *)
+      try
+        let fasl = Fasl.read_lib_fasl inst.symbols fasl_path in
+        if fasl.has_syntax_exports then begin
+          (* Syntax exports cannot be cached; fall back to source *)
+          inst.loading_libs := name :: !(inst.loading_libs);
+          Fun.protect ~finally:(fun () ->
+            inst.loading_libs :=
+              List.filter (fun n -> n <> name) !(inst.loading_libs))
+            (fun () ->
+              let port = Port.of_file sld_path in
+              let expr = Reader.read_syntax inst.readtable port in
+              match classify_top_level expr with
+              | Define_library (name_syn, decls) ->
+                process_define_library ~sld_path inst name_syn decls
+              | _ ->
+                failwith (Printf.sprintf
+                  "library file %s does not contain define-library" sld_path))
+        end else begin
+          inst.loading_libs := name :: !(inst.loading_libs);
+          Fun.protect ~finally:(fun () ->
+            inst.loading_libs :=
+              List.filter (fun n -> n <> name) !(inst.loading_libs))
+            (fun () -> replay_lib_fasl inst fasl)
+        end
+      with Fasl.Fasl_error _ ->
+        (* FASL is corrupt; fall back to source *)
+        inst.loading_libs := name :: !(inst.loading_libs);
+        Fun.protect ~finally:(fun () ->
+          inst.loading_libs :=
+            List.filter (fun n -> n <> name) !(inst.loading_libs))
+          (fun () ->
+            let port = Port.of_file sld_path in
+            let expr = Reader.read_syntax inst.readtable port in
+            match classify_top_level expr with
+            | Define_library (name_syn, decls) ->
+              process_define_library ~sld_path inst name_syn decls
+            | _ ->
+              failwith (Printf.sprintf
+                "library file %s does not contain define-library" sld_path))
+    end else begin
+      inst.loading_libs := name :: !(inst.loading_libs);
+      Fun.protect ~finally:(fun () ->
+        inst.loading_libs :=
+          List.filter (fun n -> n <> name) !(inst.loading_libs))
+        (fun () ->
+          let port = Port.of_file sld_path in
+          let expr = Reader.read_syntax inst.readtable port in
+          match classify_top_level expr with
+          | Define_library (name_syn, decls) ->
+            process_define_library ~sld_path inst name_syn decls
+          | _ ->
+            failwith (Printf.sprintf
+              "library file %s does not contain define-library" sld_path))
+    end
 
 let lookup_or_load inst name =
   match Library.lookup inst.libraries name with

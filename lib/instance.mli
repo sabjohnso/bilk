@@ -35,6 +35,10 @@ type t = {
   loading_libs : string list list ref;
   (** Libraries currently being loaded from [.sld] files.
       Used to detect circular dependencies during auto-loading. *)
+  fasl_cache : bool ref;
+  (** When [true], compiled library code is cached to [.fasl] files
+      alongside the source [.sld] files, and loaded from cache when
+      the cache is fresh.  Defaults to [false]. *)
 }
 
 (** {1 Constructors} *)

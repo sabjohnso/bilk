@@ -162,6 +162,19 @@ Changes to existing modules:
   libraries built at creation; auto-loading of `.sld` library files from
   search paths with circular dependency detection
 
+**Milestone 9 (FASL Format)** — complete.
+
+| Module | Purpose                                                        |
+|--------|----------------------------------------------------------------|
+| `Fasl` | Binary serialization of compiled code and library FASL caching |
+
+Changes to existing modules:
+- `Instance`: Added `fasl_cache` field (opt-in); when enabled,
+  `process_define_library` records declarations and writes `.fasl` cache
+  alongside `.sld` source; `try_load_library` checks cache freshness and
+  replays from FASL when valid, falling back to source compilation when
+  stale or when library has syntax exports
+
 ## Development Workflow
 
 **This project uses TDD (Test-Driven Development).** Follow this cycle:
@@ -204,6 +217,7 @@ Tests live in `test/` as per-topic files and are run via `dune test`.
 | `test/test_m6_review.ml` | M6 bugfix regression (7 tests) |
 | `test/test_expander.ml` | Expander (11 tests) |
 | `test/test_library.ml` | Library (24 tests) |
+| `test/test_fasl.ml` | Fasl (40 tests) |
 
 Test dependencies:
 - **alcotest** — unit test framework with readable output
