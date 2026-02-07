@@ -1,0 +1,3 @@
+(executables
+ (names embedding_basics custom_primitives)
+ (libraries wile unix))
