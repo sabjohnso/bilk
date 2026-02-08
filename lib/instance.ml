@@ -2147,7 +2147,7 @@ let detect_features () =
     | "Cygwin" -> "cygwin"
     | s -> String.lowercase_ascii s
   in
-  ["r7rs"; "wile"; os]
+  ["r7rs"; "wile"; os] @ Srfi.bundled_features
 
 (* --- R7RS export names --- *)
 
@@ -2236,6 +2236,7 @@ let scheme_base_syntax_names = [
   "cond"; "case"; "do"; "and"; "or"; "when"; "unless";
   "define-syntax"; "let-syntax"; "letrec-syntax";
   "quasiquote"; "guard"; "define-record-type"; "syntax-error";
+  "let-values"; "let*-values";
 ]
 
 let scheme_char_names = [
@@ -2424,7 +2425,17 @@ let register_builtin_libraries inst =
   build_library inst ["scheme"; "repl"]
     scheme_repl_names [];
   build_library inst ["scheme"; "r5rs"]
-    scheme_r5rs_runtime_names scheme_r5rs_syntax_names
+    scheme_r5rs_runtime_names scheme_r5rs_syntax_names;
+  (* SRFI 151 — bitwise operations (OCaml primitives) *)
+  let srfi_151_names = [
+    "bitwise-not"; "bitwise-and"; "bitwise-ior"; "bitwise-xor";
+    "arithmetic-shift"; "bit-count"; "integer-length"; "bitwise-if";
+    "bit-set?"; "copy-bit"; "bit-swap";
+    "any-bit-set?"; "every-bit-set?"; "first-set-bit";
+    "bit-field"; "bit-field-any?"; "bit-field-every?";
+    "bit-field-replace"; "bit-field-rotate"; "bit-field-reverse";
+  ] in
+  build_library inst ["srfi"; "151"] srfi_151_names []
 
 (* --- Expander callbacks --- *)
 
@@ -2684,6 +2695,133 @@ let create ?(readtable = Readtable.default) () =
       p.promise_value
     | [v] -> v  (* R7RS: (force non-promise) returns the value *)
     | _ -> runtime_error (Printf.sprintf "force: expected 1 argument, got %d" (List.length args)));
+  (* --- SRFI 151 bitwise primitives --- *)
+  register_late "bitwise-not" (fun args -> match args with
+    | [Datum.Fixnum n] -> Datum.Fixnum (lnot n)
+    | _ -> runtime_error "bitwise-not: expected 1 integer");
+  register_late "bitwise-and" (fun args ->
+    let to_int = function Datum.Fixnum n -> n
+      | _ -> runtime_error "bitwise-and: expected integers" in
+    Datum.Fixnum (List.fold_left (fun acc x -> acc land to_int x) (-1) args));
+  register_late "bitwise-ior" (fun args ->
+    let to_int = function Datum.Fixnum n -> n
+      | _ -> runtime_error "bitwise-ior: expected integers" in
+    Datum.Fixnum (List.fold_left (fun acc x -> acc lor to_int x) 0 args));
+  register_late "bitwise-xor" (fun args ->
+    let to_int = function Datum.Fixnum n -> n
+      | _ -> runtime_error "bitwise-xor: expected integers" in
+    Datum.Fixnum (List.fold_left (fun acc x -> acc lxor to_int x) 0 args));
+  register_late "arithmetic-shift" (fun args -> match args with
+    | [Datum.Fixnum n; Datum.Fixnum count] ->
+      if count >= 0 then Datum.Fixnum (n lsl count)
+      else Datum.Fixnum (n asr (- count))
+    | _ -> runtime_error "arithmetic-shift: expected 2 integers");
+  register_late "bit-count" (fun args -> match args with
+    | [Datum.Fixnum n] ->
+      let n = if n < 0 then lnot n else n in
+      let rec popcount n acc =
+        if n = 0 then acc
+        else popcount (n lsr 1) (acc + (n land 1))
+      in
+      Datum.Fixnum (popcount n 0)
+    | _ -> runtime_error "bit-count: expected 1 integer");
+  register_late "integer-length" (fun args -> match args with
+    | [Datum.Fixnum n] ->
+      let n = if n < 0 then lnot n else n in
+      let rec ilog n acc =
+        if n = 0 then acc
+        else ilog (n lsr 1) (acc + 1)
+      in
+      Datum.Fixnum (ilog n 0)
+    | _ -> runtime_error "integer-length: expected 1 integer");
+  register_late "bitwise-if" (fun args -> match args with
+    | [Datum.Fixnum mask; Datum.Fixnum i; Datum.Fixnum j] ->
+      Datum.Fixnum ((mask land i) lor ((lnot mask) land j))
+    | _ -> runtime_error "bitwise-if: expected 3 integers");
+  register_late "bit-set?" (fun args -> match args with
+    | [Datum.Fixnum k; Datum.Fixnum n] ->
+      Datum.Bool (n land (1 lsl k) <> 0)
+    | _ -> runtime_error "bit-set?: expected 2 integers");
+  register_late "copy-bit" (fun args -> match args with
+    | [Datum.Fixnum k; Datum.Fixnum n; Datum.Bool bit] ->
+      if bit then Datum.Fixnum (n lor (1 lsl k))
+      else Datum.Fixnum (n land (lnot (1 lsl k)))
+    | _ -> runtime_error "copy-bit: expected index, integer, boolean");
+  register_late "bit-swap" (fun args -> match args with
+    | [Datum.Fixnum i; Datum.Fixnum j; Datum.Fixnum n] ->
+      let bi = (n lsr i) land 1 in
+      let bj = (n lsr j) land 1 in
+      if bi = bj then Datum.Fixnum n
+      else Datum.Fixnum (n lxor ((1 lsl i) lor (1 lsl j)))
+    | _ -> runtime_error "bit-swap: expected 3 integers");
+  register_late "any-bit-set?" (fun args -> match args with
+    | [Datum.Fixnum i; Datum.Fixnum j] ->
+      Datum.Bool (i land j <> 0)
+    | _ -> runtime_error "any-bit-set?: expected 2 integers");
+  register_late "every-bit-set?" (fun args -> match args with
+    | [Datum.Fixnum i; Datum.Fixnum j] ->
+      Datum.Bool (i land j = j)
+    | _ -> runtime_error "every-bit-set?: expected 2 integers");
+  register_late "first-set-bit" (fun args -> match args with
+    | [Datum.Fixnum n] ->
+      if n = 0 then Datum.Fixnum (-1)
+      else
+        let rec fsb n k =
+          if n land 1 = 1 then k
+          else fsb (n lsr 1) (k + 1)
+        in
+        Datum.Fixnum (fsb (if n < 0 then lnot n lor 1 else n) 0)
+    | _ -> runtime_error "first-set-bit: expected 1 integer");
+  register_late "bit-field" (fun args -> match args with
+    | [Datum.Fixnum n; Datum.Fixnum start; Datum.Fixnum end_] ->
+      let width = end_ - start in
+      let mask = (1 lsl width) - 1 in
+      Datum.Fixnum ((n lsr start) land mask)
+    | _ -> runtime_error "bit-field: expected 3 integers");
+  register_late "bit-field-any?" (fun args -> match args with
+    | [Datum.Fixnum n; Datum.Fixnum start; Datum.Fixnum end_] ->
+      let width = end_ - start in
+      let mask = (1 lsl width) - 1 in
+      Datum.Bool ((n lsr start) land mask <> 0)
+    | _ -> runtime_error "bit-field-any?: expected 3 integers");
+  register_late "bit-field-every?" (fun args -> match args with
+    | [Datum.Fixnum n; Datum.Fixnum start; Datum.Fixnum end_] ->
+      let width = end_ - start in
+      let mask = (1 lsl width) - 1 in
+      Datum.Bool ((n lsr start) land mask = mask)
+    | _ -> runtime_error "bit-field-every?: expected 3 integers");
+  register_late "bit-field-replace" (fun args -> match args with
+    | [Datum.Fixnum n; Datum.Fixnum replacement; Datum.Fixnum start; Datum.Fixnum end_] ->
+      let width = end_ - start in
+      let mask = (1 lsl width) - 1 in
+      let cleared = n land (lnot (mask lsl start)) in
+      Datum.Fixnum (cleared lor ((replacement land mask) lsl start))
+    | _ -> runtime_error "bit-field-replace: expected 4 integers");
+  register_late "bit-field-rotate" (fun args -> match args with
+    | [Datum.Fixnum n; Datum.Fixnum count; Datum.Fixnum start; Datum.Fixnum end_] ->
+      let width = end_ - start in
+      if width = 0 then Datum.Fixnum n
+      else
+        let mask = (1 lsl width) - 1 in
+        let field = (n lsr start) land mask in
+        let count = ((count mod width) + width) mod width in
+        let rotated = ((field lsl count) lor (field lsr (width - count))) land mask in
+        let cleared = n land (lnot (mask lsl start)) in
+        Datum.Fixnum (cleared lor (rotated lsl start))
+    | _ -> runtime_error "bit-field-rotate: expected 4 integers");
+  register_late "bit-field-reverse" (fun args -> match args with
+    | [Datum.Fixnum n; Datum.Fixnum start; Datum.Fixnum end_] ->
+      let width = end_ - start in
+      let mask = (1 lsl width) - 1 in
+      let field = (n lsr start) land mask in
+      let rec rev_bits v w acc =
+        if w = 0 then acc
+        else rev_bits (v lsr 1) (w - 1) ((acc lsl 1) lor (v land 1))
+      in
+      let reversed = rev_bits field width 0 in
+      let cleared = n land (lnot (mask lsl start)) in
+      Datum.Fixnum (cleared lor (reversed lsl start))
+    | _ -> runtime_error "bit-field-reverse: expected 3 integers");
   register_builtin_libraries inst;
   inst
 
@@ -2947,7 +3085,19 @@ let try_load_library inst name =
     if Sys.file_exists path then Some path else None
   ) !(inst.search_paths) in
   match paths with
-  | [] -> ()  (* no file found, will fail later at resolve_import *)
+  | [] ->
+    (* No on-disk .sld file found; try bundled SRFI sources *)
+    (match Srfi.lookup name with
+     | None -> ()  (* no file found, will fail later at resolve_import *)
+     | Some src ->
+       with_loading_guard inst name (fun () ->
+         let port = Port.of_string src in
+         let expr = Reader.read_syntax inst.readtable port in
+         match classify_top_level expr with
+         | Define_library (name_syn, decls) ->
+           process_define_library inst name_syn decls
+         | _ ->
+           failwith "embedded SRFI does not contain define-library"))
   | sld_path :: _ ->
     let fasl_path = Fasl.fasl_path_for sld_path in
     if !(inst.fasl_cache) && Fasl.is_cache_valid ~sld_path ~fasl_path then begin

@@ -47,6 +47,7 @@ let core_forms = [
   "cond-expand"; "include"; "include-ci";
   "delay"; "delay-force";
   "case-lambda";
+  "let-values"; "let*-values";
 ]
 
 let core_env () =
@@ -1544,6 +1545,36 @@ and expand_core ~syn_env ~gensym ~ctx name (s : Syntax.t) : Syntax.t =
          thunk
        ]
      | _ -> compile_error loc "delay-force: expected single expression")
+
+  | "let-values" | "let*-values" ->
+    (* (let-values (((a b) e1) ((c) e2)) body ...)
+       → (call-with-values (lambda () e1)
+           (lambda (a b)
+             (call-with-values (lambda () e2)
+               (lambda (c)
+                 (begin body ...))))) *)
+    let args = syntax_list_to_list s in
+    (match args with
+     | _ :: bindings_syn :: body when body <> [] ->
+       let bindings = syntax_list_to_list bindings_syn in
+       let mk_sym name = { Syntax.datum = Syntax.Symbol name; loc } in
+       let mk_nil = { Syntax.datum = Syntax.Nil; loc } in
+       let wrap_body = list_to_syntax loc (mk_sym "begin" :: body) in
+       let result = List.fold_right (fun binding inner ->
+         let parts = syntax_list_to_list binding in
+         match parts with
+         | [formals; init] ->
+           list_to_syntax loc [
+             mk_sym "call-with-values";
+             list_to_syntax loc [mk_sym "lambda"; mk_nil; init];
+             list_to_syntax loc [mk_sym "lambda"; formals; inner]
+           ]
+         | _ -> compile_error loc "let-values: malformed binding"
+       ) bindings wrap_body in
+       expand_impl ~syn_env ~gensym ~ctx result
+     | _ :: _ :: [] ->
+       compile_error loc "let-values: missing body"
+     | _ -> compile_error loc "let-values: expected bindings and body")
 
   | _ -> expand_application ~syn_env ~gensym ~ctx s
 

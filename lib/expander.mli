@@ -19,7 +19,7 @@ val core_env : unit -> syn_env
     [case], [do], [and], [or], [when], [unless], [define-syntax],
     [let-syntax], [letrec-syntax], [quasiquote], [guard],
     [define-record-type], [syntax-error], [cond-expand], [include],
-    [include-ci]). *)
+    [include-ci], [let-values], [let*-values]). *)
 
 (** {1 Expansion} *)
 

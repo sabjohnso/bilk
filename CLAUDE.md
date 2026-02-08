@@ -370,6 +370,31 @@ Changes to existing modules:
   `(scheme process-context)`, `(scheme time)`, `(scheme eval)`,
   `(scheme load)`, `(scheme repl)`, `(scheme r5rs)`
 
+**Milestone 16 (SRFI Support)** — complete.
+
+| Module | Purpose |
+|--------|---------|
+| `Srfi` | Bundled SRFI library sources with lazy loading infrastructure |
+
+Adds infrastructure for bundled SRFIs + implements 13 SRFIs. Embedded
+`define-library` source strings in `Srfi` module, loaded lazily when
+`(import (srfi N))` is first encountered and no on-disk `.sld` file exists.
+
+Bundled SRFIs:
+- **Pure Scheme:** SRFI 1 (lists), 2 (and-let*), 8 (receive), 11 (let-values),
+  16 (case-lambda), 26 (cut/cute), 28 (format), 31 (rec), 111 (boxes),
+  128 (comparators), 132 (sort), 133 (vectors)
+- **OCaml primitives:** SRFI 151 (bitwise operations, 20 primitives)
+
+Changes to existing modules:
+- `Expander`: Added `let-values`, `let*-values` to `core_forms`; expansion
+  via nested `call-with-values` / `lambda`
+- `Instance`: Added SRFI fallback in `try_load_library` (after file search
+  fails, checks `Srfi.lookup`); added `Srfi.bundled_features` to
+  `detect_features`; registered 20 SRFI 151 bitwise primitives; added
+  `let-values`/`let*-values` to `scheme_base_syntax_names`; built-in
+  `(srfi 151)` library via `build_library`
+
 ## Development Workflow
 
 **This project uses TDD (Test-Driven Development).** Follow this cycle:
@@ -423,6 +448,7 @@ Tests live in `test/` as per-topic files and are run via `dune test`.
 | `test/test_semver.ml` | Semver (34 tests) |
 | `test/test_package.ml` | Package (16 tests) |
 | `test/test_pkg_manager.ml` | Pkg_manager (25 tests) |
+| `test/test_srfi.ml` | SRFI (84 tests) |
 
 Test dependencies:
 - **alcotest** — unit test framework with readable output
