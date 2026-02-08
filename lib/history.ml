@@ -62,6 +62,52 @@ let next t =
     end
   end
 
+let has_prefix prefix s =
+  let plen = String.length prefix in
+  String.length s >= plen && String.sub s 0 plen = prefix
+
+let prev_matching t prefix =
+  if t.count = 0 then None
+  else begin
+    let start =
+      if t.nav_pos < 0 then t.count - 1
+      else t.nav_pos - 1
+    in
+    let pos = ref start in
+    let found = ref false in
+    while !pos >= 0 && not !found do
+      if has_prefix prefix t.entries.(!pos) then
+        found := true
+      else
+        decr pos
+    done;
+    if !found then begin
+      t.nav_pos <- !pos;
+      Some t.entries.(!pos)
+    end else
+      None
+  end
+
+let next_matching t prefix =
+  if t.nav_pos < 0 then None
+  else begin
+    let pos = ref (t.nav_pos + 1) in
+    let found = ref false in
+    while !pos < t.count && not !found do
+      if has_prefix prefix t.entries.(!pos) then
+        found := true
+      else
+        incr pos
+    done;
+    if !found then begin
+      t.nav_pos <- !pos;
+      Some t.entries.(!pos)
+    end else begin
+      t.nav_pos <- -1;
+      None
+    end
+  end
+
 let save_to_file t path =
   let oc = open_out path in
   Fun.protect ~finally:(fun () -> close_out oc) (fun () ->

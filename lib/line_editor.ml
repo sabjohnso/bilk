@@ -471,12 +471,18 @@ let read_input t =
         st.cursor <- pos_of_row_col text (row - 1) col;
         render t st
       end else begin
-        (* On first line — navigate history *)
-        (match History.prev t.history with
+        (* On first line — navigate history, with prefix filtering *)
+        let prefix = String.sub text 0 st.cursor in
+        let hist_fn = if prefix = "" then fun () -> History.prev t.history
+                      else fun () -> History.prev_matching t.history prefix in
+        (match hist_fn () with
          | Some entry ->
            if st.saved_input = "" && text <> "" then
              st.saved_input <- text;
-           set_content st entry
+           set_content st entry;
+           (* Keep cursor at end of prefix for prefix search *)
+           if prefix <> "" then
+             st.cursor <- String.length prefix
          | None -> ());
         render t st
       end;
@@ -492,13 +498,20 @@ let read_input t =
         st.cursor <- pos_of_row_col text (row + 1) col;
         render t st
       end else begin
-        (* On last line — navigate history *)
-        (match History.next t.history with
+        (* On last line — navigate history, with prefix filtering *)
+        let prefix = String.sub text 0 st.cursor in
+        let hist_fn = if prefix = "" then fun () -> History.next t.history
+                      else fun () -> History.next_matching t.history prefix in
+        (match hist_fn () with
          | Some entry ->
-           set_content st entry
+           set_content st entry;
+           if prefix <> "" then
+             st.cursor <- String.length prefix
          | None ->
            set_content st st.saved_input;
-           st.saved_input <- "");
+           st.saved_input <- "";
+           if prefix <> "" then
+             st.cursor <- min (String.length prefix) (String.length (content_string st)));
         render t st
       end;
       loop ()

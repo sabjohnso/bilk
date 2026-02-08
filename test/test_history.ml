@@ -110,6 +110,51 @@ let test_nav_empty () =
   Alcotest.(check (option string)) "prev empty" None (History.prev h);
   Alcotest.(check (option string)) "next empty" None (History.next h)
 
+(* --- Prefix matching navigation --- *)
+
+let test_prev_matching_basic () =
+  let h = History.create () in
+  History.add h "(define x 1)";
+  History.add h "(+ 1 2)";
+  History.add h "(define y 2)";
+  History.reset_nav h;
+  Alcotest.(check (option string)) "match 1"
+    (Some "(define y 2)") (History.prev_matching h "(def");
+  Alcotest.(check (option string)) "match 2"
+    (Some "(define x 1)") (History.prev_matching h "(def");
+  Alcotest.(check (option string)) "no more"
+    None (History.prev_matching h "(def")
+
+let test_prev_matching_no_match () =
+  let h = History.create () in
+  History.add h "(+ 1 2)";
+  History.add h "(* 3 4)";
+  History.reset_nav h;
+  Alcotest.(check (option string)) "no match"
+    None (History.prev_matching h "(def")
+
+let test_next_matching_basic () =
+  let h = History.create () in
+  History.add h "(define x 1)";
+  History.add h "(+ 1 2)";
+  History.add h "(define y 2)";
+  History.reset_nav h;
+  (* Navigate back past all *)
+  ignore (History.prev_matching h "(def");
+  ignore (History.prev_matching h "(def");
+  (* Now go forward *)
+  Alcotest.(check (option string)) "fwd match"
+    (Some "(define y 2)") (History.next_matching h "(def");
+  Alcotest.(check (option string)) "fwd past end"
+    None (History.next_matching h "(def")
+
+let test_next_matching_without_prev () =
+  let h = History.create () in
+  History.add h "(define x 1)";
+  History.reset_nav h;
+  Alcotest.(check (option string)) "next without prev"
+    None (History.next_matching h "(def")
+
 (* --- File I/O --- *)
 
 let test_save_load_roundtrip () =
@@ -164,6 +209,12 @@ let () =
       Alcotest.test_case "next without prev" `Quick test_nav_next_without_prev;
       Alcotest.test_case "reset" `Quick test_nav_reset;
       Alcotest.test_case "empty" `Quick test_nav_empty;
+    ];
+    "prefix matching", [
+      Alcotest.test_case "prev matching basic" `Quick test_prev_matching_basic;
+      Alcotest.test_case "prev matching no match" `Quick test_prev_matching_no_match;
+      Alcotest.test_case "next matching basic" `Quick test_next_matching_basic;
+      Alcotest.test_case "next matching without prev" `Quick test_next_matching_without_prev;
     ];
     "file I/O", [
       Alcotest.test_case "save/load roundtrip" `Quick test_save_load_roundtrip;

@@ -33,6 +33,14 @@ val prev : t -> string option
     returns the entry, or [None] if already past the newest entry. *)
 val next : t -> string option
 
+(** [prev_matching t prefix] moves the navigation cursor backward to the
+    nearest older entry that starts with [prefix], or [None] if no match. *)
+val prev_matching : t -> string -> string option
+
+(** [next_matching t prefix] moves the navigation cursor forward to the
+    nearest newer entry that starts with [prefix], or [None] if no match. *)
+val next_matching : t -> string -> string option
+
 (** [reset_nav t] resets the navigation cursor to the "after newest" position.
     Should be called when a new prompt starts. *)
 val reset_nav : t -> unit
