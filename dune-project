@@ -23,7 +23,6 @@
   ocaml
   dune
   cmdliner
-  linenoise
   (odoc :with-doc)
   (alcotest :with-test)
   (qcheck-core :with-test)

@@ -13,7 +13,6 @@ depends: [
   "ocaml"
   "dune" {>= "3.6"}
   "cmdliner"
-  "linenoise"
   "odoc" {with-doc}
   "alcotest" {with-test}
   "qcheck-core" {with-test}

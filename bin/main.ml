@@ -165,10 +165,12 @@ let run_fasl path =
 
 let repl_help () =
   print_endline "REPL commands:";
-  print_endline "  ,help  ,h    Show this help";
-  print_endline "  ,quit  ,q    Exit the REPL";
-  print_endline "  ,load <file> Load and evaluate a Scheme file";
-  print_endline "  ,env         List bound names in the global environment"
+  print_endline "  ,help  ,h       Show this help";
+  print_endline "  ,quit  ,q       Exit the REPL";
+  print_endline "  ,load <file>    Load and evaluate a Scheme file";
+  print_endline "  ,env            List bound names in the global environment";
+  print_endline "  ,theme <name>   Switch theme (dark, light, none, or file path)";
+  print_endline "  ,paredit        Toggle paredit mode (structural editing)"
 
 let repl_env inst =
   let syms = Symbol.all inst.Instance.symbols in
@@ -192,20 +194,55 @@ let repl_load inst path =
   | Vm.Runtime_error msg -> format_error msg
   | Sys_error msg -> format_error msg
 
-let handle_repl_command inst line =
+let resolve_theme name =
+  match name with
+  | "dark" -> Some Highlight.dark_theme
+  | "light" -> Some Highlight.light_theme
+  | "none" | "off" -> None
+  | path ->
+    if Sys.file_exists path then
+      Some (Highlight.load_theme path)
+    else begin
+      Printf.eprintf "Theme not found: %s\n%!" path;
+      None
+    end
+
+let handle_repl_command inst theme_ref paredit_ref line =
   let line = String.trim line in
   match line with
   | ",quit" | ",q" -> exit 0
   | ",help" | ",h" -> repl_help ()
   | ",env" -> repl_env inst
+  | ",paredit" ->
+    paredit_ref := not !(paredit_ref);
+    if !(paredit_ref) then
+      Printf.printf "Paredit mode enabled.\n%!"
+    else
+      Printf.printf "Paredit mode disabled.\n%!"
   | ",load" ->
     Printf.eprintf "Usage: ,load <file>\n%!"
+  | ",theme" ->
+    let name = match !theme_ref with
+      | Some t -> (t : Highlight.theme).name
+      | None -> "none"
+    in
+    Printf.printf "Current theme: %s\nUsage: ,theme <dark|light|none|path>\n%!" name
   | _ ->
-    if String.length line > 6 && String.sub line 0 6 = ",load " then
+    if String.length line > 6 && String.sub line 0 6 = ",load " then begin
       let path = String.trim (String.sub line 6 (String.length line - 6)) in
       if path = "" then Printf.eprintf "Usage: ,load <file>\n%!"
       else repl_load inst path
-    else
+    end else if String.length line > 7 && String.sub line 0 7 = ",theme " then begin
+      let name = String.trim (String.sub line 7 (String.length line - 7)) in
+      if name = "" then Printf.eprintf "Usage: ,theme <dark|light|none|path>\n%!"
+      else begin
+        let theme = resolve_theme name in
+        theme_ref := theme;
+        match theme with
+        | Some t -> Printf.printf "Switched to theme: %s\n%!" t.Highlight.name
+        | None -> Printf.printf "Highlighting disabled.\n%!"
+      end
+    end else
       Printf.eprintf "Unknown command: %s\nType ,help for available commands.\n%!" line
 
 (* --- REPL --- *)
@@ -215,84 +252,90 @@ let is_unterminated msg =
   let len = String.length prefix in
   String.length msg >= len && String.sub msg 0 len = prefix
 
-let save_history () =
-  Option.iter (fun f -> ignore (LNoise.history_save ~filename:f)) history_file
+let is_complete inst text =
+  let port = Port.of_string text in
+  let rec check () =
+    try
+      match Reader.read_syntax inst.Instance.readtable port with
+      | { Syntax.datum = Syntax.Eof; _ } -> true
+      | _ -> check ()
+    with Reader.Read_error (_, msg) ->
+      if is_unterminated msg then false else true
+  in
+  check ()
 
-let run_repl () =
+let run_repl theme_name =
   let inst = make_instance () in
   inst.search_paths := [Sys.getcwd ()];
   Printf.printf "Wile Scheme %s\nType ,help for REPL commands, Ctrl-D to exit.\n%!" version;
-  Option.iter (fun f -> ignore (LNoise.history_load ~filename:f)) history_file;
-  ignore (LNoise.history_set ~max_length:1000);
-  LNoise.catch_break true;
-  at_exit save_history;
-  let buf = Buffer.create 256 in
-  let continuation = ref false in
+  let initial_theme = match theme_name with
+    | Some name -> resolve_theme name
+    | None ->
+      match Sys.getenv_opt "WILE_THEME" with
+      | Some name -> resolve_theme name
+      | None -> Some Highlight.dark_theme
+  in
+  let theme_ref = ref initial_theme in
+  let paredit_ref = ref false in
+  let highlight_fn text cursor =
+    match !theme_ref with
+    | None -> text
+    | Some theme -> Highlight.highlight_line theme inst.readtable text cursor
+  in
+  let editor = Line_editor.create {
+    prompt = "wile> ";
+    continuation_prompt = "  ... ";
+    history_file;
+    max_history = 1000;
+    is_complete = Some (is_complete inst);
+    highlight = Some highlight_fn;
+    paredit = Some paredit_ref;
+    readtable = Some inst.readtable;
+  } in
+  at_exit (fun () -> Line_editor.destroy editor);
   let print_result v =
     match v with
     | Datum.Void -> ()
     | _ -> print_endline (Datum.to_string v)
   in
+  let eval_input input =
+    let port = Port.of_string input in
+    let rec eval_loop () =
+      try
+        let expr = Reader.read_syntax inst.readtable port in
+        match expr with
+        | { Syntax.datum = Syntax.Eof; _ } -> ()
+        | _ ->
+          begin try
+            print_result (Instance.eval_syntax inst expr)
+          with
+          | Reader.Read_error (loc, msg) -> format_loc_error loc msg
+          | Compiler.Compile_error (loc, msg) -> format_loc_error loc msg
+          | Vm.Runtime_error msg -> format_error msg
+          end;
+          eval_loop ()
+      with
+      | Reader.Read_error (loc, msg) ->
+        format_loc_error loc msg
+    in
+    eval_loop ()
+  in
   let rec loop () =
-    let prompt = if !continuation then "  ... " else "wile> " in
-    match LNoise.linenoise prompt with
-    | exception Sys.Break ->
-      Buffer.clear buf;
-      continuation := false;
+    match Line_editor.read_input editor with
+    | Line_editor.Interrupted ->
       print_endline "Interrupted.";
       loop ()
-    | None ->
-      if !continuation then begin
-        (* Ctrl-D during continuation: abandon partial input *)
-        Buffer.clear buf;
-        continuation := false;
-        print_newline ();
+    | Line_editor.Eof -> ()
+    | Line_editor.Input input ->
+      let trimmed = String.trim input in
+      if trimmed = "" then
+        loop ()
+      else if trimmed.[0] = ',' then begin
+        handle_repl_command inst theme_ref paredit_ref trimmed;
         loop ()
       end else begin
-        print_newline ()
-      end
-    | Some line ->
-      if not !continuation && String.length line > 0 && line.[0] = ',' then begin
-        handle_repl_command inst line;
-        loop ()
-      end else begin
-        if Buffer.length buf > 0 then Buffer.add_char buf '\n';
-        Buffer.add_string buf line;
-        let input = Buffer.contents buf in
-        let port = Port.of_string input in
-        (* Evaluate all complete expressions from the port *)
-        let rec eval_loop () =
-          let save_pos = Port.position port in
-          try
-            let expr = Reader.read_syntax inst.readtable port in
-            match expr with
-            | { Syntax.datum = Syntax.Eof; _ } ->
-              (* All expressions consumed successfully *)
-              ignore (LNoise.history_add input);
-              Buffer.clear buf;
-              continuation := false
-            | _ ->
-              begin try
-                print_result (Instance.eval_syntax inst expr)
-              with
-              | Reader.Read_error (loc, msg) -> format_loc_error loc msg
-              | Compiler.Compile_error (loc, msg) -> format_loc_error loc msg
-              | Vm.Runtime_error msg -> format_error msg
-              end;
-              eval_loop ()
-          with
-          | Reader.Read_error (_, msg) when is_unterminated msg ->
-            (* Keep only the unconsumed portion in the buffer *)
-            let remaining = String.sub input save_pos (String.length input - save_pos) in
-            Buffer.clear buf;
-            Buffer.add_string buf remaining;
-            continuation := true
-          | Reader.Read_error (loc, msg) ->
-            format_loc_error loc msg;
-            Buffer.clear buf;
-            continuation := false
-        in
-        eval_loop ();
+        Line_editor.history_add editor input;
+        eval_input input;
         loop ()
       end
   in
@@ -310,13 +353,18 @@ let make_default_cmd () =
     Arg.(value & pos 0 (some string) None &
          info [] ~docv:"FILE" ~doc:"Scheme source file to execute.")
   in
-  let default_cmd expr file =
+  let theme_opt =
+    Arg.(value & opt (some string) None &
+         info ["theme"] ~docv:"THEME"
+           ~doc:"Color theme: $(b,dark), $(b,light), $(b,none), or a file path.")
+  in
+  let default_cmd expr file theme =
     match expr, file with
     | Some e, _ -> exit (run_expr e)
     | _, Some f -> exit (run_file f)
-    | None, None -> run_repl ()
+    | None, None -> run_repl theme
   in
-  let term = Term.(const default_cmd $ expr_opt $ file_arg) in
+  let term = Term.(const default_cmd $ expr_opt $ file_arg $ theme_opt) in
   let info =
     Cmd.info "wile" ~version
       ~doc:"Wile Scheme — an R7RS implementation"

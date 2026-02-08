@@ -221,6 +221,66 @@ Changes to existing modules:
   `Cmd.group` intercepting positional file arguments; `--exe` generates
   standalone native executable via `ocamlfind ocamlopt`
 
+**R1 (Custom Line Editor)** — complete.
+
+| Module        | Purpose                                                        |
+|---------------|----------------------------------------------------------------|
+| `Terminal`    | Raw terminal I/O: enter/leave raw mode, ANSI key parsing, cursor/screen control |
+| `History`     | Line history ring buffer with navigation, dedup, file persistence |
+| `Line_editor` | Editor engine: single-line editing, Emacs keybindings, history integration |
+
+Changes to existing modules:
+- `bin/main.ml`: Replaced all `LNoise.*` calls with `Line_editor` API
+- `bin/dune`: Removed `linenoise` dependency
+- `dune-project`: Removed `linenoise` from package depends
+
+**R3 (Syntax Highlighting)** — complete.
+
+| Module      | Purpose                                                        |
+|-------------|----------------------------------------------------------------|
+| `Tokenizer` | Fault-tolerant lexer for highlighting (never fails, covers all bytes) |
+| `Highlight` | Theme engine + ANSI rendering with rainbow parens, paren matching |
+
+Changes to existing modules:
+- `Line_editor`: Added `highlight` callback to config; render uses it for
+  ANSI-colored output with correct cursor positioning
+- `bin/main.ml`: Added `--theme` CLI flag, `WILE_THEME` env var, `,theme`
+  REPL command; dark theme enabled by default; `resolve_theme` helper
+
+**R2 (Multi-line Editing)** — complete.
+
+No new modules. Extends Line_editor for multi-line editing.
+
+Changes to existing modules:
+- `Terminal`: Added `Alt_enter` key variant
+- `Line_editor`: Added `completeness_check` type, `is_complete` config field;
+  buffer holds multi-line text with `\n` separators; Enter inserts newline
+  when incomplete, submits when complete; Alt-Enter always inserts newline;
+  Up/Down navigate between lines (history on first/last line); multi-line
+  rendering with continuation prompts; Ctrl-A/E operate per-line; Ctrl-K
+  kills to end of line (joins on newline)
+- `bin/main.ml`: Removed `Buffer.t` accumulation and `continuation` ref;
+  added `is_complete` callback using Reader; REPL now delegates all multi-line
+  handling to Line_editor
+
+**R4 (Paredit Mode)** — complete.
+
+| Module | Purpose |
+|--------|---------|
+| `Paredit` | Structural editing: balanced insertion/deletion, sexp navigation, slurp/barf/wrap/splice/raise |
+
+Changes to existing modules:
+- `Terminal`: Added `Ctrl_right`, `Ctrl_left`, `Alt_s`, `Alt_r`,
+  `Alt_open_paren`, `Alt_9` key variants; CSI `1;5C/D` decoding for
+  Ctrl-arrows; ESC+letter decoding for Alt-s/r/(
+- `Line_editor`: Added `paredit` (bool ref option) and `readtable`
+  (Readtable.t option) to config; intercepts `(`, `)`, `"`, Backspace,
+  Delete when paredit active; structural keys (Ctrl-Right=slurp,
+  Ctrl-Left=barf, Alt-(=wrap, Alt-s=splice, Alt-r=raise); dynamic prompt
+  shows `[paredit]` indicator
+- `bin/main.ml`: Added `,paredit` REPL command to toggle paredit mode;
+  `paredit_ref` threaded through command handler
+
 ## Development Workflow
 
 **This project uses TDD (Test-Driven Development).** Follow this cycle:
@@ -265,6 +325,12 @@ Tests live in `test/` as per-topic files and are run via `dune test`.
 | `test/test_library.ml` | Library (25 tests) |
 | `test/test_fasl.ml` | Fasl (40 tests) |
 | `test/test_aot.ml` | AOT compiler (27 tests) |
+| `test/test_terminal.ml` | Terminal key parsing (16 tests) |
+| `test/test_history.ml` | History (16 tests) |
+| `test/test_line_editor.ml` | Line_editor (21 tests) |
+| `test/test_tokenizer.ml` | Tokenizer (26 tests) |
+| `test/test_highlight.ml` | Highlight (11 tests) |
+| `test/test_paredit.ml` | Paredit (49 tests) |
 
 Test dependencies:
 - **alcotest** — unit test framework with readable output
@@ -312,7 +378,6 @@ Output is in `_build/default/_doc/_html/`.
 ## Runtime Dependencies
 
 - **cmdliner** — command-line argument parsing
-- **linenoise** — lightweight readline alternative for REPL line editing
 
 ## Documentation Dependencies
 
