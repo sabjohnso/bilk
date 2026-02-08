@@ -342,6 +342,34 @@ Changes to existing modules:
   aliases; built-in `(scheme file)`, `(scheme read)` libraries; updated
   `(scheme write)` with `write-shared`/`write-simple`
 
+**Milestone 15 (Remaining R7RS Standard Libraries)** — complete.
+
+No new modules. Implements 10 R7RS standard libraries covering the remaining
+specification requirements.
+
+Changes to existing modules:
+- `Datum`: Added `Promise of promise` variant with mutable `promise_done`/
+  `promise_value` fields; updated `equal` (identity), `pp` (shows forced state)
+- `Syntax`: `from_datum` maps `Promise` to `Symbol "#<promise>"`
+- `Fasl`: `write_datum` raises `Fasl_error` for `Promise`
+- `Expander`: Added `delay`, `delay-force`, `case-lambda` to `core_forms`;
+  `delay` expands to `(%make-promise #f (lambda () (make-promise expr)))`;
+  `delay-force` expands to `(%make-promise #f (lambda () expr))`;
+  `case-lambda` expands to variadic lambda with arity dispatch
+- `Instance`: Added `command_line` (string list ref), `eval_envs` (side table
+  for environment specifiers), `eval_env_counter` fields; ~30 new primitives:
+  inexact math (`exp`, `log`, `sin`, `cos`, `tan`, `asin`, `acos`, `atan`,
+  `finite?`, `infinite?`, `nan?`), complex stubs (`real-part`, `imag-part`,
+  `magnitude`, `angle`, `make-rectangular`, `make-polar`), lazy (`%make-promise`,
+  `make-promise`, `promise?`, `force`), process-context (`exit`,
+  `emergency-exit`, `get-environment-variable`, `get-environment-variables`,
+  `command-line`), time (`current-second`, `current-jiffy`,
+  `jiffies-per-second`), eval/load/repl (`environment`, `eval`, `load`,
+  `interaction-environment`); built-in libraries: `(scheme inexact)`,
+  `(scheme complex)`, `(scheme lazy)`, `(scheme case-lambda)`,
+  `(scheme process-context)`, `(scheme time)`, `(scheme eval)`,
+  `(scheme load)`, `(scheme repl)`, `(scheme r5rs)`
+
 ## Development Workflow
 
 **This project uses TDD (Test-Driven Development).** Follow this cycle:
@@ -380,7 +408,7 @@ Tests live in `test/` as per-topic files and are run via `dune test`.
 | `test/test_instance.ml` | Instance (31 tests) |
 | `test/test_opcode.ml`   | Opcode (4 tests) |
 | `test/test_compiler.ml` | Compiler (14 tests) |
-| `test/test_vm.ml`       | VM (338 tests: end-to-end via Instance.eval_string) |
+| `test/test_vm.ml`       | VM (401 tests: end-to-end via Instance.eval_string) |
 | `test/test_m6_review.ml` | M6 bugfix regression (7 tests) |
 | `test/test_expander.ml` | Expander (11 tests) |
 | `test/test_library.ml` | Library (25 tests) |

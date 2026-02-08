@@ -31,6 +31,12 @@ and t =
   | Values of t list
   | Error_object of error_obj
   | Port of Port.t
+  | Promise of promise
+
+and promise = {
+  mutable promise_done : bool;
+  mutable promise_value : t;
+}
 
 and primitive = {
   prim_name : string;
@@ -114,6 +120,7 @@ let rec equal a b =
     && List.length a.err_irritants = List.length b.err_irritants
     && List.for_all2 equal a.err_irritants b.err_irritants
   | Port _, Port _ -> false
+  | Promise _, Promise _ -> false
   | _ -> false
 
 let rec pp fmt = function
@@ -165,6 +172,11 @@ let rec pp fmt = function
       Format.fprintf fmt "#<input-port %s>" (Port.file_name p)
     else
       Format.fprintf fmt "#<output-port %s>" (Port.file_name p)
+  | Promise p ->
+    if p.promise_done then
+      Format.fprintf fmt "#<promise (forced %a)>" pp p.promise_value
+    else
+      Format.fprintf fmt "#<promise>"
 
 and pp_tail fmt = function
   | Nil -> ()

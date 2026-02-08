@@ -46,6 +46,13 @@ and t =
   | Values of t list           (** Multiple return values *)
   | Error_object of error_obj  (** R7RS error object *)
   | Port of Port.t             (** First-class port value *)
+  | Promise of promise         (** Lazy promise (delay/force) *)
+
+(** A lazy promise created by [delay] or [make-promise]. *)
+and promise = {
+  mutable promise_done : bool;   (** Whether the promise has been forced *)
+  mutable promise_value : t;     (** The thunk (unforced) or result (forced) *)
+}
 
 (** A built-in primitive function. *)
 and primitive = {

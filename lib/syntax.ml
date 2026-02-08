@@ -48,6 +48,7 @@ let rec from_datum loc (d : Datum.t) =
     | Datum.Values _ -> Symbol "#<values>"
     | Datum.Error_object e -> Symbol (Printf.sprintf "#<error \"%s\">" e.err_message)
     | Datum.Port _ -> Symbol "#<port>"
+    | Datum.Promise _ -> Symbol "#<promise>"
   in
   { loc; datum }
 

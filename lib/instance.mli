@@ -45,15 +45,26 @@ type t = {
   (** The current output port (default: stdout). *)
   current_error : Port.t ref;
   (** The current error port (default: stderr). *)
+  command_line : string list ref;
+  (** The command-line arguments for [command-line] (default: [Sys.argv]). *)
+  eval_envs : (int, Datum.env * Expander.syn_env) Hashtbl.t;
+  (** Side table mapping environment specifier IDs to env + syn_env pairs.
+      Used by [(scheme eval)] to pass environments to [eval]. *)
+  eval_env_counter : int ref;
+  (** Counter for generating fresh environment specifier IDs. *)
 }
 
 (** {1 Constructors} *)
 
 val create : ?readtable:Readtable.t -> unit -> t
 (** [create ?readtable ()] returns a fresh instance with an empty symbol table,
-    a global environment pre-populated with 182 R7RS (scheme base) primitives
+    a global environment pre-populated with ~210 R7RS primitives
     and intrinsics, 10 self-hosted boot definitions, built-in libraries
     [(scheme base)], [(scheme char)], [(scheme write)], [(scheme cxr)],
+    [(scheme file)], [(scheme read)], [(scheme inexact)], [(scheme complex)],
+    [(scheme lazy)], [(scheme case-lambda)], [(scheme process-context)],
+    [(scheme time)], [(scheme eval)], [(scheme load)], [(scheme repl)],
+    [(scheme r5rs)],
     and the given [readtable] (defaults to {!Readtable.default}). *)
 
 (** {1 Convenience} *)

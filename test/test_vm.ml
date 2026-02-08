@@ -2460,6 +2460,387 @@ let test_file_exists_delete () =
   check_datum "delete via (scheme file)"
     (Datum.Bool false) (Instance.eval_string inst code)
 
+(* --- Inexact math --- *)
+
+let test_sin_zero () =
+  check_datum "sin 0" (Datum.Flonum 0.0) (eval "(sin 0)")
+
+let test_cos_zero () =
+  check_datum "cos 0" (Datum.Flonum 1.0) (eval "(cos 0)")
+
+let test_atan_two_arg () =
+  let result = eval "(atan 1.0 1.0)" in
+  match result with
+  | Datum.Flonum f ->
+    let expected = Float.atan2 1.0 1.0 in
+    Alcotest.(check bool) "atan 1 1 ~= pi/4"
+      true (Float.abs (f -. expected) < 1e-10)
+  | _ -> Alcotest.fail "expected flonum"
+
+let test_exp_zero () =
+  check_datum "exp 0" (Datum.Flonum 1.0) (eval "(exp 0)")
+
+let test_log_one () =
+  check_datum "log 1" (Datum.Flonum 0.0) (eval "(log 1)")
+
+let test_log_two_arg () =
+  check_datum "log 8 2" (Datum.Flonum 3.0) (eval "(log 8 2)")
+
+let test_finite_fixnum () =
+  check_datum "finite? 1" (Datum.Bool true) (eval "(finite? 1)")
+
+let test_infinite_inf () =
+  check_datum "infinite? +inf.0" (Datum.Bool true) (eval "(infinite? +inf.0)")
+
+let test_nan_nan () =
+  check_datum "nan? +nan.0" (Datum.Bool true) (eval "(nan? +nan.0)")
+
+let test_nan_fixnum () =
+  check_datum "nan? 42" (Datum.Bool false) (eval "(nan? 42)")
+
+let test_real_part () =
+  check_datum "real-part 3" (Datum.Fixnum 3) (eval "(real-part 3)")
+
+let test_imag_part () =
+  check_datum "imag-part 3.5" (Datum.Flonum 0.0) (eval "(imag-part 3.5)")
+
+let test_magnitude_neg () =
+  check_datum "magnitude -5" (Datum.Fixnum 5) (eval "(magnitude -5)")
+
+let test_angle_positive () =
+  check_datum "angle 1" (Datum.Flonum 0.0) (eval "(angle 1)")
+
+let test_make_rectangular () =
+  check_datum "make-rectangular 3 0" (Datum.Fixnum 3) (eval "(make-rectangular 3 0)")
+
+let test_import_scheme_inexact () =
+  let inst = Instance.create () in
+  ignore (Instance.eval_string inst "(import (scheme inexact))");
+  check_datum "sin via import" (Datum.Flonum 0.0) (Instance.eval_string inst "(sin 0)")
+
+let test_import_scheme_complex () =
+  let inst = Instance.create () in
+  ignore (Instance.eval_string inst "(import (scheme complex))");
+  check_datum "real-part via import" (Datum.Fixnum 5) (Instance.eval_string inst "(real-part 5)")
+
+(* --- Lazy --- *)
+
+let test_force_delay () =
+  check_datum "force delay" (Datum.Fixnum 3) (eval "(force (delay (+ 1 2)))")
+
+let test_promise_pred_true () =
+  check_datum "promise? delay" (Datum.Bool true) (eval "(promise? (delay 1))")
+
+let test_promise_pred_false () =
+  check_datum "promise? 42" (Datum.Bool false) (eval "(promise? 42)")
+
+let test_force_make_promise () =
+  check_datum "force make-promise" (Datum.Fixnum 42) (eval "(force (make-promise 42))")
+
+let test_force_non_promise () =
+  check_datum "force non-promise" (Datum.Fixnum 42) (eval "(force 42)")
+
+let test_delay_memoization () =
+  check_datum "memoization"
+    (Datum.Fixnum 1)
+    (eval "(begin \
+       (define count 0) \
+       (define p (delay (begin (set! count (+ count 1)) count))) \
+       (force p) \
+       (force p) \
+       count)")
+
+let test_delay_force_iterative () =
+  check_datum "delay-force iterative"
+    (Datum.Fixnum 10000)
+    (eval "(begin \
+       (define (lazy-count n) \
+         (if (= n 0) (delay 0) \
+           (delay-force (lazy-count (- n 1))))) \
+       (force (delay-force (delay (+ 10000 (force (lazy-count 10000)))))))")
+
+let test_make_promise_idempotent () =
+  check_datum "make-promise idempotent"
+    (Datum.Fixnum 5)
+    (eval "(begin \
+       (define p (delay 5)) \
+       (define p2 (make-promise p)) \
+       (force p2))")
+
+let test_import_scheme_lazy () =
+  let inst = Instance.create () in
+  ignore (Instance.eval_string inst "(import (scheme lazy))");
+  check_datum "force via import" (Datum.Fixnum 7)
+    (Instance.eval_string inst "(force (delay (+ 3 4)))")
+
+(* --- case-lambda --- *)
+
+let test_case_lambda_fixed () =
+  check_datum "case-lambda fixed"
+    (Datum.Fixnum 5)
+    (eval "(begin \
+       (define f (case-lambda \
+         ((x) x) \
+         ((x y) (+ x y)))) \
+       (f 2 3))")
+
+let test_case_lambda_single () =
+  check_datum "case-lambda single"
+    (Datum.Fixnum 7)
+    (eval "(begin \
+       (define f (case-lambda \
+         ((x) x) \
+         ((x y) (+ x y)))) \
+       (f 7))")
+
+let test_case_lambda_zero () =
+  check_datum "case-lambda zero args"
+    (Datum.Fixnum 42)
+    (eval "(begin \
+       (define f (case-lambda \
+         (() 42) \
+         ((x) x))) \
+       (f))")
+
+let test_case_lambda_variadic () =
+  check_datum "case-lambda variadic"
+    (Datum.Fixnum 6)
+    (eval "(begin \
+       (define f (case-lambda \
+         ((x) x) \
+         ((x y . rest) (+ x y (length rest))))) \
+       (f 1 2 3 4 5))")
+
+let test_import_case_lambda () =
+  let inst = Instance.create () in
+  ignore (Instance.eval_string inst "(import (scheme case-lambda))");
+  check_datum "case-lambda via import" (Datum.Fixnum 10)
+    (Instance.eval_string inst
+       "(begin (define f (case-lambda ((x) x) ((x y) (+ x y)))) (f 4 6))")
+
+(* --- process-context --- *)
+
+let test_command_line_string () =
+  check_datum "command-line is list"
+    (Datum.Bool true) (eval "(string? (car (command-line)))")
+
+let test_get_env_var_path () =
+  check_datum "PATH exists"
+    (Datum.Bool true) (eval "(string? (get-environment-variable \"PATH\"))")
+
+let test_get_env_var_missing () =
+  check_datum "missing env var"
+    (Datum.Bool false) (eval "(get-environment-variable \"NONEXISTENT_WILE_12345\")")
+
+let test_get_env_vars_list () =
+  check_datum "env vars is list"
+    (Datum.Bool true) (eval "(list? (get-environment-variables))")
+
+let test_get_env_vars_pair () =
+  check_datum "env vars entries are pairs"
+    (Datum.Bool true) (eval "(pair? (car (get-environment-variables)))")
+
+let test_procedure_exit () =
+  check_datum "exit is procedure"
+    (Datum.Bool true) (eval "(procedure? exit)")
+
+let test_import_process_context () =
+  let inst = Instance.create () in
+  ignore (Instance.eval_string inst "(import (scheme process-context))");
+  check_datum "command-line via import"
+    (Datum.Bool true) (Instance.eval_string inst "(list? (command-line))")
+
+(* --- time --- *)
+
+let test_current_second () =
+  check_datum "current-second is number"
+    (Datum.Bool true) (eval "(number? (current-second))")
+
+let test_current_second_positive () =
+  check_datum "current-second > 0"
+    (Datum.Bool true) (eval "(> (current-second) 0)")
+
+let test_current_jiffy () =
+  check_datum "current-jiffy is integer"
+    (Datum.Bool true) (eval "(integer? (current-jiffy))")
+
+let test_jiffies_per_second () =
+  check_datum "jiffies-per-second"
+    (Datum.Fixnum 1_000_000) (eval "(jiffies-per-second)")
+
+let test_import_time () =
+  let inst = Instance.create () in
+  ignore (Instance.eval_string inst "(import (scheme time))");
+  check_datum "current-second via import"
+    (Datum.Bool true) (Instance.eval_string inst "(number? (current-second))")
+
+(* --- eval/load/repl --- *)
+
+let test_eval_basic () =
+  check_datum "eval basic"
+    (Datum.Fixnum 3)
+    (eval "(eval '(+ 1 2) (environment '(scheme base)))")
+
+let test_eval_lambda () =
+  check_datum "eval lambda"
+    (Datum.Fixnum 10)
+    (eval "(eval '((lambda (x) (* x 2)) 5) (environment '(scheme base)))")
+
+let test_eval_multi_import () =
+  let inst = Instance.create () in
+  check_datum "eval multi import"
+    (Datum.Bool true)
+    (Instance.eval_string inst
+       "(eval '(finite? 42) (environment '(scheme base) '(scheme inexact)))")
+
+let test_eval_isolation () =
+  (* eval with environment should not see global bindings *)
+  let inst = Instance.create () in
+  ignore (Instance.eval_string inst "(define my-val 999)");
+  Alcotest.check_raises "eval isolation"
+    (Vm.Runtime_error "unbound variable: my-val")
+    (fun () -> ignore (Instance.eval_string inst
+       "(eval 'my-val (environment '(scheme base)))"))
+
+let test_interaction_env () =
+  check_datum "interaction-environment"
+    (Datum.Fixnum 3)
+    (eval "(eval '(+ 1 2) (interaction-environment))")
+
+let test_interaction_env_sees_globals () =
+  let inst = Instance.create () in
+  ignore (Instance.eval_string inst "(define xyz 42)");
+  check_datum "interaction-env sees globals"
+    (Datum.Fixnum 42)
+    (Instance.eval_string inst "(eval 'xyz (interaction-environment))")
+
+let test_load_basic () =
+  let tmp = Filename.temp_file "wile_load" ".scm" in
+  let oc = open_out tmp in
+  output_string oc "(define loaded-val 123)\n";
+  close_out oc;
+  let inst = Instance.create () in
+  ignore (Instance.eval_string inst
+    (Printf.sprintf "(load \"%s\")" tmp));
+  check_datum "load defines binding"
+    (Datum.Fixnum 123)
+    (Instance.eval_string inst "loaded-val");
+  Sys.remove tmp
+
+let test_load_multi_expr () =
+  let tmp = Filename.temp_file "wile_load" ".scm" in
+  let oc = open_out tmp in
+  output_string oc "(define a 10)\n(define b 20)\n";
+  close_out oc;
+  let inst = Instance.create () in
+  ignore (Instance.eval_string inst
+    (Printf.sprintf "(load \"%s\")" tmp));
+  check_datum "load multi expr"
+    (Datum.Fixnum 30)
+    (Instance.eval_string inst "(+ a b)");
+  Sys.remove tmp
+
+let test_import_scheme_eval () =
+  let inst = Instance.create () in
+  ignore (Instance.eval_string inst "(import (scheme eval))");
+  check_datum "eval via import"
+    (Datum.Fixnum 6)
+    (Instance.eval_string inst "(eval '(* 2 3) (environment '(scheme base)))")
+
+let test_import_scheme_load () =
+  let tmp = Filename.temp_file "wile_load" ".scm" in
+  let oc = open_out tmp in
+  output_string oc "(define load-test-val 77)\n";
+  close_out oc;
+  let inst = Instance.create () in
+  ignore (Instance.eval_string inst "(import (scheme load))");
+  ignore (Instance.eval_string inst
+    (Printf.sprintf "(load \"%s\")" tmp));
+  check_datum "load via import"
+    (Datum.Fixnum 77)
+    (Instance.eval_string inst "load-test-val");
+  Sys.remove tmp
+
+let test_import_scheme_repl () =
+  let inst = Instance.create () in
+  ignore (Instance.eval_string inst "(import (scheme repl))");
+  check_datum "interaction-environment via import"
+    (Datum.Fixnum 5)
+    (Instance.eval_string inst "(eval '(+ 2 3) (interaction-environment))")
+
+let test_eval_define_in_env () =
+  (* eval can define in given environment *)
+  let inst = Instance.create () in
+  ignore (Instance.eval_string inst
+    "(begin \
+       (define e (environment '(scheme base))) \
+       (eval '(define x 42) e) \
+       (eval 'x e))");
+  (* The result comes from the last eval_string which evaluates (begin ...) *)
+  check_datum "eval define in env"
+    (Datum.Fixnum 42)
+    (Instance.eval_string inst
+       "(begin \
+          (define e (environment '(scheme base))) \
+          (eval '(define x 42) e) \
+          (eval 'x e))")
+
+let test_eval_quote_list () =
+  check_datum "eval quote list"
+    (Datum.Fixnum 1)
+    (eval "(eval '(car '(1 2 3)) (environment '(scheme base)))")
+
+let test_eval_with_lazy () =
+  check_datum "eval with lazy"
+    (Datum.Fixnum 99)
+    (eval "(eval '(force (delay 99)) (environment '(scheme base) '(scheme lazy)))")
+
+let test_eval_cond () =
+  check_datum "eval cond"
+    (Datum.Fixnum 2)
+    (eval "(eval '(cond (#f 1) (#t 2) (else 3)) (environment '(scheme base)))")
+
+let test_load_with_env_spec () =
+  let tmp = Filename.temp_file "wile_load" ".scm" in
+  let oc = open_out tmp in
+  output_string oc "(define env-loaded 55)\n";
+  close_out oc;
+  let inst = Instance.create () in
+  let code = Printf.sprintf
+    "(begin \
+       (define e (environment '(scheme base))) \
+       (load \"%s\" e) \
+       (eval 'env-loaded e))" tmp in
+  check_datum "load with env spec"
+    (Datum.Fixnum 55)
+    (Instance.eval_string inst code);
+  Sys.remove tmp
+
+let test_environment_is_procedure () =
+  check_datum "environment is procedure"
+    (Datum.Bool true) (eval "(procedure? environment)")
+
+(* --- scheme r5rs --- *)
+
+let test_r5rs_basic () =
+  let inst = Instance.create () in
+  ignore (Instance.eval_string inst "(import (scheme r5rs))");
+  check_datum "r5rs +" (Datum.Fixnum 3) (Instance.eval_string inst "(+ 1 2)")
+
+let test_r5rs_lazy () =
+  let inst = Instance.create () in
+  ignore (Instance.eval_string inst "(import (scheme r5rs))");
+  check_datum "r5rs delay/force" (Datum.Fixnum 42)
+    (Instance.eval_string inst "(force (delay 42))")
+
+let test_r5rs_map () =
+  let inst = Instance.create () in
+  ignore (Instance.eval_string inst "(import (scheme r5rs))");
+  check_datum "r5rs map"
+    (Datum.Pair { car = Datum.Fixnum 1; cdr =
+      Datum.Pair { car = Datum.Fixnum 3; cdr = Datum.Nil } })
+    (Instance.eval_string inst "(map car '((1 2) (3 4)))")
+
 let () =
   Alcotest.run "VM"
     [ ("self-evaluating",
@@ -2909,5 +3290,86 @@ let () =
        ; Alcotest.test_case "import (scheme read)" `Quick test_import_scheme_read
        ; Alcotest.test_case "import (scheme write)" `Quick test_import_scheme_write
        ; Alcotest.test_case "file-exists?+delete" `Quick test_file_exists_delete
+       ])
+    ; ("inexact",
+       [ Alcotest.test_case "sin 0" `Quick test_sin_zero
+       ; Alcotest.test_case "cos 0" `Quick test_cos_zero
+       ; Alcotest.test_case "atan two arg" `Quick test_atan_two_arg
+       ; Alcotest.test_case "exp 0" `Quick test_exp_zero
+       ; Alcotest.test_case "log 1" `Quick test_log_one
+       ; Alcotest.test_case "log base" `Quick test_log_two_arg
+       ; Alcotest.test_case "finite? fixnum" `Quick test_finite_fixnum
+       ; Alcotest.test_case "infinite? +inf.0" `Quick test_infinite_inf
+       ; Alcotest.test_case "nan? +nan.0" `Quick test_nan_nan
+       ; Alcotest.test_case "nan? fixnum" `Quick test_nan_fixnum
+       ; Alcotest.test_case "import (scheme inexact)" `Quick test_import_scheme_inexact
+       ])
+    ; ("complex",
+       [ Alcotest.test_case "real-part" `Quick test_real_part
+       ; Alcotest.test_case "imag-part" `Quick test_imag_part
+       ; Alcotest.test_case "magnitude neg" `Quick test_magnitude_neg
+       ; Alcotest.test_case "angle positive" `Quick test_angle_positive
+       ; Alcotest.test_case "make-rectangular" `Quick test_make_rectangular
+       ; Alcotest.test_case "import (scheme complex)" `Quick test_import_scheme_complex
+       ])
+    ; ("lazy",
+       [ Alcotest.test_case "force delay" `Quick test_force_delay
+       ; Alcotest.test_case "promise? true" `Quick test_promise_pred_true
+       ; Alcotest.test_case "promise? false" `Quick test_promise_pred_false
+       ; Alcotest.test_case "force make-promise" `Quick test_force_make_promise
+       ; Alcotest.test_case "force non-promise" `Quick test_force_non_promise
+       ; Alcotest.test_case "memoization" `Quick test_delay_memoization
+       ; Alcotest.test_case "delay-force iterative" `Quick test_delay_force_iterative
+       ; Alcotest.test_case "make-promise idempotent" `Quick test_make_promise_idempotent
+       ; Alcotest.test_case "import (scheme lazy)" `Quick test_import_scheme_lazy
+       ])
+    ; ("case-lambda",
+       [ Alcotest.test_case "fixed dispatch" `Quick test_case_lambda_fixed
+       ; Alcotest.test_case "single arg" `Quick test_case_lambda_single
+       ; Alcotest.test_case "zero args" `Quick test_case_lambda_zero
+       ; Alcotest.test_case "variadic" `Quick test_case_lambda_variadic
+       ; Alcotest.test_case "import (scheme case-lambda)" `Quick test_import_case_lambda
+       ])
+    ; ("process-context",
+       [ Alcotest.test_case "command-line string" `Quick test_command_line_string
+       ; Alcotest.test_case "get-env-var PATH" `Quick test_get_env_var_path
+       ; Alcotest.test_case "get-env-var missing" `Quick test_get_env_var_missing
+       ; Alcotest.test_case "get-env-vars list" `Quick test_get_env_vars_list
+       ; Alcotest.test_case "get-env-vars pair" `Quick test_get_env_vars_pair
+       ; Alcotest.test_case "exit is procedure" `Quick test_procedure_exit
+       ; Alcotest.test_case "import (scheme process-context)" `Quick test_import_process_context
+       ])
+    ; ("time",
+       [ Alcotest.test_case "current-second" `Quick test_current_second
+       ; Alcotest.test_case "current-second positive" `Quick test_current_second_positive
+       ; Alcotest.test_case "current-jiffy" `Quick test_current_jiffy
+       ; Alcotest.test_case "jiffies-per-second" `Quick test_jiffies_per_second
+       ; Alcotest.test_case "import (scheme time)" `Quick test_import_time
+       ])
+    ; ("eval",
+       [ Alcotest.test_case "eval basic" `Quick test_eval_basic
+       ; Alcotest.test_case "eval lambda" `Quick test_eval_lambda
+       ; Alcotest.test_case "eval multi import" `Quick test_eval_multi_import
+       ; Alcotest.test_case "eval isolation" `Quick test_eval_isolation
+       ; Alcotest.test_case "eval define in env" `Quick test_eval_define_in_env
+       ; Alcotest.test_case "eval quote list" `Quick test_eval_quote_list
+       ; Alcotest.test_case "eval with lazy" `Quick test_eval_with_lazy
+       ; Alcotest.test_case "eval cond" `Quick test_eval_cond
+       ; Alcotest.test_case "interaction-environment" `Quick test_interaction_env
+       ; Alcotest.test_case "interaction-env globals" `Quick test_interaction_env_sees_globals
+       ; Alcotest.test_case "environment is procedure" `Quick test_environment_is_procedure
+       ; Alcotest.test_case "import (scheme eval)" `Quick test_import_scheme_eval
+       ; Alcotest.test_case "import (scheme repl)" `Quick test_import_scheme_repl
+       ])
+    ; ("load",
+       [ Alcotest.test_case "load basic" `Quick test_load_basic
+       ; Alcotest.test_case "load multi expr" `Quick test_load_multi_expr
+       ; Alcotest.test_case "load with env spec" `Quick test_load_with_env_spec
+       ; Alcotest.test_case "import (scheme load)" `Quick test_import_scheme_load
+       ])
+    ; ("r5rs",
+       [ Alcotest.test_case "basic" `Quick test_r5rs_basic
+       ; Alcotest.test_case "lazy" `Quick test_r5rs_lazy
+       ; Alcotest.test_case "map" `Quick test_r5rs_map
        ])
     ]

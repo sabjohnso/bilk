@@ -14,6 +14,9 @@ type t = {
   current_input : Port.t ref;
   current_output : Port.t ref;
   current_error : Port.t ref;
+  command_line : string list ref;
+  eval_envs : (int, Datum.env * Expander.syn_env) Hashtbl.t;
+  eval_env_counter : int ref;
 }
 
 (* --- Primitive helpers --- *)
@@ -439,6 +442,122 @@ let prim_exact_integer_sqrt args =
   | [Datum.Fixnum _] -> runtime_error "exact-integer-sqrt: expected non-negative integer"
   | [_] -> runtime_error "exact-integer-sqrt: expected exact non-negative integer"
   | _ -> runtime_error (Printf.sprintf "exact-integer-sqrt: expected 1 argument, got %d" (List.length args))
+
+(* --- Inexact math primitives --- *)
+
+let prim_exp args =
+  match args with
+  | [v] -> Datum.Flonum (Float.exp (as_flonum "exp" v))
+  | _ -> runtime_error (Printf.sprintf "exp: expected 1 argument, got %d" (List.length args))
+
+let prim_log args =
+  match args with
+  | [v] -> Datum.Flonum (Float.log (as_flonum "log" v))
+  | [v; base] ->
+    Datum.Flonum (Float.log (as_flonum "log" v) /. Float.log (as_flonum "log" base))
+  | _ -> runtime_error (Printf.sprintf "log: expected 1 or 2 arguments, got %d" (List.length args))
+
+let prim_sin args =
+  match args with
+  | [v] -> Datum.Flonum (Float.sin (as_flonum "sin" v))
+  | _ -> runtime_error (Printf.sprintf "sin: expected 1 argument, got %d" (List.length args))
+
+let prim_cos args =
+  match args with
+  | [v] -> Datum.Flonum (Float.cos (as_flonum "cos" v))
+  | _ -> runtime_error (Printf.sprintf "cos: expected 1 argument, got %d" (List.length args))
+
+let prim_tan args =
+  match args with
+  | [v] -> Datum.Flonum (Float.tan (as_flonum "tan" v))
+  | _ -> runtime_error (Printf.sprintf "tan: expected 1 argument, got %d" (List.length args))
+
+let prim_asin args =
+  match args with
+  | [v] -> Datum.Flonum (Float.asin (as_flonum "asin" v))
+  | _ -> runtime_error (Printf.sprintf "asin: expected 1 argument, got %d" (List.length args))
+
+let prim_acos args =
+  match args with
+  | [v] -> Datum.Flonum (Float.acos (as_flonum "acos" v))
+  | _ -> runtime_error (Printf.sprintf "acos: expected 1 argument, got %d" (List.length args))
+
+let prim_atan args =
+  match args with
+  | [v] -> Datum.Flonum (Float.atan (as_flonum "atan" v))
+  | [y; x] -> Datum.Flonum (Float.atan2 (as_flonum "atan" y) (as_flonum "atan" x))
+  | _ -> runtime_error (Printf.sprintf "atan: expected 1 or 2 arguments, got %d" (List.length args))
+
+let prim_finite args =
+  match args with
+  | [Datum.Fixnum _] -> Datum.Bool true
+  | [Datum.Flonum f] -> Datum.Bool (Float.is_finite f)
+  | [_] -> runtime_error "finite?: expected number"
+  | _ -> runtime_error (Printf.sprintf "finite?: expected 1 argument, got %d" (List.length args))
+
+let prim_infinite args =
+  match args with
+  | [Datum.Fixnum _] -> Datum.Bool false
+  | [Datum.Flonum f] -> Datum.Bool (Float.is_infinite f)
+  | [_] -> runtime_error "infinite?: expected number"
+  | _ -> runtime_error (Printf.sprintf "infinite?: expected 1 argument, got %d" (List.length args))
+
+let prim_nan args =
+  match args with
+  | [Datum.Fixnum _] -> Datum.Bool false
+  | [Datum.Flonum f] -> Datum.Bool (Float.is_nan f)
+  | [_] -> runtime_error "nan?: expected number"
+  | _ -> runtime_error (Printf.sprintf "nan?: expected 1 argument, got %d" (List.length args))
+
+(* --- Complex stubs (reals only) --- *)
+
+let prim_real_part args =
+  match args with
+  | [Datum.Fixnum _ as v] -> v
+  | [Datum.Flonum _ as v] -> v
+  | [_] -> runtime_error "real-part: expected number"
+  | _ -> runtime_error (Printf.sprintf "real-part: expected 1 argument, got %d" (List.length args))
+
+let prim_imag_part args =
+  match args with
+  | [Datum.Fixnum _] -> Datum.Fixnum 0
+  | [Datum.Flonum _] -> Datum.Flonum 0.0
+  | [_] -> runtime_error "imag-part: expected number"
+  | _ -> runtime_error (Printf.sprintf "imag-part: expected 1 argument, got %d" (List.length args))
+
+let prim_magnitude args =
+  match args with
+  | [Datum.Fixnum n] -> Datum.Fixnum (abs n)
+  | [Datum.Flonum f] -> Datum.Flonum (Float.abs f)
+  | [_] -> runtime_error "magnitude: expected number"
+  | _ -> runtime_error (Printf.sprintf "magnitude: expected 1 argument, got %d" (List.length args))
+
+let prim_angle args =
+  match args with
+  | [Datum.Fixnum n] -> Datum.Flonum (if n >= 0 then 0.0 else Float.pi)
+  | [Datum.Flonum f] -> Datum.Flonum (if f >= 0.0 then 0.0 else Float.pi)
+  | [_] -> runtime_error "angle: expected number"
+  | _ -> runtime_error (Printf.sprintf "angle: expected 1 argument, got %d" (List.length args))
+
+let prim_make_rectangular args =
+  match args with
+  | [real; imag] ->
+    let i = as_flonum "make-rectangular" imag in
+    if i = 0.0 then real
+    else runtime_error "make-rectangular: complex numbers not supported"
+  | _ -> runtime_error (Printf.sprintf "make-rectangular: expected 2 arguments, got %d" (List.length args))
+
+let prim_make_polar args =
+  match args with
+  | [r; theta] ->
+    let rf = as_flonum "make-polar" r in
+    let tf = as_flonum "make-polar" theta in
+    let real = rf *. Float.cos tf in
+    let imag = rf *. Float.sin tf in
+    if Float.abs imag < 1e-15 then
+      Datum.Flonum real
+    else runtime_error "make-polar: complex numbers not supported"
+  | _ -> runtime_error (Printf.sprintf "make-polar: expected 2 arguments, got %d" (List.length args))
 
 let prim_number_to_string args =
   match args with
@@ -1519,6 +1638,82 @@ let register_primitives symbols env handlers
   register "sqrt" prim_sqrt;
   register "exact-integer-sqrt" prim_exact_integer_sqrt;
   register "number->string" prim_number_to_string;
+  (* Inexact math *)
+  register "exp" prim_exp;
+  register "log" prim_log;
+  register "sin" prim_sin;
+  register "cos" prim_cos;
+  register "tan" prim_tan;
+  register "asin" prim_asin;
+  register "acos" prim_acos;
+  register "atan" prim_atan;
+  register "finite?" prim_finite;
+  register "infinite?" prim_infinite;
+  register "nan?" prim_nan;
+  (* Complex stubs *)
+  register "real-part" prim_real_part;
+  register "imag-part" prim_imag_part;
+  register "magnitude" prim_magnitude;
+  register "angle" prim_angle;
+  register "make-rectangular" prim_make_rectangular;
+  register "make-polar" prim_make_polar;
+  (* Lazy *)
+  register "%make-promise" (fun args -> match args with
+    | [Datum.Bool done_; v] ->
+      Datum.Promise { promise_done = done_; promise_value = v }
+    | _ -> runtime_error "%make-promise: expected 2 arguments");
+  register "make-promise" (fun args -> match args with
+    | [Datum.Promise _ as p] -> p
+    | [v] -> Datum.Promise { promise_done = true; promise_value = v }
+    | _ -> runtime_error (Printf.sprintf "make-promise: expected 1 argument, got %d" (List.length args)));
+  register "promise?" (fun args -> match args with
+    | [Datum.Promise _] -> Datum.Bool true
+    | [_] -> Datum.Bool false
+    | _ -> runtime_error (Printf.sprintf "promise?: expected 1 argument, got %d" (List.length args)));
+  (* Process context *)
+  register "exit" (fun args -> match args with
+    | [] -> Stdlib.exit 0
+    | [Datum.Bool true] -> Stdlib.exit 0
+    | [Datum.Bool false] -> Stdlib.exit 1
+    | [Datum.Fixnum n] -> Stdlib.exit n
+    | [_] -> runtime_error "exit: expected boolean or integer"
+    | _ -> runtime_error (Printf.sprintf "exit: expected 0 or 1 arguments, got %d" (List.length args)));
+  register "emergency-exit" (fun args -> match args with
+    | [] -> Stdlib.exit 0
+    | [Datum.Bool true] -> Stdlib.exit 0
+    | [Datum.Bool false] -> Stdlib.exit 1
+    | [Datum.Fixnum n] -> Stdlib.exit n
+    | [_] -> runtime_error "emergency-exit: expected boolean or integer"
+    | _ -> runtime_error (Printf.sprintf "emergency-exit: expected 0 or 1 arguments, got %d" (List.length args)));
+  register "get-environment-variable" (fun args -> match args with
+    | [Datum.Str s] ->
+      (match Sys.getenv_opt (Bytes.to_string s) with
+       | Some v -> Datum.Str (Bytes.of_string v)
+       | None -> Datum.Bool false)
+    | [_] -> runtime_error "get-environment-variable: expected string"
+    | _ -> runtime_error (Printf.sprintf "get-environment-variable: expected 1 argument, got %d" (List.length args)));
+  register "get-environment-variables" (fun args -> match args with
+    | [] ->
+      let env = Unix.environment () in
+      let pairs = Array.to_list (Array.map (fun s ->
+        match String.split_on_char '=' s with
+        | key :: rest ->
+          Datum.Pair { car = Datum.Str (Bytes.of_string key);
+                       cdr = Datum.Str (Bytes.of_string (String.concat "=" rest)) }
+        | [] -> Datum.Pair { car = Datum.Str Bytes.empty; cdr = Datum.Str Bytes.empty }
+      ) env) in
+      Datum.list_of pairs
+    | _ -> runtime_error (Printf.sprintf "get-environment-variables: expected 0 arguments, got %d" (List.length args)));
+  (* Time *)
+  register "current-second" (fun args -> match args with
+    | [] -> Datum.Flonum (Unix.gettimeofday ())
+    | _ -> runtime_error (Printf.sprintf "current-second: expected 0 arguments, got %d" (List.length args)));
+  register "current-jiffy" (fun args -> match args with
+    | [] -> Datum.Fixnum (int_of_float (Unix.gettimeofday () *. 1e6))
+    | _ -> runtime_error (Printf.sprintf "current-jiffy: expected 0 arguments, got %d" (List.length args)));
+  register "jiffies-per-second" (fun args -> match args with
+    | [] -> Datum.Fixnum 1_000_000
+    | _ -> runtime_error (Printf.sprintf "jiffies-per-second: expected 0 arguments, got %d" (List.length args)));
   register "string->number" prim_string_to_number;
   (* Pair & list *)
   register "set-car!" prim_set_car;
@@ -2068,6 +2263,113 @@ let scheme_file_names = [
 
 let scheme_read_names = [ "read" ]
 
+let scheme_inexact_names = [
+  "exp"; "log"; "sin"; "cos"; "tan"; "asin"; "acos"; "atan";
+  "sqrt"; "finite?"; "infinite?"; "nan?"
+]
+
+let scheme_complex_names = [
+  "real-part"; "imag-part"; "magnitude"; "angle";
+  "make-rectangular"; "make-polar"
+]
+
+let scheme_lazy_names = [ "force"; "make-promise"; "promise?" ]
+let scheme_lazy_syntax_names = [ "delay"; "delay-force" ]
+
+let scheme_case_lambda_syntax_names = [ "case-lambda" ]
+
+let scheme_process_context_names = [
+  "command-line"; "exit"; "emergency-exit";
+  "get-environment-variable"; "get-environment-variables"
+]
+
+let scheme_time_names = [
+  "current-second"; "current-jiffy"; "jiffies-per-second"
+]
+
+let scheme_eval_names = [ "environment"; "eval" ]
+let scheme_load_names = [ "load" ]
+let scheme_repl_names = [ "interaction-environment" ]
+
+let scheme_r5rs_runtime_names = [
+  (* Arithmetic *)
+  "+"; "-"; "*"; "/"; "="; "<"; ">"; "<="; ">=";
+  "abs"; "min"; "max"; "quotient"; "remainder"; "modulo";
+  "floor"; "ceiling"; "truncate"; "round";
+  "gcd"; "lcm"; "expt"; "sqrt";
+  "number->string"; "string->number";
+  "exact->inexact"; "inexact->exact";
+  (* Inexact *)
+  "exp"; "log"; "sin"; "cos"; "tan"; "asin"; "acos"; "atan";
+  (* Complex *)
+  "real-part"; "imag-part"; "magnitude"; "angle";
+  "make-rectangular"; "make-polar";
+  (* Type predicates *)
+  "boolean?"; "number?"; "complex?"; "real?"; "rational?";
+  "integer?"; "exact?"; "inexact?";
+  "zero?"; "positive?"; "negative?"; "odd?"; "even?";
+  "symbol?"; "char?"; "string?"; "vector?";
+  "procedure?"; "pair?"; "null?";
+  "eof-object?";
+  (* Equivalence *)
+  "eq?"; "eqv?"; "equal?"; "not";
+  (* Pairs & lists *)
+  "cons"; "car"; "cdr"; "set-car!"; "set-cdr!";
+  "caar"; "cadr"; "cdar"; "cddr";
+  "list"; "make-list"; "length"; "append"; "reverse";
+  "list-tail"; "list-ref";
+  "memq"; "memv"; "member"; "assq"; "assv"; "assoc";
+  (* Symbols *)
+  "symbol->string"; "string->symbol";
+  (* Characters *)
+  "char=?"; "char<?"; "char>?"; "char<=?"; "char>=?";
+  "char-ci=?"; "char-ci<?"; "char-ci>?"; "char-ci<=?"; "char-ci>=?";
+  "char->integer"; "integer->char";
+  "char-upcase"; "char-downcase";
+  "char-alphabetic?"; "char-numeric?"; "char-whitespace?";
+  "char-upper-case?"; "char-lower-case?";
+  (* Strings *)
+  "make-string"; "string"; "string-length"; "string-ref"; "string-set!";
+  "string=?"; "string<?"; "string>?"; "string<=?"; "string>=?";
+  "string-ci=?"; "string-ci<?"; "string-ci>?"; "string-ci<=?"; "string-ci>=?";
+  "substring"; "string-append"; "string->list"; "list->string";
+  "string-copy"; "string-fill!";
+  (* Vectors *)
+  "make-vector"; "vector"; "vector-length"; "vector-ref"; "vector-set!";
+  "vector->list"; "list->vector"; "vector-fill!";
+  (* I/O *)
+  "display"; "write"; "newline";
+  "read";
+  "open-input-file"; "open-output-file";
+  "close-input-port"; "close-output-port";
+  "call-with-input-file"; "call-with-output-file";
+  "with-input-from-file"; "with-output-to-file";
+  "input-port?"; "output-port?";
+  "current-input-port"; "current-output-port";
+  "read-char"; "peek-char"; "write-char";
+  "eof-object";
+  "char-ready?";
+  (* Control *)
+  "apply"; "call/cc"; "call-with-current-continuation";
+  "call-with-values"; "values"; "dynamic-wind";
+  "map"; "for-each";
+  (* Eval / load *)
+  "eval"; "load"; "interaction-environment";
+  (* Lazy *)
+  "force"; "make-promise"; "promise?";
+  (* Process context *)
+  "exit";
+]
+
+let scheme_r5rs_syntax_names = [
+  "if"; "lambda"; "define"; "set!"; "begin"; "quote";
+  "let"; "let*"; "letrec";
+  "cond"; "case"; "do"; "and"; "or";
+  "define-syntax"; "let-syntax"; "letrec-syntax";
+  "quasiquote";
+  "delay";
+]
+
 let build_library inst name runtime_names syntax_names =
   let exports = Hashtbl.create (List.length runtime_names) in
   List.iter (fun rname ->
@@ -2102,7 +2404,27 @@ let register_builtin_libraries inst =
   build_library inst ["scheme"; "file"]
     scheme_file_names [];
   build_library inst ["scheme"; "read"]
-    scheme_read_names []
+    scheme_read_names [];
+  build_library inst ["scheme"; "inexact"]
+    scheme_inexact_names [];
+  build_library inst ["scheme"; "complex"]
+    scheme_complex_names [];
+  build_library inst ["scheme"; "lazy"]
+    scheme_lazy_names scheme_lazy_syntax_names;
+  build_library inst ["scheme"; "case-lambda"]
+    [] scheme_case_lambda_syntax_names;
+  build_library inst ["scheme"; "process-context"]
+    scheme_process_context_names [];
+  build_library inst ["scheme"; "time"]
+    scheme_time_names [];
+  build_library inst ["scheme"; "eval"]
+    scheme_eval_names [];
+  build_library inst ["scheme"; "load"]
+    scheme_load_names [];
+  build_library inst ["scheme"; "repl"]
+    scheme_repl_names [];
+  build_library inst ["scheme"; "r5rs"]
+    scheme_r5rs_runtime_names scheme_r5rs_syntax_names
 
 (* --- Expander callbacks --- *)
 
@@ -2176,7 +2498,10 @@ let create ?(readtable = Readtable.default) () =
                syn_env; gensym_counter; libraries;
                search_paths = ref []; features;
                loading_libs = ref []; fasl_cache = ref false;
-               current_input; current_output; current_error } in
+               current_input; current_output; current_error;
+               command_line = ref (Array.to_list Sys.argv);
+               eval_envs = Hashtbl.create 4;
+               eval_env_counter = ref 0 } in
   List.iter (eval_boot inst) boot_definitions;
   (* Register higher-order port procedures that need the instance *)
   let register_late name fn =
@@ -2233,6 +2558,132 @@ let create ?(readtable = Readtable.default) () =
     match s.Syntax.datum with
     | Syntax.Eof -> Datum.Eof
     | _ -> Syntax.to_datum s);
+  (* Environment specifier helpers *)
+  let make_env_spec env se =
+    let id = !(inst.eval_env_counter) in
+    inst.eval_env_counter := id + 1;
+    Hashtbl.replace inst.eval_envs id (env, se);
+    Datum.Vector [| Datum.Symbol "%env-spec"; Datum.Fixnum id |]
+  in
+  let get_env_spec name v =
+    match v with
+    | Datum.Vector [| Datum.Symbol "%env-spec"; Datum.Fixnum id |] ->
+      (match Hashtbl.find_opt inst.eval_envs id with
+       | Some pair -> pair
+       | None -> runtime_error (Printf.sprintf "%s: invalid environment specifier" name))
+    | _ -> runtime_error (Printf.sprintf "%s: expected environment specifier" name)
+  in
+  register_late "interaction-environment" (fun args -> match args with
+    | [] -> make_env_spec inst.global_env inst.syn_env
+    | _ -> runtime_error (Printf.sprintf "interaction-environment: expected 0 arguments, got %d" (List.length args)));
+  (* Internal primitives that core forms depend on at runtime.
+     These must be injected into fresh eval environments so that
+     expander-generated code (e.g. delay → %make-promise) works. *)
+  let internal_prims = [ "%make-promise" ] in
+  register_late "environment" (fun args ->
+    (* (environment import-set ...) — create fresh env from imports *)
+    let env = Env.empty () in
+    let se = Expander.core_env () in
+    (* Seed with internal primitives needed by core form expansions *)
+    List.iter (fun name ->
+      let sym = Symbol.intern inst.symbols name in
+      match Env.lookup_slot inst.global_env sym with
+      | Some slot -> Env.define_slot env sym slot
+      | None -> ()
+    ) internal_prims;
+    List.iter (fun spec ->
+      let spec_syn = Syntax.from_datum Loc.none spec in
+      let iset = Library.parse_import_set spec_syn in
+      let lookup_fn name = !lib_lookup_ref inst name in
+      let (rt_bindings, syn_bindings) = Library.resolve_import lookup_fn iset in
+      List.iter (fun (name, _id, slot) ->
+        let sym = Symbol.intern inst.symbols name in
+        Env.define_slot env sym slot
+      ) rt_bindings;
+      List.iter (fun (name, binding) ->
+        Expander.define_binding se name binding
+      ) syn_bindings
+    ) args;
+    make_env_spec env se);
+  register_late "eval" (fun args -> match args with
+    | [expr; env_spec] ->
+      let (env, se) = get_env_spec "eval" env_spec in
+      let expr_syn = Syntax.from_datum Loc.none expr in
+      let gensym_counter = ref 0 in
+      let gensym () =
+        let n = !gensym_counter in
+        gensym_counter := n + 1;
+        Printf.sprintf "%%eval%d" n
+      in
+      let (features, has_library, read_include) = make_expander_callbacks inst in
+      let expanded = Expander.expand ~syn_env:se ~gensym
+        ~features ~has_library ~read_include expr_syn in
+      let code = Compiler.compile inst.symbols expanded in
+      Vm.execute ~winds:inst.winds env code
+    | _ -> runtime_error (Printf.sprintf "eval: expected 2 arguments, got %d" (List.length args)));
+  register_late "load" (fun args -> match args with
+    | [Datum.Str s] ->
+      let path = Bytes.to_string s in
+      let port = Port.of_file path in
+      let rec loop () =
+        let expr = Reader.read_syntax inst.readtable port in
+        match expr.Syntax.datum with
+        | Syntax.Eof -> Datum.Void
+        | _ ->
+          let expanded = expand_with_callbacks inst expr in
+          let code = Compiler.compile inst.symbols expanded in
+          ignore (Vm.execute ~winds:inst.winds inst.global_env code);
+          loop ()
+      in
+      loop ()
+    | [Datum.Str s; env_spec] ->
+      let path = Bytes.to_string s in
+      let (env, se) = get_env_spec "load" env_spec in
+      let port = Port.of_file path in
+      let gensym_counter = ref 0 in
+      let gensym () =
+        let n = !gensym_counter in
+        gensym_counter := n + 1;
+        Printf.sprintf "%%load%d" n
+      in
+      let (features, has_library, read_include) = make_expander_callbacks inst in
+      let rec loop () =
+        let expr = Reader.read_syntax inst.readtable port in
+        match expr.Syntax.datum with
+        | Syntax.Eof -> Datum.Void
+        | _ ->
+          let expanded = Expander.expand ~syn_env:se ~gensym
+            ~features ~has_library ~read_include expr in
+          let code = Compiler.compile inst.symbols expanded in
+          ignore (Vm.execute ~winds:inst.winds env code);
+          loop ()
+      in
+      loop ()
+    | [_] -> runtime_error "load: expected string"
+    | _ -> runtime_error (Printf.sprintf "load: expected 1 or 2 arguments, got %d" (List.length args)));
+  register_late "command-line" (fun args -> match args with
+    | [] ->
+      Datum.list_of (List.map (fun s -> Datum.Str (Bytes.of_string s)) !(inst.command_line))
+    | _ -> runtime_error (Printf.sprintf "command-line: expected 0 arguments, got %d" (List.length args)));
+  register_late "force" (fun args -> match args with
+    | [Datum.Promise p] ->
+      (* Iterative forcing per R7RS §4.2.5 *)
+      while not p.promise_done do
+        let result = call inst p.promise_value [] in
+        if not p.promise_done then
+          (match result with
+           | Datum.Promise p2 ->
+             p.promise_done <- p2.promise_done;
+             p.promise_value <- p2.promise_value;
+             p2.promise_done <- true;
+             p2.promise_value <- Datum.Promise p
+           | v ->
+             p.promise_done <- true;
+             p.promise_value <- v)
+      done;
+      p.promise_value
+    | [v] -> v  (* R7RS: (force non-promise) returns the value *)
+    | _ -> runtime_error (Printf.sprintf "force: expected 1 argument, got %d" (List.length args)));
   register_builtin_libraries inst;
   inst
 

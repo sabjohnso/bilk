@@ -45,6 +45,8 @@ let core_forms = [
   "define-syntax"; "let-syntax"; "letrec-syntax";
   "quasiquote"; "guard"; "define-record-type"; "syntax-error";
   "cond-expand"; "include"; "include-ci";
+  "delay"; "delay-force";
+  "case-lambda";
 ]
 
 let core_env () =
@@ -1405,6 +1407,143 @@ and expand_core ~syn_env ~gensym ~ctx name (s : Syntax.t) : Syntax.t =
 
   | "include-ci" ->
     expand_include ~syn_env ~gensym ~ctx ~fold_case:true loc s
+
+  | "case-lambda" ->
+    (* (case-lambda (formals body ...) ...)
+       → (lambda %args (let ((%n (length %args))) (dispatch ...))) *)
+    let args = syntax_list_to_list s in
+    let clauses = List.tl args in
+    let mk_sym name = { Syntax.datum = Syntax.Symbol name; loc } in
+    let args_sym = gensym () in
+    let n_sym = gensym () in
+    let rec build_dispatch = function
+      | [] ->
+        list_to_syntax loc [
+          mk_sym "error";
+          { Syntax.datum = Syntax.Str "wrong number of arguments"; loc }
+        ]
+      | clause :: rest ->
+        let parts = syntax_list_to_list clause in
+        (match parts with
+         | formals :: body when body <> [] ->
+           let param_names = ref [] in
+           let is_variadic = ref false in
+           let min_arity = ref 0 in
+           let rec walk_formals (f : Syntax.t) =
+             match f.datum with
+             | Syntax.Nil -> ()
+             | Syntax.Symbol name ->
+               (* rest parameter — variadic *)
+               param_names := name :: !param_names;
+               is_variadic := true
+             | Syntax.Pair (car, cdr) ->
+               (match car.datum with
+                | Syntax.Symbol name ->
+                  param_names := name :: !param_names;
+                  incr min_arity;
+                  walk_formals cdr
+                | _ -> compile_error loc "case-lambda: expected symbol in formals")
+             | _ -> compile_error loc "case-lambda: malformed formals"
+           in
+           walk_formals formals;
+           let names = List.rev !param_names in
+           let variadic = !is_variadic in
+           let arity = !min_arity in
+           (* Build the test *)
+           let test =
+             if variadic then
+               list_to_syntax loc [mk_sym ">="; mk_sym n_sym;
+                 { Syntax.datum = Syntax.Fixnum arity; loc }]
+             else
+               list_to_syntax loc [mk_sym "="; mk_sym n_sym;
+                 { Syntax.datum = Syntax.Fixnum arity; loc }]
+           in
+           (* Build bindings: ((x (car %args)) (y (car (cdr %args))) ...) *)
+           let rec build_bindings names depth =
+             match names with
+             | [] -> []
+             | [name] when variadic ->
+               (* rest param: gets the cdr chain *)
+               let accessor = build_accessor depth true in
+               [list_to_syntax loc [mk_sym name; accessor]]
+             | name :: rest_names ->
+               let accessor = build_accessor depth false in
+               list_to_syntax loc [mk_sym name; accessor]
+               :: build_bindings rest_names (depth + 1)
+           and build_accessor depth is_rest =
+             let rec build d =
+               if d = 0 then mk_sym args_sym
+               else list_to_syntax loc [mk_sym "cdr"; build (d - 1)]
+             in
+             if is_rest then build depth
+             else list_to_syntax loc [mk_sym "car"; build depth]
+           in
+           let bindings = build_bindings names 0 in
+           let let_body =
+             if bindings = [] then
+               list_to_syntax loc (mk_sym "begin" :: body)
+             else
+               list_to_syntax loc
+                 (mk_sym "let"
+                  :: list_to_syntax loc bindings
+                  :: body)
+           in
+           let expanded_body = expand_impl ~syn_env ~gensym ~ctx let_body in
+           let alt = build_dispatch rest in
+           list_to_syntax loc [mk_sym "if"; test; expanded_body; alt]
+         | _ -> compile_error loc "case-lambda: expected formals and body")
+    in
+    let dispatch = build_dispatch clauses in
+    let n_binding = list_to_syntax loc [
+      list_to_syntax loc [mk_sym n_sym;
+        list_to_syntax loc [mk_sym "length"; mk_sym args_sym]]
+    ] in
+    let let_form = list_to_syntax loc [mk_sym "let"; n_binding; dispatch] in
+    let result = list_to_syntax loc [
+      mk_sym "lambda";
+      mk_sym args_sym;
+      let_form
+    ] in
+    expand_impl ~syn_env ~gensym ~ctx result
+
+  | "delay" ->
+    (* (delay expr) → (%make-promise #f (lambda () (make-promise expr))) *)
+    let args = syntax_list_to_list s in
+    (match args with
+     | [_; expr] ->
+       let expr' = expand_impl ~syn_env ~gensym ~ctx expr in
+       let thunk = list_to_syntax loc [
+         { Syntax.datum = Syntax.Symbol "lambda"; loc };
+         { Syntax.datum = Syntax.Nil; loc };
+         list_to_syntax loc [
+           { Syntax.datum = Syntax.Symbol "make-promise"; loc };
+           expr'
+         ]
+       ] in
+       list_to_syntax loc [
+         { Syntax.datum = Syntax.Symbol "%make-promise"; loc };
+         { Syntax.datum = Syntax.Bool false; loc };
+         thunk
+       ]
+     | _ -> compile_error loc "delay: expected single expression")
+
+  | "delay-force" ->
+    (* (delay-force expr) → (%make-promise #f (lambda () expr)) *)
+    let args = syntax_list_to_list s in
+    (match args with
+     | [_; expr] ->
+       let expr' = expand_impl ~syn_env ~gensym ~ctx expr in
+       let thunk = list_to_syntax loc [
+         { Syntax.datum = Syntax.Symbol "lambda"; loc };
+         { Syntax.datum = Syntax.Nil; loc };
+         expr'
+       ] in
+       list_to_syntax loc [
+         { Syntax.datum = Syntax.Symbol "%make-promise"; loc };
+         { Syntax.datum = Syntax.Bool false; loc };
+         thunk
+       ]
+     | _ -> compile_error loc "delay-force: expected single expression")
 
   | _ -> expand_application ~syn_env ~gensym ~ctx s
 
