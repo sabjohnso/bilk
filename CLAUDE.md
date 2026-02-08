@@ -353,7 +353,7 @@ Tests live in `test/` as per-topic files and are run via `dune test`.
 | `test/test_line_editor.ml` | Line_editor (21 tests) |
 | `test/test_tokenizer.ml` | Tokenizer (26 tests) |
 | `test/test_highlight.ml` | Highlight (18 tests) |
-| `test/test_paredit.ml` | Paredit (72 tests) |
+| `test/test_paredit.ml` | Paredit (73 tests) |
 | `test/test_semver.ml` | Semver (34 tests) |
 | `test/test_package.ml` | Package (16 tests) |
 | `test/test_pkg_manager.ml` | Pkg_manager (25 tests) |
