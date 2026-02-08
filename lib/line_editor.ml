@@ -29,6 +29,7 @@ type edit_state = {
   content : Buffer.t;
   mutable cursor : int;
   mutable saved_input : string;  (* saved before history navigation *)
+  mutable rendered_row : int;    (* cursor row at last render, for move-up *)
 }
 
 let create config =
@@ -145,9 +146,12 @@ let render t st =
   let cur_row = cursor_row text st.cursor in
   let cur_col = cursor_col text st.cursor in
   let prompt = effective_prompt t in
-  (* Move to start of editing area *)
-  if cur_row > 0 then
-    Terminal.write_string t.term (Printf.sprintf "\x1b[%dA" cur_row);
+  (* Move to start of editing area — use the cursor row from the
+     previous render so we move up the correct number of lines even
+     when the content changed (e.g. history navigation from a multi-line
+     entry to a shorter one). *)
+  if st.rendered_row > 0 then
+    Terminal.write_string t.term (Printf.sprintf "\x1b[%dA" st.rendered_row);
   Terminal.write_string t.term "\r";
   (* Highlight the full text if a highlighter is configured *)
   let highlighted_lines = match t.config.highlight with
@@ -178,7 +182,8 @@ let render t st =
     Terminal.write_string t.term (Printf.sprintf "\x1b[%dA" lines_up);
   let prompt_len = if cur_row = 0 then String.length prompt
                    else String.length t.config.continuation_prompt in
-  Terminal.move_to_column t.term (prompt_len + cur_col + 1)
+  Terminal.move_to_column t.term (prompt_len + cur_col + 1);
+  st.rendered_row <- cur_row
 
 (* --- Word movement helpers --- *)
 
@@ -291,6 +296,7 @@ let read_input t =
     content = Buffer.create 80;
     cursor = 0;
     saved_input = "";
+    rendered_row = 0;
   } in
   History.reset_nav t.history;
   render t st;
