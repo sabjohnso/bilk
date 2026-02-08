@@ -85,3 +85,12 @@ val splice : Readtable.t -> string -> int -> edit_result
 (** [raise_sexp rt text cursor] replaces the enclosing list with the
     sexp at cursor. *)
 val raise_sexp : Readtable.t -> string -> int -> edit_result
+
+(** {1 Indentation} *)
+
+(** [compute_indent rt text cursor] returns the number of spaces to indent
+    a new line inserted at [cursor]. Uses Scheme indentation conventions:
+    special forms (define, lambda, let, begin, etc.) indent body by 2 from
+    the opening paren; regular calls align with the first argument if one
+    appears on the same line as the operator, otherwise indent by 2. *)
+val compute_indent : Readtable.t -> string -> int -> int

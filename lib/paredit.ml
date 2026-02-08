@@ -519,3 +519,91 @@ let raise_sexp rt text cursor =
       let after = String.sub text (close_pos + 1) (len - close_pos - 1) in
       { text = before ^ sexp_text ^ after;
         cursor = open_pos }
+
+(* --- Indentation --- *)
+
+let body_indent_forms = [
+  "define"; "define-syntax"; "define-record-type"; "define-library";
+  "define-values";
+  "lambda";
+  "let"; "let*"; "letrec"; "letrec*"; "let-values"; "let*-values";
+  "let-syntax"; "letrec-syntax";
+  "begin"; "when"; "unless"; "cond"; "case"; "do";
+  "guard"; "syntax-rules"; "parameterize";
+  "with-exception-handler"; "dynamic-wind";
+  "call-with-current-continuation"; "call/cc";
+  "call-with-values"; "call-with-port";
+  "with-input-from-file"; "with-output-to-file";
+]
+
+let col_of_pos text pos =
+  let rec scan i =
+    if i < 0 then pos
+    else if text.[i] = '\n' then pos - i - 1
+    else scan (i - 1)
+  in
+  scan (pos - 1)
+
+let row_of_pos text pos =
+  let row = ref 0 in
+  for i = 0 to min (pos - 1) (String.length text - 1) do
+    if text.[i] = '\n' then incr row
+  done;
+  !row
+
+let compute_indent rt text cursor =
+  let tokens = Tokenizer.tokenize rt text in
+  let tokens_before = List.filter (fun (tok : Tokenizer.token) ->
+    tok.span.start < cursor
+  ) tokens in
+  (* Build paren stack to find innermost unclosed open paren *)
+  let stack = Stack.create () in
+  List.iter (fun (tok : Tokenizer.token) ->
+    match tok.kind with
+    | Paren_open -> Stack.push tok.span.start stack
+    | Paren_close ->
+      if not (Stack.is_empty stack) then ignore (Stack.pop stack)
+    | _ -> ()
+  ) tokens_before;
+  if Stack.is_empty stack then 0
+  else
+    let open_pos = Stack.top stack in
+    let open_col = col_of_pos text open_pos in
+    (* Find top-level elements inside this form (depth 0 relative to open_pos) *)
+    let depth = ref 0 in
+    let elems = ref [] in
+    List.iter (fun (tok : Tokenizer.token) ->
+      if tok.span.start > open_pos && tok.span.start < cursor then
+        match tok.kind with
+        | Paren_open ->
+          if !depth = 0 then elems := tok.span.start :: !elems;
+          incr depth
+        | Paren_close -> if !depth > 0 then decr depth
+        | Whitespace -> ()
+        | _ ->
+          if !depth = 0 then elems := tok.span.start :: !elems
+    ) tokens_before;
+    let elems = List.rev !elems in
+    match elems with
+    | [] -> open_col + 2
+    | head_pos :: rest ->
+      let head_tok = List.find (fun (tok : Tokenizer.token) ->
+        tok.span.start = head_pos
+      ) tokens_before in
+      let head_text = String.sub text head_tok.span.start
+          (head_tok.span.stop - head_tok.span.start) in
+      let is_body_form =
+        (head_tok.kind = Tokenizer.Symbol || head_tok.kind = Tokenizer.Keyword)
+        && List.mem head_text body_indent_forms
+      in
+      if is_body_form then
+        open_col + 2
+      else
+        (* Align with first argument if on same line as head *)
+        match rest with
+        | second_pos :: _ ->
+          if row_of_pos text head_pos = row_of_pos text second_pos then
+            col_of_pos text second_pos
+          else
+            open_col + 2
+        | [] -> open_col + 2

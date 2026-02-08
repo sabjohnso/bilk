@@ -265,6 +265,75 @@ let test_no_enclosing () =
   let result2 = Paredit.splice rt "a b" 0 in
   check_edit "no enclosing splice" "a b" 0 result2
 
+(* === Indentation === *)
+
+let test_indent_top_level () =
+  Alcotest.(check int) "top level" 0 (Paredit.compute_indent rt "" 0);
+  Alcotest.(check int) "top level after expr" 0
+    (Paredit.compute_indent rt "(+ 1 2)\n" 8)
+
+let test_indent_after_open () =
+  (* Just an open paren — indent 2 *)
+  Alcotest.(check int) "after (" 2 (Paredit.compute_indent rt "(" 1)
+
+let test_indent_define () =
+  Alcotest.(check int) "define body" 2
+    (Paredit.compute_indent rt "(define x" 9)
+
+let test_indent_define_fn () =
+  Alcotest.(check int) "define fn body" 2
+    (Paredit.compute_indent rt "(define (foo x)" 15)
+
+let test_indent_lambda () =
+  Alcotest.(check int) "lambda body" 2
+    (Paredit.compute_indent rt "(lambda (x)" 11)
+
+let test_indent_let () =
+  Alcotest.(check int) "let body" 2
+    (Paredit.compute_indent rt "(let ((x 1))" 12)
+
+let test_indent_begin () =
+  Alcotest.(check int) "begin body" 2
+    (Paredit.compute_indent rt "(begin" 6)
+
+let test_indent_cond () =
+  Alcotest.(check int) "cond clause" 2
+    (Paredit.compute_indent rt "(cond" 5)
+
+let test_indent_call_align () =
+  (* (foo bar → align with first arg "bar" at col 5 *)
+  Alcotest.(check int) "align with arg" 5
+    (Paredit.compute_indent rt "(foo bar" 8)
+
+let test_indent_call_no_args () =
+  (* (foo → no args on same line, default 2 *)
+  Alcotest.(check int) "no args" 2
+    (Paredit.compute_indent rt "(foo" 4)
+
+let test_indent_if_align () =
+  (* if is not a body form — aligns with first arg *)
+  Alcotest.(check int) "if aligns" 4
+    (Paredit.compute_indent rt "(if #t" 6)
+
+let test_indent_nested () =
+  (* (define (foo x)\n  (let ((y 1)) *)
+  (* Inner (let is at column 2, let is body form → 2 + 2 = 4 *)
+  let text = "(define (foo x)\n  (let ((y 1))" in
+  Alcotest.(check int) "nested let body" 4
+    (Paredit.compute_indent rt text (String.length text))
+
+let test_indent_nested_call () =
+  (* (map (lambda (x) → inside lambda, body indent = 5 + 2 = 7 *)
+  let text = "(map (lambda (x)" in
+  Alcotest.(check int) "lambda in map" 7
+    (Paredit.compute_indent rt text (String.length text))
+
+let test_indent_deep_nesting () =
+  (* (define (foo x)\n  (if (= x 0) → inside if, align with (= x 0) at col 6 *)
+  let text = "(define (foo x)\n  (if (= x 0)" in
+  Alcotest.(check int) "if in define" 6
+    (Paredit.compute_indent rt text (String.length text))
+
 let () =
   Alcotest.run "Paredit" [
     "navigation", [
@@ -332,5 +401,21 @@ let () =
       Alcotest.test_case "raise sexp" `Quick test_raise_sexp;
       Alcotest.test_case "raise sexp list" `Quick test_raise_sexp_list;
       Alcotest.test_case "no enclosing" `Quick test_no_enclosing;
+    ];
+    "indentation", [
+      Alcotest.test_case "top level" `Quick test_indent_top_level;
+      Alcotest.test_case "after open" `Quick test_indent_after_open;
+      Alcotest.test_case "define" `Quick test_indent_define;
+      Alcotest.test_case "define fn" `Quick test_indent_define_fn;
+      Alcotest.test_case "lambda" `Quick test_indent_lambda;
+      Alcotest.test_case "let" `Quick test_indent_let;
+      Alcotest.test_case "begin" `Quick test_indent_begin;
+      Alcotest.test_case "cond" `Quick test_indent_cond;
+      Alcotest.test_case "call align" `Quick test_indent_call_align;
+      Alcotest.test_case "call no args" `Quick test_indent_call_no_args;
+      Alcotest.test_case "if align" `Quick test_indent_if_align;
+      Alcotest.test_case "nested" `Quick test_indent_nested;
+      Alcotest.test_case "nested call" `Quick test_indent_nested_call;
+      Alcotest.test_case "deep nesting" `Quick test_indent_deep_nesting;
     ];
   ]

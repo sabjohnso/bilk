@@ -226,6 +226,14 @@ let insert_char st c =
 let insert_newline st =
   insert_string st "\n"
 
+let insert_newline_indented t st =
+  let text = content_string st in
+  match t.config.readtable with
+  | Some rt ->
+    let indent = Paredit.compute_indent rt text st.cursor in
+    insert_string st ("\n" ^ String.make indent ' ')
+  | None -> insert_newline st
+
 let delete_backward st =
   if st.cursor > 0 then begin
     let text = content_string st in
@@ -331,13 +339,13 @@ let read_input t =
         Terminal.write_string t.term "\r\n";
         Input text
       end else begin
-        insert_newline st;
+        insert_newline_indented t st;
         render t st;
         loop ()
       end
 
     | Terminal.Alt_enter ->
-      insert_newline st;
+      insert_newline_indented t st;
       render t st;
       loop ()
 
