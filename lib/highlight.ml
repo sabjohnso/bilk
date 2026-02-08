@@ -19,6 +19,8 @@ type theme = {
   quote_style : style;
   error_style : style;
   default_style : style;
+  defn_name_style : style;
+  param_style : style;
 }
 
 let default_style = {
@@ -81,6 +83,8 @@ let dark_theme = {
   quote_style = fg 208;         (* orange *)
   error_style = fg_bold 196;    (* red, bold *)
   default_style;
+  defn_name_style = fg_bold 81; (* bright cyan, bold *)
+  param_style = fg 180;         (* tan/wheat *)
 }
 
 let light_theme = {
@@ -96,6 +100,8 @@ let light_theme = {
   quote_style = fg 166;         (* dark orange *)
   error_style = fg_bold 160;    (* dark red, bold *)
   default_style;
+  defn_name_style = fg_bold 24; (* dark teal, bold *)
+  param_style = fg 130;         (* brown/amber *)
 }
 
 (* --- Matching paren finder --- *)
@@ -142,6 +148,191 @@ let find_matching_paren tokens cursor_pos =
     !result
   | _ -> None
 
+(* --- Semantic analysis --- *)
+
+type sem_role = Defn_name | Param | Bound_var
+
+type sem_mark = {
+  role : sem_role;
+  name : string;
+  scope_start : int;
+  scope_end : int;
+}
+
+let analyze_semantics (tokens : Tokenizer.token list) text =
+  let arr = Array.of_list tokens in
+  let n = Array.length arr in
+  let marks = Hashtbl.create 16 in
+  let tok_text (t : Tokenizer.token) =
+    String.sub text t.span.start (t.span.stop - t.span.start)
+  in
+  let skip_ws i =
+    let j = ref i in
+    while !j < n && arr.(!j).kind = Tokenizer.Whitespace do incr j done;
+    !j
+  in
+  let find_close i =
+    let depth = ref 1 in
+    let j = ref (i + 1) in
+    while !j < n && !depth > 0 do
+      (match arr.(!j).kind with
+       | Tokenizer.Paren_open -> incr depth
+       | Tokenizer.Paren_close -> decr depth
+       | _ -> ());
+      if !depth > 0 then incr j
+    done;
+    if !j < n && !depth = 0 then Some !j else None
+  in
+  let is_id (t : Tokenizer.token) =
+    t.kind = Tokenizer.Symbol || t.kind = Tokenizer.Keyword
+  in
+  let add_mark (tok : Tokenizer.token) role scope_s scope_e =
+    Hashtbl.replace marks tok.span.start
+      { role; name = tok_text tok; scope_start = scope_s; scope_end = scope_e }
+  in
+  let collect_params from_i to_i scope_s scope_e =
+    let pi = ref (skip_ws from_i) in
+    while !pi < to_i do
+      if is_id arr.(!pi) then
+        add_mark arr.(!pi) Param scope_s scope_e;
+      pi := skip_ws (!pi + 1)
+    done
+  in
+  let process_binding_pairs open_i close_i scope_s scope_e =
+    let i = ref (skip_ws (open_i + 1)) in
+    while !i < close_i do
+      if arr.(!i).kind = Tokenizer.Paren_open then begin
+        (match find_close !i with
+         | None -> i := close_i
+         | Some pair_close ->
+           let name_i = skip_ws (!i + 1) in
+           if name_i < pair_close && is_id arr.(name_i) then
+             add_mark arr.(name_i) Bound_var scope_s scope_e;
+           i := skip_ws (pair_close + 1))
+      end else
+        i := skip_ws (!i + 1)
+    done
+  in
+  let rec process_form open_i =
+    match find_close open_i with
+    | None -> ()
+    | Some close_i ->
+      let scope_s = arr.(open_i).span.start in
+      let scope_e = arr.(close_i).span.stop in
+      let head_i = skip_ws (open_i + 1) in
+      if head_i < close_i && is_id arr.(head_i) then begin
+        let head = tok_text arr.(head_i) in
+        (match head with
+         | "define" | "define-syntax" | "define-record-type"
+         | "define-library" | "define-values" ->
+           let next_i = skip_ws (head_i + 1) in
+           if next_i < close_i then begin
+             if arr.(next_i).kind = Tokenizer.Paren_open then begin
+               (* (define (name params...) body) *)
+               (match find_close next_i with
+                | None -> ()
+                | Some params_close ->
+                  let name_i = skip_ws (next_i + 1) in
+                  if name_i < params_close && is_id arr.(name_i) then begin
+                    add_mark arr.(name_i) Defn_name scope_s scope_e;
+                    collect_params (name_i + 1) params_close scope_s scope_e
+                  end)
+             end else if is_id arr.(next_i) then
+               (* (define name expr) *)
+               add_mark arr.(next_i) Defn_name scope_s scope_e
+           end
+         | "lambda" ->
+           let next_i = skip_ws (head_i + 1) in
+           if next_i < close_i && arr.(next_i).kind = Tokenizer.Paren_open then
+             (match find_close next_i with
+              | None -> ()
+              | Some params_close ->
+                collect_params (next_i + 1) params_close scope_s scope_e)
+         | "let" | "let*" | "letrec" | "letrec*"
+         | "let-values" | "let*-values" | "let-syntax" | "letrec-syntax" ->
+           let next_i = skip_ws (head_i + 1) in
+           if next_i < close_i then begin
+             if is_id arr.(next_i) then begin
+               (* Named let: (let name ((var val) ...) body) *)
+               add_mark arr.(next_i) Defn_name scope_s scope_e;
+               let bindings_i = skip_ws (next_i + 1) in
+               if bindings_i < close_i && arr.(bindings_i).kind = Tokenizer.Paren_open then
+                 (match find_close bindings_i with
+                  | Some bc -> process_binding_pairs bindings_i bc scope_s scope_e
+                  | None -> ())
+             end else if arr.(next_i).kind = Tokenizer.Paren_open then
+               (match find_close next_i with
+                | Some bc -> process_binding_pairs next_i bc scope_s scope_e
+                | None -> ())
+           end
+         | "do" ->
+           let next_i = skip_ws (head_i + 1) in
+           if next_i < close_i && arr.(next_i).kind = Tokenizer.Paren_open then
+             (match find_close next_i with
+              | Some bc -> process_binding_pairs next_i bc scope_s scope_e
+              | None -> ())
+         | _ -> ())
+      end;
+      scan_subforms (open_i + 1) close_i
+  and scan_subforms from_i to_i =
+    let i = ref from_i in
+    while !i < to_i do
+      if arr.(!i).kind = Tokenizer.Paren_open then begin
+        process_form !i;
+        (match find_close !i with
+         | Some ci -> i := ci + 1
+         | None -> i := to_i)
+      end else
+        incr i
+    done
+  in
+  scan_subforms 0 n;
+  marks
+
+(* Find binding info for identifier at cursor position *)
+let find_cursor_binding (tokens : Tokenizer.token list) text cursor_pos marks =
+  if cursor_pos < 0 then None
+  else
+    let cursor_tok = List.find_opt (fun (t : Tokenizer.token) ->
+      cursor_pos >= t.span.start && cursor_pos < t.span.stop
+      && (t.kind = Tokenizer.Symbol || t.kind = Tokenizer.Keyword)
+    ) tokens in
+    match cursor_tok with
+    | None -> None
+    | Some ct ->
+      let name = String.sub text ct.span.start (ct.span.stop - ct.span.start) in
+      if Hashtbl.mem marks ct.span.start then
+        (* Cursor is on a binding site — just bold it *)
+        Some (ct.span.start, ct.span.stop, None)
+      else
+        (* Search for the innermost binding with this name whose scope
+           contains the cursor position *)
+        let best = ref None in
+        Hashtbl.iter (fun _pos mark ->
+          if mark.name = name
+             && cursor_pos >= mark.scope_start
+             && cursor_pos < mark.scope_end then
+            match !best with
+            | None -> best := Some mark
+            | Some prev ->
+              if mark.scope_start > prev.scope_start then
+                best := Some mark
+        ) marks;
+        match !best with
+        | Some m ->
+          (* Find the token position for the binding *)
+          let binding_tok = List.find_opt (fun (t : Tokenizer.token) ->
+            t.span.start >= m.scope_start && t.span.stop <= m.scope_end
+            && (t.kind = Tokenizer.Symbol || t.kind = Tokenizer.Keyword)
+            && String.sub text t.span.start (t.span.stop - t.span.start) = name
+            && Hashtbl.mem marks t.span.start
+          ) tokens in
+          (match binding_tok with
+           | Some bt -> Some (ct.span.start, ct.span.stop,
+                              Some (bt.span.start, bt.span.stop))
+           | None -> Some (ct.span.start, ct.span.stop, None))
+        | None -> Some (ct.span.start, ct.span.stop, None)
+
 (* --- Highlighting --- *)
 
 let highlight_line theme rt text cursor_pos =
@@ -152,29 +343,33 @@ let highlight_line theme rt text cursor_pos =
     | Some (p1, p2) -> pos = p1 || pos = p2
     | None -> false
   in
+  let marks = analyze_semantics tokens text in
+  let cursor_info = find_cursor_binding tokens text cursor_pos marks in
+  let is_cursor_tok_start pos =
+    match cursor_info with
+    | Some (s, _, _) -> pos = s
+    | None -> false
+  in
+  let is_binding_highlight start stop =
+    match cursor_info with
+    | Some (_, _, Some (bs, be)) -> start = bs && stop = be
+    | _ -> false
+  in
   let buf = Buffer.create (String.length text * 2) in
   let depth = ref 0 in
   List.iter (fun (tok : Tokenizer.token) ->
-    let s = style_to_ansi (match tok.kind with
+    let base_style = match tok.kind with
       | Tokenizer.Paren_open ->
         let d = !depth in
         incr depth;
-        let base = theme.paren.(d mod Array.length theme.paren) in
-        if is_matching_pos tok.span.start then
-          { base with underline = true }
-        else base
+        theme.paren.(d mod Array.length theme.paren)
       | Tokenizer.Paren_close ->
         if !depth > 0 then decr depth;
         let d = !depth in
-        let base = theme.paren.(d mod Array.length theme.paren) in
-        if is_matching_pos tok.span.start then
-          { base with underline = true }
-        else base
+        theme.paren.(d mod Array.length theme.paren)
       | Tokenizer.String_lit -> theme.string_style
       | Tokenizer.Number_lit -> theme.number_style
-      | Tokenizer.Keyword -> theme.keyword_style
       | Tokenizer.Comment -> theme.comment_style
-      | Tokenizer.Symbol -> theme.symbol_style
       | Tokenizer.Boolean_lit -> theme.boolean_style
       | Tokenizer.Char_lit -> theme.char_style
       | Tokenizer.Quote_shorthand -> theme.quote_style
@@ -182,7 +377,27 @@ let highlight_line theme rt text cursor_pos =
       | Tokenizer.Whitespace -> theme.default_style
       | Tokenizer.Hash_prefix -> theme.default_style
       | Tokenizer.Error -> theme.error_style
-    ) in
+      | Tokenizer.Symbol | Tokenizer.Keyword ->
+        (match Hashtbl.find_opt marks tok.span.start with
+         | Some m ->
+           (match m.role with
+            | Defn_name -> theme.defn_name_style
+            | Param | Bound_var -> theme.param_style)
+         | None ->
+           if tok.kind = Tokenizer.Keyword then theme.keyword_style
+           else theme.symbol_style)
+    in
+    let style =
+      if is_matching_pos tok.span.start then
+        { base_style with underline = true }
+      else if is_cursor_tok_start tok.span.start then
+        { base_style with bold = true }
+      else if is_binding_highlight tok.span.start tok.span.stop then
+        { base_style with underline = true }
+      else
+        base_style
+    in
+    let s = style_to_ansi style in
     let tok_text = String.sub text tok.span.start (tok.span.stop - tok.span.start) in
     if s <> "" then begin
       Buffer.add_string buf s;
@@ -298,6 +513,8 @@ let load_theme path =
          | "char" -> t := { !t with char_style = !s }
          | "quote" -> t := { !t with quote_style = !s }
          | "error" -> t := { !t with error_style = !s }
+         | "defn-name" -> t := { !t with defn_name_style = !s }
+         | "param" -> t := { !t with param_style = !s }
          | "paren" ->
            let colors = List.rev !paren_colors in
            if colors <> [] then

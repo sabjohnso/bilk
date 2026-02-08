@@ -89,6 +89,67 @@ let test_theme_load () =
     Alcotest.(check (option int)) "string fg" (Some 114) t.string_style.fg;
     Alcotest.(check int) "paren count" 3 (Array.length t.paren))
 
+(* --- Semantic highlighting --- *)
+
+let test_defn_name_colored () =
+  (* In (define (foo x) ...), foo should get defn_name_style *)
+  let text = "(define (foo x) x)" in
+  let result = Highlight.highlight_line theme rt text (-1) in
+  let stripped = Highlight.strip_ansi result in
+  Alcotest.(check string) "roundtrip" text stripped;
+  (* foo should have the defn_name_style color (fg 81) *)
+  Alcotest.(check bool) "defn name colored"
+    true (contains_substring result "\x1b[38;5;81")
+
+let test_param_colored () =
+  (* In (define (foo x) ...), x should get param_style *)
+  let text = "(define (foo x) x)" in
+  let result = Highlight.highlight_line theme rt text (-1) in
+  (* x at param position should have param_style color (fg 180) *)
+  Alcotest.(check bool) "param colored"
+    true (contains_substring result "\x1b[38;5;180")
+
+let test_let_binding_colored () =
+  let text = "(let ((x 1)) x)" in
+  let result = Highlight.highlight_line theme rt text (-1) in
+  let stripped = Highlight.strip_ansi result in
+  Alcotest.(check string) "roundtrip" text stripped;
+  (* x at binding position should have param_style color *)
+  Alcotest.(check bool) "binding colored"
+    true (contains_substring result "\x1b[38;5;180")
+
+let test_lambda_params_colored () =
+  let text = "(lambda (a b) a)" in
+  let result = Highlight.highlight_line theme rt text (-1) in
+  let stripped = Highlight.strip_ansi result in
+  Alcotest.(check string) "roundtrip" text stripped;
+  Alcotest.(check bool) "param colored"
+    true (contains_substring result "\x1b[38;5;180")
+
+let test_cursor_on_identifier_bold () =
+  (* Cursor on 'x' in body — should be bold *)
+  let text = "(define (foo x) x)" in
+  let cursor = 16 in  (* on the 'x' in the body *)
+  let result = Highlight.highlight_line theme rt text cursor in
+  (* The x at cursor should have bold *)
+  Alcotest.(check bool) "cursor bold"
+    true (contains_substring result ";1m")
+
+let test_cursor_binding_underline () =
+  (* Cursor on 'x' in body — binding site 'x' in params should be underlined *)
+  let text = "(define (foo x) x)" in
+  let cursor = 16 in  (* on the 'x' in the body *)
+  let result = Highlight.highlight_line theme rt text cursor in
+  (* Binding site x should have underline *)
+  Alcotest.(check bool) "binding underline"
+    true (contains_substring result ";4m")
+
+let test_semantic_roundtrip () =
+  let text = "(define (factorial n) (if (= n 0) 1 (* n (factorial (- n 1)))))" in
+  let highlighted = Highlight.highlight_line theme rt text (-1) in
+  Alcotest.(check string) "roundtrip"
+    text (Highlight.strip_ansi highlighted)
+
 let () =
   Alcotest.run "Highlight" [
     "highlighting", [
@@ -107,5 +168,14 @@ let () =
     ];
     "theme loading", [
       Alcotest.test_case "load theme" `Quick test_theme_load;
+    ];
+    "semantic highlighting", [
+      Alcotest.test_case "defn name colored" `Quick test_defn_name_colored;
+      Alcotest.test_case "param colored" `Quick test_param_colored;
+      Alcotest.test_case "let binding colored" `Quick test_let_binding_colored;
+      Alcotest.test_case "lambda params colored" `Quick test_lambda_params_colored;
+      Alcotest.test_case "cursor bold" `Quick test_cursor_on_identifier_bold;
+      Alcotest.test_case "cursor binding underline" `Quick test_cursor_binding_underline;
+      Alcotest.test_case "semantic roundtrip" `Quick test_semantic_roundtrip;
     ];
   ]

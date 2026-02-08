@@ -30,6 +30,8 @@ type theme = {
   quote_style : style;      (** Quote shorthand style. *)
   error_style : style;      (** Error / unrecognized token style. *)
   default_style : style;    (** Default / fallback style. *)
+  defn_name_style : style;  (** Defined name style (function/variable names). *)
+  param_style : style;      (** Parameter / binding style. *)
 }
 
 (** {1 Built-in themes} *)
