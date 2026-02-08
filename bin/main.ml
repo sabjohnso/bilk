@@ -276,7 +276,7 @@ let run_repl theme_name =
       | None -> Some Highlight.dark_theme
   in
   let theme_ref = ref initial_theme in
-  let paredit_ref = ref false in
+  let paredit_ref = ref true in
   let highlight_fn text cursor =
     match !theme_ref with
     | None -> text

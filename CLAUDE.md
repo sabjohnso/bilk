@@ -56,7 +56,7 @@ PLAN.md       # Development plan and milestones
 _opam/        # Local opam switch (gitignored)
 ```
 
-- `bin/dune` — declares the `wile` executable, depends on `wile`, `cmdliner`, `linenoise`
+- `bin/dune` — declares the `wile` executable, depends on `wile`, `cmdliner`
 - `lib/dune` — declares the `wile` library
 - `test/dune` — declares test executables
 
@@ -185,8 +185,8 @@ Changes to existing modules:
 - `Symbol`: Added `all` — returns all interned symbols from a table
 - `bin/main.ml`: Replaced placeholder with cmdliner-based CLI supporting
   three modes: interactive REPL (`wile`), file execution (`wile file.scm`),
-  and expression evaluation (`wile -e '(+ 1 2)'`).  REPL features: linenoise
-  line editing, multiline input, history (`~/.wile_history`), REPL commands
+  and expression evaluation (`wile -e '(+ 1 2)'`).  REPL features: custom
+  line editor, multiline input, history (`~/.wile_history`), REPL commands
   (`,help`, `,quit`, `,load`, `,env`), SIGINT handling, FASL cache enabled
 
 **Milestone 11 (OCaml Embedding API)** — complete.
@@ -267,7 +267,7 @@ Changes to existing modules:
 
 | Module | Purpose |
 |--------|---------|
-| `Paredit` | Structural editing: balanced insertion/deletion, sexp navigation, slurp/barf/wrap/splice/raise |
+| `Paredit` | Structural editing: balanced insertion/deletion, sexp navigation, slurp/barf/wrap/splice/raise, auto-indentation |
 
 Changes to existing modules:
 - `Terminal`: Added `Ctrl_right`, `Ctrl_left`, `Alt_s`, `Alt_r`,
@@ -277,7 +277,14 @@ Changes to existing modules:
   (Readtable.t option) to config; intercepts `(`, `)`, `"`, Backspace,
   Delete when paredit active; structural keys (Ctrl-Right=slurp,
   Ctrl-Left=barf, Alt-(=wrap, Alt-s=splice, Alt-r=raise); dynamic prompt
-  shows `[paredit]` indicator
+  shows `[paredit]` indicator; Emacs-style backspace (moves inside closing
+  delimiters); prefix-filtered history navigation; Scheme-aware
+  auto-indentation on newline
+- `Highlight`: Added semantic highlighting for defined names (`defn_name_style`)
+  and parameters/bindings (`param_style`); cursor-on-identifier bolds both
+  the identifier and its binding site; fixed matching-paren backward search
+- `History`: Added `prev_matching`/`next_matching` for prefix-filtered
+  navigation
 - `bin/main.ml`: Added `,paredit` REPL command to toggle paredit mode;
   `paredit_ref` threaded through command handler
 
@@ -326,11 +333,11 @@ Tests live in `test/` as per-topic files and are run via `dune test`.
 | `test/test_fasl.ml` | Fasl (40 tests) |
 | `test/test_aot.ml` | AOT compiler (27 tests) |
 | `test/test_terminal.ml` | Terminal key parsing (16 tests) |
-| `test/test_history.ml` | History (16 tests) |
+| `test/test_history.ml` | History (20 tests) |
 | `test/test_line_editor.ml` | Line_editor (21 tests) |
 | `test/test_tokenizer.ml` | Tokenizer (26 tests) |
-| `test/test_highlight.ml` | Highlight (11 tests) |
-| `test/test_paredit.ml` | Paredit (49 tests) |
+| `test/test_highlight.ml` | Highlight (18 tests) |
+| `test/test_paredit.ml` | Paredit (72 tests) |
 
 Test dependencies:
 - **alcotest** — unit test framework with readable output
