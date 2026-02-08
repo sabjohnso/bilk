@@ -2274,7 +2274,7 @@ let scheme_complex_names = [
   "make-rectangular"; "make-polar"
 ]
 
-let scheme_lazy_names = [ "force"; "make-promise"; "promise?" ]
+let scheme_lazy_names = [ "force"; "make-promise"; "promise?"; "%make-promise" ]
 let scheme_lazy_syntax_names = [ "delay"; "delay-force" ]
 
 let scheme_case_lambda_syntax_names = [ "case-lambda" ]
@@ -3177,6 +3177,1378 @@ let create ?(readtable = Readtable.default) () =
       let ht = require_ht "hash-table-mutable?" ht_val in
       Datum.Bool ht.ht_mutable
     | _ -> runtime_error "hash-table-mutable?: expected 1 argument");
+  (* --- SRFI 14 — Character Sets --- *)
+  let cs_make () = { Datum.cs_bits = Bytes.make 32 '\x00' } in
+  let cs_copy cs = { Datum.cs_bits = Bytes.copy cs.Datum.cs_bits } in
+  let cs_test cs n =
+    n >= 0 && n < 256 &&
+    Char.code (Bytes.get cs.Datum.cs_bits (n / 8)) land (1 lsl (n mod 8)) <> 0 in
+  let cs_set cs n =
+    if n >= 0 && n < 256 then
+      Bytes.set cs.Datum.cs_bits (n / 8)
+        (Char.chr (Char.code (Bytes.get cs.Datum.cs_bits (n / 8)) lor (1 lsl (n mod 8)))) in
+  let cs_clear cs n =
+    if n >= 0 && n < 256 then
+      Bytes.set cs.Datum.cs_bits (n / 8)
+        (Char.chr (Char.code (Bytes.get cs.Datum.cs_bits (n / 8)) land (lnot (1 lsl (n mod 8))))) in
+  let require_cs name = function
+    | Datum.Char_set cs -> cs
+    | v -> runtime_error (Printf.sprintf "%s: expected char-set, got %s" name (Datum.to_string v)) in
+  let require_char name = function
+    | Datum.Char c -> Uchar.to_int c
+    | v -> runtime_error (Printf.sprintf "%s: expected char, got %s" name (Datum.to_string v)) in
+  register_late "char-set?" (fun args -> match args with
+    | [Datum.Char_set _] -> Datum.Bool true
+    | [_] -> Datum.Bool false
+    | _ -> runtime_error "char-set?: expected 1 argument");
+  register_late "char-set" (fun args ->
+    let cs = cs_make () in
+    List.iter (fun a -> cs_set cs (require_char "char-set" a)) args;
+    Datum.Char_set cs);
+  register_late "char-set-copy" (fun args -> match args with
+    | [cs_val] -> Datum.Char_set (cs_copy (require_cs "char-set-copy" cs_val))
+    | _ -> runtime_error "char-set-copy: expected 1 argument");
+  register_late "char-set-contains?" (fun args -> match args with
+    | [cs_val; Datum.Char c] ->
+      Datum.Bool (cs_test (require_cs "char-set-contains?" cs_val) (Uchar.to_int c))
+    | _ -> runtime_error "char-set-contains?: expected char-set and char");
+  register_late "char-set=?" (fun args ->
+    match args with
+    | [] | [_] -> Datum.Bool true
+    | _ ->
+      let first = require_cs "char-set=?" (List.hd args) in
+      Datum.Bool (List.for_all (fun a ->
+        Bytes.equal first.Datum.cs_bits (require_cs "char-set=?" a).Datum.cs_bits
+      ) (List.tl args)));
+  register_late "char-set<=?" (fun args ->
+    match args with
+    | [] | [_] -> Datum.Bool true
+    | _ ->
+      let rec check = function
+        | [] | [_] -> true
+        | a :: b :: rest ->
+          let ca = require_cs "char-set<=?" a in
+          let cb = require_cs "char-set<=?" b in
+          let subset = ref true in
+          for i = 0 to 31 do
+            let ba = Char.code (Bytes.get ca.Datum.cs_bits i) in
+            let bb = Char.code (Bytes.get cb.Datum.cs_bits i) in
+            if ba land bb <> ba then subset := false
+          done;
+          !subset && check (b :: rest)
+      in
+      Datum.Bool (check args));
+  register_late "char-set>=?" (fun args ->
+    match args with
+    | [] | [_] -> Datum.Bool true
+    | _ ->
+      let rec check = function
+        | [] | [_] -> true
+        | a :: b :: rest ->
+          let ca = require_cs "char-set>=?" a in
+          let cb = require_cs "char-set>=?" b in
+          let superset = ref true in
+          for i = 0 to 31 do
+            let ba = Char.code (Bytes.get ca.Datum.cs_bits i) in
+            let bb = Char.code (Bytes.get cb.Datum.cs_bits i) in
+            if ba lor bb <> ba then superset := false
+          done;
+          !superset && check (b :: rest)
+      in
+      Datum.Bool (check args));
+  register_late "char-set-adjoin" (fun args ->
+    match args with
+    | cs_val :: chars ->
+      let cs = cs_copy (require_cs "char-set-adjoin" cs_val) in
+      List.iter (fun a -> cs_set cs (require_char "char-set-adjoin" a)) chars;
+      Datum.Char_set cs
+    | _ -> runtime_error "char-set-adjoin: expected char-set and chars");
+  register_late "char-set-adjoin!" (fun args ->
+    match args with
+    | cs_val :: chars ->
+      let cs = require_cs "char-set-adjoin!" cs_val in
+      List.iter (fun a -> cs_set cs (require_char "char-set-adjoin!" a)) chars;
+      Datum.Char_set cs
+    | _ -> runtime_error "char-set-adjoin!: expected char-set and chars");
+  register_late "char-set-delete" (fun args ->
+    match args with
+    | cs_val :: chars ->
+      let cs = cs_copy (require_cs "char-set-delete" cs_val) in
+      List.iter (fun a -> cs_clear cs (require_char "char-set-delete" a)) chars;
+      Datum.Char_set cs
+    | _ -> runtime_error "char-set-delete: expected char-set and chars");
+  register_late "char-set-delete!" (fun args ->
+    match args with
+    | cs_val :: chars ->
+      let cs = require_cs "char-set-delete!" cs_val in
+      List.iter (fun a -> cs_clear cs (require_char "char-set-delete!" a)) chars;
+      Datum.Char_set cs
+    | _ -> runtime_error "char-set-delete!: expected char-set and chars");
+  register_late "char-set-complement" (fun args -> match args with
+    | [cs_val] ->
+      let cs = require_cs "char-set-complement" cs_val in
+      let result = cs_make () in
+      for i = 0 to 31 do
+        Bytes.set result.Datum.cs_bits i
+          (Char.chr (Char.code (Bytes.get cs.Datum.cs_bits i) lxor 0xFF))
+      done;
+      Datum.Char_set result
+    | _ -> runtime_error "char-set-complement: expected 1 argument");
+  register_late "char-set-union" (fun args ->
+    let result = cs_make () in
+    List.iter (fun a ->
+      let cs = require_cs "char-set-union" a in
+      for i = 0 to 31 do
+        Bytes.set result.Datum.cs_bits i
+          (Char.chr (Char.code (Bytes.get result.Datum.cs_bits i) lor
+                     Char.code (Bytes.get cs.Datum.cs_bits i)))
+      done
+    ) args;
+    Datum.Char_set result);
+  register_late "char-set-intersection" (fun args ->
+    match args with
+    | [] ->
+      let result = cs_make () in
+      for i = 0 to 31 do
+        Bytes.set result.Datum.cs_bits i (Char.chr 0xFF)
+      done;
+      Datum.Char_set result
+    | first :: rest ->
+      let result = cs_copy (require_cs "char-set-intersection" first) in
+      List.iter (fun a ->
+        let cs = require_cs "char-set-intersection" a in
+        for i = 0 to 31 do
+          Bytes.set result.Datum.cs_bits i
+            (Char.chr (Char.code (Bytes.get result.Datum.cs_bits i) land
+                       Char.code (Bytes.get cs.Datum.cs_bits i)))
+        done
+      ) rest;
+      Datum.Char_set result);
+  register_late "char-set-difference" (fun args ->
+    match args with
+    | first :: rest ->
+      let result = cs_copy (require_cs "char-set-difference" first) in
+      List.iter (fun a ->
+        let cs = require_cs "char-set-difference" a in
+        for i = 0 to 31 do
+          Bytes.set result.Datum.cs_bits i
+            (Char.chr (Char.code (Bytes.get result.Datum.cs_bits i) land
+                       (Char.code (Bytes.get cs.Datum.cs_bits i) lxor 0xFF)))
+        done
+      ) rest;
+      Datum.Char_set result
+    | _ -> runtime_error "char-set-difference: expected at least 1 argument");
+  register_late "char-set-xor" (fun args ->
+    let result = cs_make () in
+    List.iter (fun a ->
+      let cs = require_cs "char-set-xor" a in
+      for i = 0 to 31 do
+        Bytes.set result.Datum.cs_bits i
+          (Char.chr (Char.code (Bytes.get result.Datum.cs_bits i) lxor
+                     Char.code (Bytes.get cs.Datum.cs_bits i)))
+      done
+    ) args;
+    Datum.Char_set result);
+  register_late "char-set-union!" (fun args ->
+    match args with
+    | first :: rest ->
+      let cs = require_cs "char-set-union!" first in
+      List.iter (fun a ->
+        let other = require_cs "char-set-union!" a in
+        for i = 0 to 31 do
+          Bytes.set cs.Datum.cs_bits i
+            (Char.chr (Char.code (Bytes.get cs.Datum.cs_bits i) lor
+                       Char.code (Bytes.get other.Datum.cs_bits i)))
+        done
+      ) rest;
+      Datum.Char_set cs
+    | _ -> runtime_error "char-set-union!: expected at least 1 argument");
+  register_late "char-set-intersection!" (fun args ->
+    match args with
+    | first :: rest ->
+      let cs = require_cs "char-set-intersection!" first in
+      List.iter (fun a ->
+        let other = require_cs "char-set-intersection!" a in
+        for i = 0 to 31 do
+          Bytes.set cs.Datum.cs_bits i
+            (Char.chr (Char.code (Bytes.get cs.Datum.cs_bits i) land
+                       Char.code (Bytes.get other.Datum.cs_bits i)))
+        done
+      ) rest;
+      Datum.Char_set cs
+    | _ -> runtime_error "char-set-intersection!: expected at least 1 argument");
+  register_late "char-set-difference!" (fun args ->
+    match args with
+    | first :: rest ->
+      let cs = require_cs "char-set-difference!" first in
+      List.iter (fun a ->
+        let other = require_cs "char-set-difference!" a in
+        for i = 0 to 31 do
+          Bytes.set cs.Datum.cs_bits i
+            (Char.chr (Char.code (Bytes.get cs.Datum.cs_bits i) land
+                       (Char.code (Bytes.get other.Datum.cs_bits i) lxor 0xFF)))
+        done
+      ) rest;
+      Datum.Char_set cs
+    | _ -> runtime_error "char-set-difference!: expected at least 1 argument");
+  register_late "char-set-xor!" (fun args ->
+    match args with
+    | first :: rest ->
+      let cs = require_cs "char-set-xor!" first in
+      List.iter (fun a ->
+        let other = require_cs "char-set-xor!" a in
+        for i = 0 to 31 do
+          Bytes.set cs.Datum.cs_bits i
+            (Char.chr (Char.code (Bytes.get cs.Datum.cs_bits i) lxor
+                       Char.code (Bytes.get other.Datum.cs_bits i)))
+        done
+      ) rest;
+      Datum.Char_set cs
+    | _ -> runtime_error "char-set-xor!: expected at least 1 argument");
+  register_late "list->char-set" (fun args -> match args with
+    | [lst] ->
+      let cs = cs_make () in
+      let rec walk = function
+        | Datum.Nil -> ()
+        | Datum.Pair { car; cdr } ->
+          cs_set cs (require_char "list->char-set" car);
+          walk cdr
+        | _ -> runtime_error "list->char-set: expected proper list"
+      in
+      walk lst;
+      Datum.Char_set cs
+    | _ -> runtime_error "list->char-set: expected 1 argument");
+  register_late "string->char-set" (fun args -> match args with
+    | [Datum.Str s] ->
+      let cs = cs_make () in
+      Bytes.iter (fun c -> cs_set cs (Char.code c)) s;
+      Datum.Char_set cs
+    | _ -> runtime_error "string->char-set: expected 1 string");
+  register_late "char-set->list" (fun args -> match args with
+    | [cs_val] ->
+      let cs = require_cs "char-set->list" cs_val in
+      let acc = ref [] in
+      for i = 255 downto 0 do
+        if cs_test cs i then
+          acc := Datum.Char (Uchar.of_int i) :: !acc
+      done;
+      Datum.list_of !acc
+    | _ -> runtime_error "char-set->list: expected 1 argument");
+  register_late "char-set->string" (fun args -> match args with
+    | [cs_val] ->
+      let cs = require_cs "char-set->string" cs_val in
+      let buf = Buffer.create 32 in
+      for i = 0 to 255 do
+        if cs_test cs i then Buffer.add_char buf (Char.chr i)
+      done;
+      Datum.Str (Bytes.of_string (Buffer.contents buf))
+    | _ -> runtime_error "char-set->string: expected 1 argument");
+  register_late "ucs-range->char-set" (fun args ->
+    match args with
+    | [Datum.Fixnum lo; Datum.Fixnum hi] ->
+      let cs = cs_make () in
+      for i = lo to hi - 1 do cs_set cs i done;
+      Datum.Char_set cs
+    | _ -> runtime_error "ucs-range->char-set: expected 2 integers");
+  register_late "char-set-fold" (fun args -> match args with
+    | [proc; init; cs_val] ->
+      let cs = require_cs "char-set-fold" cs_val in
+      let acc = ref init in
+      for i = 0 to 255 do
+        if cs_test cs i then
+          acc := call inst proc [Datum.Char (Uchar.of_int i); !acc]
+      done;
+      !acc
+    | _ -> runtime_error "char-set-fold: expected 3 arguments");
+  register_late "char-set-for-each" (fun args -> match args with
+    | [proc; cs_val] ->
+      let cs = require_cs "char-set-for-each" cs_val in
+      for i = 0 to 255 do
+        if cs_test cs i then
+          ignore (call inst proc [Datum.Char (Uchar.of_int i)])
+      done;
+      Datum.Void
+    | _ -> runtime_error "char-set-for-each: expected 2 arguments");
+  register_late "char-set-map" (fun args -> match args with
+    | [proc; cs_val] ->
+      let cs = require_cs "char-set-map" cs_val in
+      let result = cs_make () in
+      for i = 0 to 255 do
+        if cs_test cs i then begin
+          let v = call inst proc [Datum.Char (Uchar.of_int i)] in
+          cs_set result (require_char "char-set-map" v)
+        end
+      done;
+      Datum.Char_set result
+    | _ -> runtime_error "char-set-map: expected 2 arguments");
+  register_late "char-set-count" (fun args -> match args with
+    | [pred; cs_val] ->
+      let cs = require_cs "char-set-count" cs_val in
+      let n = ref 0 in
+      for i = 0 to 255 do
+        if cs_test cs i then
+          if Datum.is_true (call inst pred [Datum.Char (Uchar.of_int i)]) then
+            incr n
+      done;
+      Datum.Fixnum !n
+    | _ -> runtime_error "char-set-count: expected 2 arguments");
+  register_late "char-set-every" (fun args -> match args with
+    | [pred; cs_val] ->
+      let cs = require_cs "char-set-every" cs_val in
+      let result = ref true in
+      for i = 0 to 255 do
+        if cs_test cs i && !result then
+          if not (Datum.is_true (call inst pred [Datum.Char (Uchar.of_int i)])) then
+            result := false
+      done;
+      Datum.Bool !result
+    | _ -> runtime_error "char-set-every: expected 2 arguments");
+  register_late "char-set-any" (fun args -> match args with
+    | [pred; cs_val] ->
+      let cs = require_cs "char-set-any" cs_val in
+      let result = ref false in
+      for i = 0 to 255 do
+        if cs_test cs i && not !result then
+          if Datum.is_true (call inst pred [Datum.Char (Uchar.of_int i)]) then
+            result := true
+      done;
+      Datum.Bool !result
+    | _ -> runtime_error "char-set-any: expected 2 arguments");
+  register_late "char-set-filter" (fun args -> match args with
+    | [pred; cs_val] ->
+      let cs = require_cs "char-set-filter" cs_val in
+      let result = cs_make () in
+      for i = 0 to 255 do
+        if cs_test cs i then
+          if Datum.is_true (call inst pred [Datum.Char (Uchar.of_int i)]) then
+            cs_set result i
+      done;
+      Datum.Char_set result
+    | _ -> runtime_error "char-set-filter: expected 2 arguments");
+  register_late "char-set-cursor" (fun args -> match args with
+    | [cs_val] ->
+      let cs = require_cs "char-set-cursor" cs_val in
+      let cursor = ref 256 in
+      for i = 255 downto 0 do
+        if cs_test cs i then cursor := i
+      done;
+      Datum.Fixnum !cursor
+    | _ -> runtime_error "char-set-cursor: expected 1 argument");
+  register_late "char-set-ref" (fun args -> match args with
+    | [_cs_val; Datum.Fixnum cursor] ->
+      if cursor < 0 || cursor >= 256 then
+        runtime_error "char-set-ref: cursor out of range"
+      else
+        Datum.Char (Uchar.of_int cursor)
+    | _ -> runtime_error "char-set-ref: expected char-set and cursor");
+  register_late "char-set-cursor-next" (fun args -> match args with
+    | [cs_val; Datum.Fixnum cursor] ->
+      let cs = require_cs "char-set-cursor-next" cs_val in
+      let next = ref 256 in
+      for i = 255 downto cursor + 1 do
+        if cs_test cs i then next := i
+      done;
+      Datum.Fixnum !next
+    | _ -> runtime_error "char-set-cursor-next: expected char-set and cursor");
+  register_late "end-of-char-set?" (fun args -> match args with
+    | [Datum.Fixnum cursor] -> Datum.Bool (cursor >= 256)
+    | _ -> runtime_error "end-of-char-set?: expected cursor");
+  register_late "char-set-size" (fun args -> match args with
+    | [cs_val] ->
+      let cs = require_cs "char-set-size" cs_val in
+      let n = ref 0 in
+      for i = 0 to 255 do
+        if cs_test cs i then incr n
+      done;
+      Datum.Fixnum !n
+    | _ -> runtime_error "char-set-size: expected 1 argument");
+  (* Predefined char-sets *)
+  let cs_from_pred pred =
+    let cs = cs_make () in
+    for i = 0 to 255 do if pred i then cs_set cs i done;
+    Datum.Char_set cs
+  in
+  let define_cs name v =
+    let sym = Symbol.intern inst.symbols name in
+    Env.define inst.global_env sym v;
+    Expander.define_binding inst.syn_env name Expander.var_binding
+  in
+  define_cs "char-set:letter"
+    (cs_from_pred (fun i -> let c = Char.chr i in (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')));
+  define_cs "char-set:digit"
+    (cs_from_pred (fun i -> let c = Char.chr i in c >= '0' && c <= '9'));
+  define_cs "char-set:letter+digit"
+    (cs_from_pred (fun i -> let c = Char.chr i in
+       (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')));
+  define_cs "char-set:whitespace"
+    (cs_from_pred (fun i -> let c = Char.chr i in
+       c = ' ' || c = '\t' || c = '\n' || c = '\r' || i = 0x0B || i = 0x0C));
+  define_cs "char-set:upper-case"
+    (cs_from_pred (fun i -> let c = Char.chr i in c >= 'A' && c <= 'Z'));
+  define_cs "char-set:lower-case"
+    (cs_from_pred (fun i -> let c = Char.chr i in c >= 'a' && c <= 'z'));
+  define_cs "char-set:punctuation"
+    (cs_from_pred (fun i -> let c = Char.chr i in
+       (c >= '!' && c <= '/') || (c >= ':' && c <= '@') ||
+       (c >= '[' && c <= '`') || (c >= '{' && c <= '~')));
+  define_cs "char-set:symbol"
+    (cs_from_pred (fun i -> let c = Char.chr i in
+       c = '$' || c = '+' || c = '<' || c = '=' || c = '>' ||
+       c = '^' || c = '`' || c = '|' || c = '~'));
+  define_cs "char-set:blank"
+    (cs_from_pred (fun i -> let c = Char.chr i in c = ' ' || c = '\t'));
+  define_cs "char-set:ascii"
+    (cs_from_pred (fun i -> i < 128));
+  define_cs "char-set:empty" (Datum.Char_set (cs_make ()));
+  let full_cs = cs_make () in
+  for i = 0 to 31 do Bytes.set full_cs.Datum.cs_bits i (Char.chr 0xFF) done;
+  define_cs "char-set:full" (Datum.Char_set full_cs);
+  define_cs "char-set:hex-digit"
+    (cs_from_pred (fun i -> let c = Char.chr i in
+       (c >= '0' && c <= '9') || (c >= 'A' && c <= 'F') || (c >= 'a' && c <= 'f')));
+  define_cs "char-set:graphic"
+    (cs_from_pred (fun i -> i >= 0x21 && i <= 0x7E));
+  define_cs "char-set:printing"
+    (cs_from_pred (fun i -> (i >= 0x20 && i <= 0x7E)));
+  define_cs "char-set:iso-control"
+    (cs_from_pred (fun i -> i < 0x20 || (i >= 0x7F && i <= 0x9F)));
+  define_cs "char-set:title-case" (Datum.Char_set (cs_make ()));
+  let srfi_14_names = [
+    "char-set?"; "char-set"; "char-set-copy"; "char-set-contains?";
+    "char-set=?"; "char-set<=?"; "char-set>=?";
+    "char-set-adjoin"; "char-set-adjoin!"; "char-set-delete"; "char-set-delete!";
+    "char-set-complement"; "char-set-union"; "char-set-intersection";
+    "char-set-difference"; "char-set-xor";
+    "char-set-union!"; "char-set-intersection!"; "char-set-difference!"; "char-set-xor!";
+    "list->char-set"; "string->char-set"; "char-set->list"; "char-set->string";
+    "ucs-range->char-set";
+    "char-set-fold"; "char-set-for-each"; "char-set-map";
+    "char-set-count"; "char-set-every"; "char-set-any"; "char-set-filter";
+    "char-set-cursor"; "char-set-ref"; "char-set-cursor-next"; "end-of-char-set?";
+    "char-set-size";
+    "char-set:letter"; "char-set:digit"; "char-set:letter+digit";
+    "char-set:whitespace"; "char-set:upper-case"; "char-set:lower-case";
+    "char-set:punctuation"; "char-set:symbol"; "char-set:blank";
+    "char-set:ascii"; "char-set:empty"; "char-set:full";
+    "char-set:hex-digit"; "char-set:graphic"; "char-set:printing";
+    "char-set:iso-control"; "char-set:title-case";
+  ] in
+  build_library inst ["srfi"; "14"] srfi_14_names [];
+  (* --- SRFI 13 — String Library --- *)
+  let char_pred_of _name arg =
+    match arg with
+    | Datum.Char c -> (fun ch -> Uchar.equal ch c)
+    | Datum.Char_set cs -> (fun ch -> cs_test cs (Uchar.to_int ch))
+    | _ -> (fun ch -> Datum.is_true (call inst arg [Datum.Char ch]))
+  in
+  let get_start_end name s args =
+    let len = Bytes.length s in
+    let start = match args with Datum.Fixnum n :: _ -> n | _ -> 0 in
+    let end_ = match args with _ :: Datum.Fixnum n :: _ -> n | _ :: _ -> len | [] -> len in
+    if start < 0 || end_ > len || start > end_ then
+      runtime_error (Printf.sprintf "%s: invalid range %d..%d for string of length %d" name start end_ len);
+    (start, end_)
+  in
+  register_late "string-null?" (fun args -> match args with
+    | [Datum.Str s] -> Datum.Bool (Bytes.length s = 0)
+    | _ -> runtime_error "string-null?: expected 1 string");
+  register_late "string-every" (fun args ->
+    match args with
+    | pred :: Datum.Str s :: rest ->
+      let p = char_pred_of "string-every" pred in
+      let start, end_ = get_start_end "string-every" s rest in
+      let result = ref true in
+      for i = start to end_ - 1 do
+        if !result && not (p (Uchar.of_int (Char.code (Bytes.get s i)))) then
+          result := false
+      done;
+      Datum.Bool !result
+    | _ -> runtime_error "string-every: expected pred, string, [start, [end]]");
+  register_late "string-any" (fun args ->
+    match args with
+    | pred :: Datum.Str s :: rest ->
+      let p = char_pred_of "string-any" pred in
+      let start, end_ = get_start_end "string-any" s rest in
+      let result = ref false in
+      for i = start to end_ - 1 do
+        if not !result && p (Uchar.of_int (Char.code (Bytes.get s i))) then
+          result := true
+      done;
+      Datum.Bool !result
+    | _ -> runtime_error "string-any: expected pred, string, [start, [end]]");
+  register_late "string-tabulate" (fun args -> match args with
+    | [proc; Datum.Fixnum len] ->
+      let buf = Bytes.create len in
+      for i = 0 to len - 1 do
+        match call inst proc [Datum.Fixnum i] with
+        | Datum.Char c -> Bytes.set buf i (Char.chr (Uchar.to_int c))
+        | _ -> runtime_error "string-tabulate: procedure must return a character"
+      done;
+      Datum.Str buf
+    | _ -> runtime_error "string-tabulate: expected proc and length");
+  register_late "string-take" (fun args -> match args with
+    | [Datum.Str s; Datum.Fixnum n] -> Datum.Str (Bytes.sub s 0 n)
+    | _ -> runtime_error "string-take: expected string and integer");
+  register_late "string-take-right" (fun args -> match args with
+    | [Datum.Str s; Datum.Fixnum n] ->
+      let len = Bytes.length s in
+      Datum.Str (Bytes.sub s (len - n) n)
+    | _ -> runtime_error "string-take-right: expected string and integer");
+  register_late "string-drop" (fun args -> match args with
+    | [Datum.Str s; Datum.Fixnum n] ->
+      Datum.Str (Bytes.sub s n (Bytes.length s - n))
+    | _ -> runtime_error "string-drop: expected string and integer");
+  register_late "string-drop-right" (fun args -> match args with
+    | [Datum.Str s; Datum.Fixnum n] ->
+      Datum.Str (Bytes.sub s 0 (Bytes.length s - n))
+    | _ -> runtime_error "string-drop-right: expected string and integer");
+  register_late "string-pad" (fun args ->
+    match args with
+    | Datum.Str s :: Datum.Fixnum len :: rest ->
+      let ch = match rest with Datum.Char c :: _ -> Char.chr (Uchar.to_int c) | _ -> ' ' in
+      let slen = Bytes.length s in
+      if slen >= len then Datum.Str (Bytes.sub s (slen - len) len)
+      else begin
+        let result = Bytes.make len ch in
+        Bytes.blit s 0 result (len - slen) slen;
+        Datum.Str result
+      end
+    | _ -> runtime_error "string-pad: expected string, length, [char]");
+  register_late "string-pad-right" (fun args ->
+    match args with
+    | Datum.Str s :: Datum.Fixnum len :: rest ->
+      let ch = match rest with Datum.Char c :: _ -> Char.chr (Uchar.to_int c) | _ -> ' ' in
+      let slen = Bytes.length s in
+      if slen >= len then Datum.Str (Bytes.sub s 0 len)
+      else begin
+        let result = Bytes.make len ch in
+        Bytes.blit s 0 result 0 slen;
+        Datum.Str result
+      end
+    | _ -> runtime_error "string-pad-right: expected string, length, [char]");
+  register_late "string-trim" (fun args ->
+    match args with
+    | Datum.Str s :: rest ->
+      let p = match rest with pred :: _ -> char_pred_of "string-trim" pred
+        | [] -> (fun c -> Uchar.to_int c = Char.code ' ' || Uchar.to_int c = Char.code '\t' ||
+                          Uchar.to_int c = Char.code '\n' || Uchar.to_int c = Char.code '\r') in
+      let len = Bytes.length s in
+      let i = ref 0 in
+      while !i < len && p (Uchar.of_int (Char.code (Bytes.get s !i))) do incr i done;
+      Datum.Str (Bytes.sub s !i (len - !i))
+    | _ -> runtime_error "string-trim: expected string, [pred]");
+  register_late "string-trim-right" (fun args ->
+    match args with
+    | Datum.Str s :: rest ->
+      let p = match rest with pred :: _ -> char_pred_of "string-trim-right" pred
+        | [] -> (fun c -> Uchar.to_int c = Char.code ' ' || Uchar.to_int c = Char.code '\t' ||
+                          Uchar.to_int c = Char.code '\n' || Uchar.to_int c = Char.code '\r') in
+      let len = Bytes.length s in
+      let j = ref (len - 1) in
+      while !j >= 0 && p (Uchar.of_int (Char.code (Bytes.get s !j))) do decr j done;
+      Datum.Str (Bytes.sub s 0 (!j + 1))
+    | _ -> runtime_error "string-trim-right: expected string, [pred]");
+  register_late "string-trim-both" (fun args ->
+    match args with
+    | Datum.Str s :: rest ->
+      let p = match rest with pred :: _ -> char_pred_of "string-trim-both" pred
+        | [] -> (fun c -> Uchar.to_int c = Char.code ' ' || Uchar.to_int c = Char.code '\t' ||
+                          Uchar.to_int c = Char.code '\n' || Uchar.to_int c = Char.code '\r') in
+      let len = Bytes.length s in
+      let i = ref 0 in
+      while !i < len && p (Uchar.of_int (Char.code (Bytes.get s !i))) do incr i done;
+      let j = ref (len - 1) in
+      while !j >= !i && p (Uchar.of_int (Char.code (Bytes.get s !j))) do decr j done;
+      Datum.Str (Bytes.sub s !i (!j - !i + 1))
+    | _ -> runtime_error "string-trim-both: expected string, [pred]");
+  register_late "string-prefix-length" (fun args -> match args with
+    | [Datum.Str s1; Datum.Str s2] ->
+      let len = min (Bytes.length s1) (Bytes.length s2) in
+      let i = ref 0 in
+      while !i < len && Bytes.get s1 !i = Bytes.get s2 !i do incr i done;
+      Datum.Fixnum !i
+    | _ -> runtime_error "string-prefix-length: expected 2 strings");
+  register_late "string-suffix-length" (fun args -> match args with
+    | [Datum.Str s1; Datum.Str s2] ->
+      let l1 = Bytes.length s1 and l2 = Bytes.length s2 in
+      let len = min l1 l2 in
+      let i = ref 0 in
+      while !i < len && Bytes.get s1 (l1 - 1 - !i) = Bytes.get s2 (l2 - 1 - !i) do incr i done;
+      Datum.Fixnum !i
+    | _ -> runtime_error "string-suffix-length: expected 2 strings");
+  register_late "string-prefix?" (fun args -> match args with
+    | [Datum.Str prefix; Datum.Str s] ->
+      let plen = Bytes.length prefix and slen = Bytes.length s in
+      Datum.Bool (plen <= slen &&
+                  Bytes.sub s 0 plen = prefix)
+    | _ -> runtime_error "string-prefix?: expected 2 strings");
+  register_late "string-suffix?" (fun args -> match args with
+    | [Datum.Str suffix; Datum.Str s] ->
+      let sfxlen = Bytes.length suffix and slen = Bytes.length s in
+      Datum.Bool (sfxlen <= slen &&
+                  Bytes.sub s (slen - sfxlen) sfxlen = suffix)
+    | _ -> runtime_error "string-suffix?: expected 2 strings");
+  register_late "string-index" (fun args ->
+    match args with
+    | pred :: Datum.Str s :: rest ->
+      let p = char_pred_of "string-index" pred in
+      let start, end_ = get_start_end "string-index" s rest in
+      let result = ref (Datum.Bool false) in
+      let found = ref false in
+      for i = start to end_ - 1 do
+        if not !found && p (Uchar.of_int (Char.code (Bytes.get s i))) then begin
+          result := Datum.Fixnum i;
+          found := true
+        end
+      done;
+      !result
+    | _ -> runtime_error "string-index: expected pred, string, [start, [end]]");
+  register_late "string-index-right" (fun args ->
+    match args with
+    | pred :: Datum.Str s :: rest ->
+      let p = char_pred_of "string-index-right" pred in
+      let start, end_ = get_start_end "string-index-right" s rest in
+      let result = ref (Datum.Bool false) in
+      for i = end_ - 1 downto start do
+        if !result = Datum.Bool false && p (Uchar.of_int (Char.code (Bytes.get s i))) then
+          result := Datum.Fixnum i
+      done;
+      !result
+    | _ -> runtime_error "string-index-right: expected pred, string, [start, [end]]");
+  register_late "string-skip" (fun args ->
+    match args with
+    | pred :: Datum.Str s :: rest ->
+      let p = char_pred_of "string-skip" pred in
+      let start, end_ = get_start_end "string-skip" s rest in
+      let result = ref (Datum.Bool false) in
+      let found = ref false in
+      for i = start to end_ - 1 do
+        if not !found && not (p (Uchar.of_int (Char.code (Bytes.get s i)))) then begin
+          result := Datum.Fixnum i;
+          found := true
+        end
+      done;
+      !result
+    | _ -> runtime_error "string-skip: expected pred, string, [start, [end]]");
+  register_late "string-skip-right" (fun args ->
+    match args with
+    | pred :: Datum.Str s :: rest ->
+      let p = char_pred_of "string-skip-right" pred in
+      let start, end_ = get_start_end "string-skip-right" s rest in
+      let result = ref (Datum.Bool false) in
+      for i = end_ - 1 downto start do
+        if !result = Datum.Bool false && not (p (Uchar.of_int (Char.code (Bytes.get s i)))) then
+          result := Datum.Fixnum i
+      done;
+      !result
+    | _ -> runtime_error "string-skip-right: expected pred, string, [start, [end]]");
+  register_late "string-contains" (fun args -> match args with
+    | [Datum.Str haystack; Datum.Str needle] ->
+      let hlen = Bytes.length haystack and nlen = Bytes.length needle in
+      if nlen = 0 then Datum.Fixnum 0
+      else begin
+        let result = ref (Datum.Bool false) in
+        let found = ref false in
+        for i = 0 to hlen - nlen do
+          if not !found && Bytes.sub haystack i nlen = needle then begin
+            result := Datum.Fixnum i;
+            found := true
+          end
+        done;
+        !result
+      end
+    | _ -> runtime_error "string-contains: expected 2 strings");
+  register_late "string-contains-ci" (fun args -> match args with
+    | [Datum.Str haystack; Datum.Str needle] ->
+      let hlen = Bytes.length haystack and nlen = Bytes.length needle in
+      let lower b = Bytes.of_string (String.lowercase_ascii (Bytes.to_string b)) in
+      let needle_low = lower needle in
+      if nlen = 0 then Datum.Fixnum 0
+      else begin
+        let result = ref (Datum.Bool false) in
+        let found = ref false in
+        for i = 0 to hlen - nlen do
+          if not !found && lower (Bytes.sub haystack i nlen) = needle_low then begin
+            result := Datum.Fixnum i;
+            found := true
+          end
+        done;
+        !result
+      end
+    | _ -> runtime_error "string-contains-ci: expected 2 strings");
+  register_late "string-count" (fun args ->
+    match args with
+    | pred :: Datum.Str s :: rest ->
+      let p = char_pred_of "string-count" pred in
+      let start, end_ = get_start_end "string-count" s rest in
+      let n = ref 0 in
+      for i = start to end_ - 1 do
+        if p (Uchar.of_int (Char.code (Bytes.get s i))) then incr n
+      done;
+      Datum.Fixnum !n
+    | _ -> runtime_error "string-count: expected pred, string, [start, [end]]");
+  register_late "string-reverse" (fun args -> match args with
+    | [Datum.Str s] ->
+      let len = Bytes.length s in
+      let result = Bytes.create len in
+      for i = 0 to len - 1 do
+        Bytes.set result i (Bytes.get s (len - 1 - i))
+      done;
+      Datum.Str result
+    | _ -> runtime_error "string-reverse: expected 1 string");
+  register_late "string-concatenate" (fun args -> match args with
+    | [lst] ->
+      let buf = Buffer.create 64 in
+      let rec walk = function
+        | Datum.Nil -> ()
+        | Datum.Pair { car = Datum.Str s; cdr } ->
+          Buffer.add_bytes buf s;
+          walk cdr
+        | _ -> runtime_error "string-concatenate: expected list of strings"
+      in
+      walk lst;
+      Datum.Str (Bytes.of_string (Buffer.contents buf))
+    | _ -> runtime_error "string-concatenate: expected 1 argument");
+  register_late "string-concatenate-reverse" (fun args ->
+    match args with
+    | [lst] ->
+      let strs = ref [] in
+      let rec walk = function
+        | Datum.Nil -> ()
+        | Datum.Pair { car = Datum.Str s; cdr } ->
+          strs := s :: !strs;
+          walk cdr
+        | _ -> runtime_error "string-concatenate-reverse: expected list of strings"
+      in
+      walk lst;
+      let buf = Buffer.create 64 in
+      List.iter (Buffer.add_bytes buf) !strs;
+      Datum.Str (Bytes.of_string (Buffer.contents buf))
+    | _ -> runtime_error "string-concatenate-reverse: expected 1 argument");
+  register_late "string-fold" (fun args ->
+    match args with
+    | proc :: init :: Datum.Str s :: rest ->
+      let start, end_ = get_start_end "string-fold" s rest in
+      let acc = ref init in
+      for i = start to end_ - 1 do
+        acc := call inst proc [Datum.Char (Uchar.of_int (Char.code (Bytes.get s i))); !acc]
+      done;
+      !acc
+    | _ -> runtime_error "string-fold: expected proc, init, string, [start, [end]]");
+  register_late "string-fold-right" (fun args ->
+    match args with
+    | proc :: init :: Datum.Str s :: rest ->
+      let start, end_ = get_start_end "string-fold-right" s rest in
+      let acc = ref init in
+      for i = end_ - 1 downto start do
+        acc := call inst proc [Datum.Char (Uchar.of_int (Char.code (Bytes.get s i))); !acc]
+      done;
+      !acc
+    | _ -> runtime_error "string-fold-right: expected proc, init, string, [start, [end]]");
+  register_late "string-filter" (fun args ->
+    match args with
+    | pred :: Datum.Str s :: rest ->
+      let p = char_pred_of "string-filter" pred in
+      let start, end_ = get_start_end "string-filter" s rest in
+      let buf = Buffer.create (end_ - start) in
+      for i = start to end_ - 1 do
+        let c = Bytes.get s i in
+        if p (Uchar.of_int (Char.code c)) then Buffer.add_char buf c
+      done;
+      Datum.Str (Bytes.of_string (Buffer.contents buf))
+    | _ -> runtime_error "string-filter: expected pred, string, [start, [end]]");
+  register_late "string-delete" (fun args ->
+    match args with
+    | pred :: Datum.Str s :: rest ->
+      let p = char_pred_of "string-delete" pred in
+      let start, end_ = get_start_end "string-delete" s rest in
+      let buf = Buffer.create (end_ - start) in
+      for i = start to end_ - 1 do
+        let c = Bytes.get s i in
+        if not (p (Uchar.of_int (Char.code c))) then Buffer.add_char buf c
+      done;
+      Datum.Str (Bytes.of_string (Buffer.contents buf))
+    | _ -> runtime_error "string-delete: expected pred, string, [start, [end]]");
+  register_late "string-replace" (fun args -> match args with
+    | [Datum.Str s1; Datum.Str s2; Datum.Fixnum start; Datum.Fixnum end_] ->
+      let len1 = Bytes.length s1 and len2 = Bytes.length s2 in
+      let result_len = start + len2 + (len1 - end_) in
+      let result = Bytes.create result_len in
+      Bytes.blit s1 0 result 0 start;
+      Bytes.blit s2 0 result start len2;
+      Bytes.blit s1 end_ result (start + len2) (len1 - end_);
+      Datum.Str result
+    | _ -> runtime_error "string-replace: expected string, string, start, end");
+  register_late "string-titlecase" (fun args -> match args with
+    | [Datum.Str s] ->
+      let len = Bytes.length s in
+      let result = Bytes.copy s in
+      let word_start = ref true in
+      for i = 0 to len - 1 do
+        let c = Bytes.get result i in
+        if c = ' ' || c = '\t' || c = '\n' || c = '\r' then
+          word_start := true
+        else begin
+          if !word_start then begin
+            Bytes.set result i (Char.uppercase_ascii c);
+            word_start := false
+          end else
+            Bytes.set result i (Char.lowercase_ascii c)
+        end
+      done;
+      Datum.Str result
+    | _ -> runtime_error "string-titlecase: expected 1 string");
+  register_late "xsubstring" (fun args -> match args with
+    | [Datum.Str s; Datum.Fixnum from; Datum.Fixnum to_] ->
+      let len = Bytes.length s in
+      if len = 0 then runtime_error "xsubstring: empty string";
+      let result_len = to_ - from in
+      let result = Bytes.create result_len in
+      for i = 0 to result_len - 1 do
+        Bytes.set result i (Bytes.get s (((from + i) mod len + len) mod len))
+      done;
+      Datum.Str result
+    | [Datum.Str s; Datum.Fixnum from] ->
+      let len = Bytes.length s in
+      if len = 0 then runtime_error "xsubstring: empty string";
+      let to_ = from + len in
+      let result_len = to_ - from in
+      let result = Bytes.create result_len in
+      for i = 0 to result_len - 1 do
+        Bytes.set result i (Bytes.get s (((from + i) mod len + len) mod len))
+      done;
+      Datum.Str result
+    | _ -> runtime_error "xsubstring: expected string, from, [to]");
+  let srfi_13_names = [
+    "string-null?"; "string-every"; "string-any"; "string-tabulate";
+    "string-take"; "string-take-right"; "string-drop"; "string-drop-right";
+    "string-pad"; "string-pad-right";
+    "string-trim"; "string-trim-right"; "string-trim-both";
+    "string-prefix-length"; "string-suffix-length";
+    "string-prefix?"; "string-suffix?";
+    "string-index"; "string-index-right"; "string-skip"; "string-skip-right";
+    "string-contains"; "string-contains-ci";
+    "string-count"; "string-reverse";
+    "string-concatenate"; "string-concatenate-reverse";
+    "string-fold"; "string-fold-right";
+    "string-filter"; "string-delete";
+    "string-replace"; "string-titlecase"; "xsubstring";
+  ] in
+  build_library inst ["srfi"; "13"] srfi_13_names [];
+  (* --- SRFI 115 — Regexp --- *)
+  let rec sre_to_node datum num_groups =
+    match datum with
+    | Datum.Str s ->
+      let nodes = ref [] in
+      Bytes.iter (fun c -> nodes := Regexp_engine.Lit (Char.code c) :: !nodes) s;
+      (Regexp_engine.Seq (List.rev !nodes), num_groups)
+    | Datum.Char c ->
+      (Regexp_engine.Lit (Uchar.to_int c), num_groups)
+    | Datum.Char_set cs ->
+      (Regexp_engine.Class (Bytes.copy cs.Datum.cs_bits), num_groups)
+    | Datum.Symbol s -> sre_symbol_to_node s num_groups
+    | Datum.Pair _ -> begin
+      match Datum.to_list datum with
+      | Some (Datum.Symbol op :: args) -> sre_form_to_node op args num_groups
+      | _ -> runtime_error (Printf.sprintf "regexp: invalid SRE: %s" (Datum.to_string datum))
+    end
+    | _ -> runtime_error (Printf.sprintf "regexp: invalid SRE: %s" (Datum.to_string datum))
+  and sre_symbol_to_node s num_groups =
+    match s with
+    | "any" -> (Regexp_engine.Any, num_groups)
+    | "bos" -> (Regexp_engine.Bos, num_groups)
+    | "eos" -> (Regexp_engine.Eos, num_groups)
+    | "bol" -> (Regexp_engine.Bol, num_groups)
+    | "eol" -> (Regexp_engine.Eol, num_groups)
+    | "alphabetic" | "alpha" ->
+      let cs = cs_make () in
+      for i = 0 to 255 do
+        let c = Char.chr i in
+        if (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') then cs_set cs i
+      done;
+      (Regexp_engine.Class (Bytes.copy cs.Datum.cs_bits), num_groups)
+    | "numeric" | "num" ->
+      let cs = cs_make () in
+      for i = Char.code '0' to Char.code '9' do cs_set cs i done;
+      (Regexp_engine.Class (Bytes.copy cs.Datum.cs_bits), num_groups)
+    | "alphanumeric" | "alnum" ->
+      let cs = cs_make () in
+      for i = 0 to 255 do
+        let c = Char.chr i in
+        if (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') then
+          cs_set cs i
+      done;
+      (Regexp_engine.Class (Bytes.copy cs.Datum.cs_bits), num_groups)
+    | "whitespace" | "space" | "white" ->
+      let cs = cs_make () in
+      List.iter (fun c -> cs_set cs (Char.code c)) [' '; '\t'; '\n'; '\r'];
+      cs_set cs 0x0B; cs_set cs 0x0C;
+      (Regexp_engine.Class (Bytes.copy cs.Datum.cs_bits), num_groups)
+    | "upper-case" | "upper" ->
+      let cs = cs_make () in
+      for i = Char.code 'A' to Char.code 'Z' do cs_set cs i done;
+      (Regexp_engine.Class (Bytes.copy cs.Datum.cs_bits), num_groups)
+    | "lower-case" | "lower" ->
+      let cs = cs_make () in
+      for i = Char.code 'a' to Char.code 'z' do cs_set cs i done;
+      (Regexp_engine.Class (Bytes.copy cs.Datum.cs_bits), num_groups)
+    | "punctuation" | "punct" ->
+      let cs = cs_make () in
+      for i = 0 to 255 do
+        let c = Char.chr i in
+        if (c >= '!' && c <= '/') || (c >= ':' && c <= '@') ||
+           (c >= '[' && c <= '`') || (c >= '{' && c <= '~') then
+          cs_set cs i
+      done;
+      (Regexp_engine.Class (Bytes.copy cs.Datum.cs_bits), num_groups)
+    | "digit" ->
+      let cs = cs_make () in
+      for i = Char.code '0' to Char.code '9' do cs_set cs i done;
+      (Regexp_engine.Class (Bytes.copy cs.Datum.cs_bits), num_groups)
+    | "hex-digit" | "xdigit" ->
+      let cs = cs_make () in
+      for i = Char.code '0' to Char.code '9' do cs_set cs i done;
+      for i = Char.code 'A' to Char.code 'F' do cs_set cs i done;
+      for i = Char.code 'a' to Char.code 'f' do cs_set cs i done;
+      (Regexp_engine.Class (Bytes.copy cs.Datum.cs_bits), num_groups)
+    | _ -> runtime_error (Printf.sprintf "regexp: unknown SRE symbol: %s" s)
+  and sre_form_to_node op args num_groups =
+    match op with
+    | ":" | "seq" ->
+      let nodes, ng = List.fold_left (fun (acc, ng) a ->
+        let n, ng' = sre_to_node a ng in
+        (n :: acc, ng')
+      ) ([], num_groups) args in
+      (Regexp_engine.Seq (List.rev nodes), ng)
+    | "or" ->
+      (match args with
+       | [] -> (Regexp_engine.Seq [], num_groups)  (* matches empty *)
+       | [a] -> sre_to_node a num_groups
+       | a :: rest ->
+         let na, ng = sre_to_node a num_groups in
+         let rest_datum = Datum.list_of (Datum.Symbol "or" :: rest) in
+         let nb, ng' = sre_to_node rest_datum ng in
+         (Regexp_engine.Alt (na, nb), ng'))
+    | "*" ->
+      (match args with
+       | [a] ->
+         let n, ng = sre_to_node a num_groups in
+         (Regexp_engine.Rep (n, 0, None, true), ng)
+       | _ -> runtime_error "regexp: * expects exactly 1 argument")
+    | "+" ->
+      (match args with
+       | [a] ->
+         let n, ng = sre_to_node a num_groups in
+         (Regexp_engine.Rep (n, 1, None, true), ng)
+       | _ -> runtime_error "regexp: + expects exactly 1 argument")
+    | "?" ->
+      (match args with
+       | [a] ->
+         let n, ng = sre_to_node a num_groups in
+         (Regexp_engine.Rep (n, 0, Some 1, true), ng)
+       | _ -> runtime_error "regexp: ? expects exactly 1 argument")
+    | "=" ->
+      (match args with
+       | [Datum.Fixnum count; a] ->
+         let n, ng = sre_to_node a num_groups in
+         (Regexp_engine.Rep (n, count, Some count, true), ng)
+       | _ -> runtime_error "regexp: = expects count and pattern")
+    | ">=" ->
+      (match args with
+       | [Datum.Fixnum min; a] ->
+         let n, ng = sre_to_node a num_groups in
+         (Regexp_engine.Rep (n, min, None, true), ng)
+       | _ -> runtime_error "regexp: >= expects min and pattern")
+    | "**" ->
+      (match args with
+       | [Datum.Fixnum min; Datum.Fixnum max; a] ->
+         let n, ng = sre_to_node a num_groups in
+         (Regexp_engine.Rep (n, min, Some max, true), ng)
+       | _ -> runtime_error "regexp: ** expects min, max, and pattern")
+    | "submatch" | "->"|  "$" ->
+      let idx = num_groups in
+      let ng = num_groups + 1 in
+      (match args with
+       | [a] ->
+         let n, ng' = sre_to_node a ng in
+         (Regexp_engine.Group (idx, n), ng')
+       | _ ->
+         let nodes, ng' = List.fold_left (fun (acc, ng) a ->
+           let n, ng' = sre_to_node a ng in
+           (n :: acc, ng')
+         ) ([], ng) args in
+         (Regexp_engine.Group (idx, Regexp_engine.Seq (List.rev nodes)), ng'))
+    | "~" | "complement" ->
+      (match args with
+       | [a] ->
+         let n, ng = sre_to_node a num_groups in
+         (match n with
+          | Regexp_engine.Class bits ->
+            let nbits = Bytes.copy bits in
+            for i = 0 to 31 do
+              Bytes.set nbits i (Char.chr (Char.code (Bytes.get nbits i) lxor 0xFF))
+            done;
+            (Regexp_engine.Class nbits, ng)
+          | _ -> runtime_error "regexp: complement only works on character classes")
+       | _ -> runtime_error "regexp: complement expects 1 argument")
+    | "w/nocase" ->
+      (match args with
+       | [a] ->
+         let n, ng = sre_to_node a num_groups in
+         (sre_nocase n, ng)
+       | _ ->
+         let nodes, ng' = List.fold_left (fun (acc, ng) a ->
+           let n, ng' = sre_to_node a ng in
+           (n :: acc, ng')
+         ) ([], num_groups) args in
+         (sre_nocase (Regexp_engine.Seq (List.rev nodes)), ng'))
+    | _ -> runtime_error (Printf.sprintf "regexp: unknown SRE form: %s" op)
+  and sre_nocase node =
+    match node with
+    | Regexp_engine.Lit b ->
+      let c = Char.chr b in
+      if c >= 'A' && c <= 'Z' then
+        Regexp_engine.Alt (Regexp_engine.Lit b, Regexp_engine.Lit (Char.code (Char.lowercase_ascii c)))
+      else if c >= 'a' && c <= 'z' then
+        Regexp_engine.Alt (Regexp_engine.Lit b, Regexp_engine.Lit (Char.code (Char.uppercase_ascii c)))
+      else Regexp_engine.Lit b
+    | Regexp_engine.Seq nodes -> Regexp_engine.Seq (List.map sre_nocase nodes)
+    | Regexp_engine.Alt (a, b) -> Regexp_engine.Alt (sre_nocase a, sre_nocase b)
+    | Regexp_engine.Rep (n, min, max, g) -> Regexp_engine.Rep (sre_nocase n, min, max, g)
+    | Regexp_engine.Group (idx, n) -> Regexp_engine.Group (idx, sre_nocase n)
+    | Regexp_engine.Class bits ->
+      let nbits = Bytes.copy bits in
+      let set_bit n =
+        if n >= 0 && n < 256 then
+          Bytes.set nbits (n / 8) (Char.chr (Char.code (Bytes.get nbits (n / 8)) lor (1 lsl (n mod 8))))
+      in
+      for i = 0 to 255 do
+        let c = Char.chr i in
+        if class_test nbits i then begin
+          if c >= 'A' && c <= 'Z' then set_bit (Char.code (Char.lowercase_ascii c))
+          else if c >= 'a' && c <= 'z' then set_bit (Char.code (Char.uppercase_ascii c))
+        end
+      done;
+      Regexp_engine.Class nbits
+    | other -> other
+  and class_test bits n =
+    n >= 0 && n < 256 &&
+    Char.code (Bytes.get bits (n / 8)) land (1 lsl (n mod 8)) <> 0
+  in
+  let compile_sre datum =
+    let node, num_groups = sre_to_node datum 1 in
+    let rx = Regexp_engine.compile (Regexp_engine.Group (0, node)) (num_groups) in
+    { Datum.rx_compiled = Obj.repr rx; rx_source = datum }
+  in
+  let _require_rx name = function
+    | Datum.Regexp rx -> rx
+    | v -> runtime_error (Printf.sprintf "%s: expected regexp, got %s" name (Datum.to_string v))
+  in
+  let get_compiled rx = (Obj.obj rx.Datum.rx_compiled : Regexp_engine.compiled) in
+  let ensure_rx _name = function
+    | Datum.Regexp rx -> rx
+    | Datum.Str s ->
+      compile_sre (Datum.Str s)
+    | other ->
+      compile_sre other
+  in
+  let make_match_obj input (result : Regexp_engine.match_result) =
+    if not result.matched then Datum.Bool false
+    else
+      let n = Array.length result.groups in
+      let groups = Array.init n (fun i ->
+        match result.groups.(i) with
+        | Some (s, e) ->
+          Datum.Pair { car = Datum.Fixnum s; cdr = Datum.Fixnum e }
+        | None -> Datum.Bool false
+      ) in
+      Datum.Vector [|
+        Datum.Symbol "match-obj";
+        Datum.Str (Bytes.copy input);
+        Datum.Vector groups
+      |]
+  in
+  let is_match_obj = function
+    | Datum.Vector [| Datum.Symbol "match-obj"; _; _ |] -> true
+    | _ -> false
+  in
+  let match_obj_input = function
+    | Datum.Vector [| _; Datum.Str s; _ |] -> s
+    | _ -> runtime_error "not a match object"
+  in
+  let match_obj_groups = function
+    | Datum.Vector [| _; _; Datum.Vector g |] -> g
+    | _ -> runtime_error "not a match object"
+  in
+  register_late "regexp" (fun args -> match args with
+    | [sre] -> Datum.Regexp (compile_sre sre)
+    | _ -> runtime_error "regexp: expected 1 argument");
+  register_late "regexp?" (fun args -> match args with
+    | [Datum.Regexp _] -> Datum.Bool true
+    | [_] -> Datum.Bool false
+    | _ -> runtime_error "regexp?: expected 1 argument");
+  register_late "regexp-matches" (fun args -> match args with
+    | [rx_val; Datum.Str s] ->
+      let rx = ensure_rx "regexp-matches" rx_val in
+      let compiled = get_compiled rx in
+      let result = Regexp_engine.exec compiled s 0 (Bytes.length s) in
+      make_match_obj s result
+    | _ -> runtime_error "regexp-matches: expected regexp/sre and string");
+  register_late "regexp-matches?" (fun args -> match args with
+    | [rx_val; Datum.Str s] ->
+      let rx = ensure_rx "regexp-matches?" rx_val in
+      let compiled = get_compiled rx in
+      let result = Regexp_engine.exec compiled s 0 (Bytes.length s) in
+      Datum.Bool result.matched
+    | _ -> runtime_error "regexp-matches?: expected regexp/sre and string");
+  register_late "regexp-search" (fun args -> match args with
+    | [rx_val; Datum.Str s] ->
+      let rx = ensure_rx "regexp-search" rx_val in
+      let compiled = get_compiled rx in
+      let result = Regexp_engine.search compiled s 0 (Bytes.length s) in
+      make_match_obj s result
+    | _ -> runtime_error "regexp-search: expected regexp/sre and string");
+  register_late "regexp-replace" (fun args ->
+    match args with
+    | [rx_val; Datum.Str s; replacement] ->
+      let rx = ensure_rx "regexp-replace" rx_val in
+      let compiled = get_compiled rx in
+      let result = Regexp_engine.search compiled s 0 (Bytes.length s) in
+      if not result.matched then Datum.Str (Bytes.copy s)
+      else begin
+        match result.groups.(0) with
+        | Some (start, end_) ->
+          let rep_str = match replacement with
+            | Datum.Str r -> Bytes.to_string r
+            | _ ->
+              let m = make_match_obj s result in
+              let v = call inst replacement [m] in
+              (match v with Datum.Str r -> Bytes.to_string r
+               | _ -> Datum.to_display_string v)
+          in
+          let buf = Buffer.create (Bytes.length s) in
+          Buffer.add_bytes buf (Bytes.sub s 0 start);
+          Buffer.add_string buf rep_str;
+          Buffer.add_bytes buf (Bytes.sub s end_ (Bytes.length s - end_));
+          Datum.Str (Bytes.of_string (Buffer.contents buf))
+        | None -> Datum.Str (Bytes.copy s)
+      end
+    | _ -> runtime_error "regexp-replace: expected regexp/sre, string, and replacement");
+  register_late "regexp-replace-all" (fun args ->
+    match args with
+    | [rx_val; Datum.Str s; replacement] ->
+      let rx = ensure_rx "regexp-replace-all" rx_val in
+      let compiled = get_compiled rx in
+      let len = Bytes.length s in
+      let buf = Buffer.create len in
+      let pos = ref 0 in
+      let continue = ref true in
+      while !continue do
+        if !pos > len then continue := false
+        else begin
+          let result = Regexp_engine.search compiled s !pos len in
+          if not result.matched then begin
+            Buffer.add_bytes buf (Bytes.sub s !pos (len - !pos));
+            continue := false
+          end else begin
+            match result.groups.(0) with
+            | Some (start, end_) ->
+              Buffer.add_bytes buf (Bytes.sub s !pos (start - !pos));
+              let rep_str = match replacement with
+                | Datum.Str r -> Bytes.to_string r
+                | _ ->
+                  let m = make_match_obj s result in
+                  let v = call inst replacement [m] in
+                  (match v with Datum.Str r -> Bytes.to_string r
+                   | _ -> Datum.to_display_string v)
+              in
+              Buffer.add_string buf rep_str;
+              pos := if end_ = start then begin
+                if end_ < len then begin
+                  Buffer.add_char buf (Bytes.get s end_);
+                  end_ + 1
+                end else begin
+                  continue := false;
+                  end_
+                end
+              end else end_
+            | None -> Buffer.add_bytes buf (Bytes.sub s !pos (len - !pos)); continue := false
+          end
+        end
+      done;
+      Datum.Str (Bytes.of_string (Buffer.contents buf))
+    | _ -> runtime_error "regexp-replace-all: expected regexp/sre, string, and replacement");
+  register_late "regexp-fold" (fun args ->
+    match args with
+    | [rx_val; proc; init; Datum.Str s] ->
+      let rx = ensure_rx "regexp-fold" rx_val in
+      let compiled = get_compiled rx in
+      let len = Bytes.length s in
+      let acc = ref init in
+      let pos = ref 0 in
+      let idx = ref 0 in
+      let continue = ref true in
+      while !continue do
+        if !pos > len then continue := false
+        else begin
+          let result = Regexp_engine.search compiled s !pos len in
+          if not result.matched then
+            continue := false
+          else begin
+            match result.groups.(0) with
+            | Some (start, end_) ->
+              let m = make_match_obj s result in
+              acc := call inst proc [Datum.Fixnum !idx; m; !acc];
+              incr idx;
+              pos := if end_ = start then begin
+                if end_ < len then end_ + 1
+                else begin continue := false; end_ end
+              end else end_
+            | None -> continue := false
+          end
+        end
+      done;
+      !acc
+    | [rx_val; proc; init; Datum.Str s; finish] ->
+      let rx = ensure_rx "regexp-fold" rx_val in
+      let compiled = get_compiled rx in
+      let len = Bytes.length s in
+      let acc = ref init in
+      let pos = ref 0 in
+      let idx = ref 0 in
+      let continue = ref true in
+      while !continue do
+        if !pos > len then continue := false
+        else begin
+          let result = Regexp_engine.search compiled s !pos len in
+          if not result.matched then
+            continue := false
+          else begin
+            match result.groups.(0) with
+            | Some (start, end_) ->
+              let m = make_match_obj s result in
+              acc := call inst proc [Datum.Fixnum !idx; m; !acc];
+              incr idx;
+              pos := if end_ = start then begin
+                if end_ < len then end_ + 1
+                else begin continue := false; end_ end
+              end else end_
+            | None -> continue := false
+          end
+        end
+      done;
+      call inst finish [Datum.Fixnum !idx; Datum.Bool false; !acc]
+    | _ -> runtime_error "regexp-fold: expected regexp/sre, proc, init, string, [finish]");
+  register_late "regexp-extract" (fun args -> match args with
+    | [rx_val; Datum.Str s] ->
+      let rx = ensure_rx "regexp-extract" rx_val in
+      let compiled = get_compiled rx in
+      let len = Bytes.length s in
+      let acc = ref [] in
+      let pos = ref 0 in
+      let continue = ref true in
+      while !continue do
+        if !pos > len then continue := false
+        else begin
+          let result = Regexp_engine.search compiled s !pos len in
+          if not result.matched then
+            continue := false
+          else begin
+            match result.groups.(0) with
+            | Some (start, end_) ->
+              acc := Datum.Str (Bytes.sub s start (end_ - start)) :: !acc;
+              pos := if end_ = start then begin
+                if end_ < len then end_ + 1
+                else begin continue := false; end_ end
+              end else end_
+            | None -> continue := false
+          end
+        end
+      done;
+      Datum.list_of (List.rev !acc)
+    | _ -> runtime_error "regexp-extract: expected regexp/sre and string");
+  register_late "regexp-split" (fun args -> match args with
+    | [rx_val; Datum.Str s] ->
+      let rx = ensure_rx "regexp-split" rx_val in
+      let compiled = get_compiled rx in
+      let len = Bytes.length s in
+      let acc = ref [] in
+      let pos = ref 0 in
+      let continue = ref true in
+      while !continue do
+        if !pos > len then continue := false
+        else begin
+          let result = Regexp_engine.search compiled s !pos len in
+          if not result.matched then begin
+            acc := Datum.Str (Bytes.sub s !pos (len - !pos)) :: !acc;
+            continue := false
+          end else begin
+            match result.groups.(0) with
+            | Some (start, end_) ->
+              acc := Datum.Str (Bytes.sub s !pos (start - !pos)) :: !acc;
+              pos := if end_ = start then begin
+                if end_ < len then begin
+                  acc := Datum.Str (Bytes.sub s end_ 1) :: !acc;
+                  end_ + 1
+                end else begin continue := false; end_ end
+              end else end_
+            | None ->
+              acc := Datum.Str (Bytes.sub s !pos (len - !pos)) :: !acc;
+              continue := false
+          end
+        end
+      done;
+      Datum.list_of (List.rev !acc)
+    | _ -> runtime_error "regexp-split: expected regexp/sre and string");
+  register_late "regexp-match?" (fun args -> match args with
+    | [v] -> Datum.Bool (is_match_obj v)
+    | _ -> runtime_error "regexp-match?: expected 1 argument");
+  register_late "regexp-match-count" (fun args -> match args with
+    | [m] ->
+      let groups = match_obj_groups m in
+      Datum.Fixnum (Array.length groups)
+    | _ -> runtime_error "regexp-match-count: expected 1 argument");
+  register_late "regexp-match-submatch" (fun args -> match args with
+    | [m; Datum.Fixnum idx] ->
+      let input = match_obj_input m in
+      let groups = match_obj_groups m in
+      if idx < 0 || idx >= Array.length groups then Datum.Bool false
+      else begin
+        match groups.(idx) with
+        | Datum.Pair { car = Datum.Fixnum s; cdr = Datum.Fixnum e } ->
+          Datum.Str (Bytes.sub input s (e - s))
+        | _ -> Datum.Bool false
+      end
+    | _ -> runtime_error "regexp-match-submatch: expected match and index");
+  register_late "regexp-match-submatch-start" (fun args -> match args with
+    | [m; Datum.Fixnum idx] ->
+      let groups = match_obj_groups m in
+      if idx < 0 || idx >= Array.length groups then Datum.Bool false
+      else begin
+        match groups.(idx) with
+        | Datum.Pair { car = Datum.Fixnum s; _ } -> Datum.Fixnum s
+        | _ -> Datum.Bool false
+      end
+    | _ -> runtime_error "regexp-match-submatch-start: expected match and index");
+  register_late "regexp-match-submatch-end" (fun args -> match args with
+    | [m; Datum.Fixnum idx] ->
+      let groups = match_obj_groups m in
+      if idx < 0 || idx >= Array.length groups then Datum.Bool false
+      else begin
+        match groups.(idx) with
+        | Datum.Pair { car = _; cdr = Datum.Fixnum e } -> Datum.Fixnum e
+        | _ -> Datum.Bool false
+      end
+    | _ -> runtime_error "regexp-match-submatch-end: expected match and index");
+  let srfi_115_names = [
+    "regexp"; "regexp?";
+    "regexp-matches"; "regexp-matches?"; "regexp-search";
+    "regexp-replace"; "regexp-replace-all";
+    "regexp-fold"; "regexp-extract"; "regexp-split";
+    "regexp-match?"; "regexp-match-count";
+    "regexp-match-submatch"; "regexp-match-submatch-start"; "regexp-match-submatch-end";
+  ] in
+  build_library inst ["srfi"; "115"] srfi_115_names [];
   register_builtin_libraries inst;
   inst
 

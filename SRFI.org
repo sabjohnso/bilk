@@ -1,0 +1,328 @@
+#+TITLE: SRFI Implementation Status for Wile
+#+AUTHOR: Wile R7RS Scheme
+#+STARTUP: overview
+
+* Overview
+
+Wile implements 20 of 268 SRFIs. This document tracks the status of
+each SRFI and explains why unimplemented ones are omitted.
+
+** Legend
+- *Implemented* :: Fully implemented and tested in Wile.
+- *R7RS Built-in* :: Functionality is part of R7RS and already provided by Wile's core.
+- *Withdrawn* :: Withdrawn by its author; not a candidate for implementation.
+- *Not Implemented* :: Final SRFI that could potentially be implemented.
+
+* Implemented SRFIs
+
+| SRFI | Title                        | Approach       |
+|------+------------------------------+----------------|
+|    1 | List Library                 | Pure Scheme    |
+|    2 | AND-LET*                     | Pure Scheme    |
+|    8 | receive                      | Pure Scheme    |
+|   11 | let-values                   | Pure Scheme    |
+|   13 | String Libraries             | Mixed          |
+|   14 | Character-set Library        | OCaml          |
+|   16 | Variable arity procedures    | Pure Scheme    |
+|   26 | cut/cute                     | Pure Scheme    |
+|   28 | Basic Format Strings         | Pure Scheme    |
+|   31 | rec                          | Pure Scheme    |
+|   41 | Streams                      | Pure Scheme    |
+|   69 | Basic hash tables            | OCaml          |
+|  111 | Boxes                        | Pure Scheme    |
+|  113 | Sets and bags                | Pure Scheme    |
+|  115 | Scheme Regular Expressions   | OCaml + Module |
+|  125 | Intermediate hash tables     | Pure Scheme    |
+|  128 | Comparators (reduced)        | Pure Scheme    |
+|  132 | Sort Libraries               | Pure Scheme    |
+|  133 | Vector Library               | Pure Scheme    |
+|  151 | Bitwise Operations           | OCaml          |
+
+* Withdrawn SRFIs
+
+These SRFIs have been withdrawn by their authors and are not candidates
+for implementation.
+
+| SRFI | Title                                         |
+|------+-----------------------------------------------|
+|    3 | List-Set Library                              |
+|   12 | Exception Handling                            |
+|   15 | Syntax for dynamic scoping                    |
+|   20 | Simple object system                          |
+|   24 | Define-syntax in local lexical scopes         |
+|   32 | Sort Libraries                                |
+|   33 | Integer Bitwise-operation Library             |
+|   40 | A Library of Streams                          |
+|   50 | Mixing Scheme and C                           |
+|   52 | Extended Character Sets                       |
+|   53 | Syntactic computations with computation-rules |
+|   56 | Binary I/O                                    |
+|   65 | define-immutable                              |
+|   68 | Comprehensive I/O                             |
+|   73 | Exact Infinities                              |
+|   75 | R6RS Unicode data                             |
+|   76 | R6RS Records                                  |
+|   77 | Preliminary Proposal for R6RS Arithmetic      |
+|   79 | Primitive I/O                                 |
+|   80 | Stream I/O                                    |
+|   81 | Port I/O                                      |
+|   82 | Stream Ports                                  |
+|   83 | R6RS Library Syntax                           |
+|   84 | Universal Identifiers                         |
+|   85 | Recursive Equivalence Predicates              |
+|   91 | Extended ports                                |
+|   92 | ALAMBDA and ALAMBDA*                          |
+|   93 | R6RS Syntax-Case Macros                       |
+|  102 | Procedure Arity Inspection                    |
+|  103 | Library Files                                 |
+|  104 | Library Files Utilities                       |
+|  114 | Comparators                                   |
+|  121 | Generators                                    |
+|  142 | Bitwise Operations                            |
+|  154 | First-class dynamic extents                   |
+|  155 | Promises                                      |
+|  157 | Continuation marks                            |
+|  159 | Combinator Formatting                         |
+|  177 | Portable keyword arguments                    |
+|  182 | ADBMAL, ALET, and ALET*                       |
+|  183 | Another format procedure, Fox                 |
+|  184 | define-record-lambda                          |
+|  186 | Transcoders and transcoded ports              |
+|  187 | ALAMBDA and ADEFINE                           |
+|  191 | Procedure Arity Inspection                    |
+|  198 | Foreign Interface Status                      |
+|  199 | POSIX errno manipulation                      |
+|  200 | Pattern Matching                              |
+|  204 | Wright-Cartwright-Shinn Pattern Matcher       |
+|  205 | POSIX Terminal Fundamentals                   |
+|  218 | Unicode Numerals                              |
+|  220 | Line directives                               |
+|  243 | Unreadable Data                               |
+|  245 | Mixing definitions and expressions            |
+|  246 | Guardians                                     |
+|  249 | Restarting conditions                         |
+|  256 | Minimal extension for record inheritance      |
+
+* Draft SRFIs
+
+These SRFIs are not yet finalized and are not candidates for
+implementation until they reach final status.
+
+| SRFI | Title                               |
+|------+-------------------------------------|
+|  254 | Ephemerons and Guardians            |
+|  262 | Extensible pattern matcher          |
+|  263 | Prototype Object System             |
+|  265 | The CFG Language                    |
+|  266 | The expr syntax                     |
+|  267 | Raw String Syntax                   |
+
+* R7RS Built-in
+
+These SRFIs define features that are already part of the R7RS standard
+and are provided by Wile's core libraries.  Separate SRFI
+implementations are unnecessary.
+
+| SRFI | Title                                          | Covered by            |
+|------+------------------------------------------------+-----------------------|
+|    0 | Feature-based conditional expansion            | =(cond-expand)= core  |
+|    6 | Basic String Ports                             | =(scheme base)=       |
+|    9 | Defining Record Types                          | =define-record-type=  |
+|   23 | Error reporting mechanism                      | =(error)= in base     |
+|   30 | Nested Multi-line Comments                     | Reader (=#|...|#=)    |
+|   34 | Exception Handling for Programs                | =guard= core form     |
+|   39 | Parameter objects                              | Not yet, but R7RS     |
+|   62 | S-expression comments                          | Reader (=#;=)         |
+|   87 | => in case clauses                             | Not supported in Wile |
+
+* Not Implemented (Final SRFIs)
+
+** Likely Candidates (Pure Scheme, Low Complexity)
+
+These could be implemented as embedded Scheme define-library sources
+with little or no OCaml code.
+
+| SRFI | Title                                     | Reason not yet done                  |
+|------+-------------------------------------------+--------------------------------------|
+|    5 | Compatible let with signatures            | Low priority; niche syntax extension |
+|   42 | Eager Comprehensions                      | Complex macro; moderate effort       |
+|   45 | Iterative Lazy Algorithms                 | Overlaps with =(scheme lazy)=        |
+|   46 | Basic Syntax-rules Extensions             | Tail patterns; expander change       |
+|   48 | Intermediate Format Strings               | Extends SRFI 28; moderate effort     |
+|   51 | Handling rest list                        | Simple; low demand                   |
+|   61 | More general cond clause                  | Needs ==>= in =cond= (unsupported)   |
+|   71 | Extended LET for multiple values          | Pure Scheme macro; moderate effort   |
+|   78 | Lightweight testing                       | Pure Scheme; low priority            |
+|   86 | MU and NU                                 | Obscure; low demand                  |
+|   88 | Keyword objects                           | Needs new datum type or convention   |
+|   89 | Optional/named parameters                 | Pure Scheme macro; moderate effort   |
+|   95 | Sorting and Merging                       | Overlaps with SRFI 132               |
+|  101 | Purely Functional Random-Access Lists     | Pure Scheme; moderate effort         |
+|  116 | Immutable List Library                    | Large API; mirrors SRFI 1            |
+|  117 | Queues based on lists                     | Simple; low demand                   |
+|  127 | Lazy Sequences                            | Builds on SRFI 41; moderate effort   |
+|  129 | Titlecase procedures                      | Trivial; low demand                  |
+|  130 | Cursor-based string library               | Moderate effort; niche               |
+|  134 | Immutable Deques                          | Pure Scheme; moderate effort         |
+|  135 | Immutable Texts                           | Large API; moderate effort           |
+|  145 | Assumptions                               | Trivial macro; low priority          |
+|  146 | Mappings                                  | Large API; significant effort        |
+|  148 | Eager syntax-rules                        | Expander change needed               |
+|  149 | Basic Syntax-rules Template Extensions    | Expander change needed               |
+|  152 | String Library (reduced)                  | Overlaps with SRFI 13                |
+|  153 | Ordered Sets                              | Needs balanced trees; moderate       |
+|  156 | Syntactic combiners for binary predicates | Pure Scheme macro; trivial           |
+|  158 | Generators and Accumulators               | Large API; moderate effort           |
+|  162 | Comparators sublibrary                    | Subset of SRFI 128                   |
+|  175 | ASCII character library                   | Pure Scheme; trivial                 |
+|  188 | Splicing binding constructs               | Expander change needed               |
+|  189 | Maybe and Either                          | Pure Scheme; moderate effort         |
+|  190 | Coroutine Generators                      | Needs =call/cc=; moderate effort     |
+|  195 | Multiple-value boxes                      | Simple; low demand                   |
+|  196 | Range Objects                             | Pure Scheme; moderate effort         |
+|  197 | Pipeline Operators                        | Simple macro; low priority           |
+|  201 | Syntactic Extensions to Core Bindings     | Expander changes needed              |
+|  202 | Pattern-matching and-let*                 | Builds on SRFI 2; moderate effort    |
+|  206 | Auxiliary Syntax Keywords                 | Needs expander support               |
+|  207 | String-notated bytevectors                | Reader change needed                 |
+|  208 | NaN procedures                            | Trivial; depends on IEEE 754         |
+|  209 | Enums and Enum Sets                       | Pure Scheme; moderate effort         |
+|  210 | Multiple Values procedures                | Pure Scheme; moderate effort         |
+|  214 | Flexvectors                               | Pure Scheme; moderate effort         |
+|  219 | Define higher-order lambda                | Simple macro; low priority           |
+|  221 | Generator/accumulator sub-library         | Depends on SRFI 158                  |
+|  222 | Compound Objects                          | Pure Scheme; low priority            |
+|  223 | Generalized binary search                 | Pure Scheme; trivial                 |
+|  225 | Dictionaries                              | Pure Scheme; moderate effort         |
+|  226 | Control Features                          | Pure Scheme; low priority            |
+|  228 | Composing Comparators                     | Builds on SRFI 128; easy             |
+|  232 | Flexible curried procedures               | Pure Scheme macro; low priority      |
+|  234 | Topological Sorting                       | Pure Scheme; easy                    |
+|  235 | Combinators                               | Pure Scheme; trivial                 |
+|  236 | Unspecified order evaluation              | Pure Scheme macro; low priority      |
+|  239 | Destructuring Lists                       | Pure Scheme macro; moderate effort   |
+|  241 | Match (Pattern-Matching Catamorphisms)    | Complex macro; significant effort    |
+|  244 | Multiple-value Definitions                | Pure Scheme macro; moderate effort   |
+|  247 | Syntactic Monads                          | Complex macro; niche                 |
+|  251 | Mixing definitions and expressions        | Expander change needed               |
+|  252 | Property Testing                          | Pure Scheme; moderate effort         |
+|  253 | Data (Type-)Checking                      | Pure Scheme; moderate effort         |
+|  255 | Restarting conditions                     | Pure Scheme; moderate effort         |
+|  257 | Simple extendable pattern matcher         | Pure Scheme; moderate effort         |
+|  258 | Uninterned symbols                        | Needs Symbol module changes          |
+|  259 | Tagged procedures with type safety        | Needs Datum changes                  |
+|  260 | Generated Symbols                         | Needs =gensym= primitive             |
+|  261 | Portable SRFI Library Reference           | Meta-SRFI; not runtime code          |
+|  264 | String Syntax for Scheme Regular Exprs    | Reader change + SRFI 115 extension   |
+
+** System-Level / OS-Dependent
+
+These require OS-level facilities (threads, networking, filesystem,
+FFI) that are outside the scope of Wile's current bytecode VM.
+
+| SRFI | Title                                | Reason                              |
+|------+--------------------------------------+-------------------------------------|
+|    4 | Homogeneous numeric vector datatypes | R6RS-era; superseded by R7RS        |
+|    7 | Feature-based program configuration  | Build system concern; not runtime   |
+|   10 | #, external form                     | Reader extension; niche             |
+|   17 | Generalized set!                     | Needs setter protocol in VM         |
+|   18 | Multithreading support               | Requires threading runtime          |
+|   19 | Time Data Types and Procedures       | Needs OS time APIs beyond =Unix=    |
+|   21 | Real-time multithreading support     | Requires threading runtime          |
+|   22 | Running Scheme Scripts on Unix       | Shell/OS integration                |
+|   25 | Multi-dimensional Array Primitives   | Large C-level API                   |
+|   27 | Sources of Random Bits               | Needs CSPRNG; OS-dependent          |
+|   29 | Localization                         | Needs locale/i18n support           |
+|   35 | Conditions                           | R6RS conditions; different model    |
+|   36 | I/O Conditions                       | R6RS I/O conditions                 |
+|   37 | args-fold                            | Pure Scheme; niche CLI utility      |
+|   38 | External Representation (shared)     | Needs =write-shared= with labels   |
+|   43 | Vector library                       | Superseded by SRFI 133              |
+|   44 | Collections                          | Very large abstract API             |
+|   47 | Array                                | Superseded by SRFI 63/164           |
+|   49 | Indentation-sensitive syntax         | Reader overhaul needed              |
+|   54 | Formatting                           | Superseded by SRFI 48               |
+|   55 | require-extension                    | Superseded by R7RS =import=         |
+|   57 | Records                              | Superseded by R7RS records          |
+|   58 | Array Notation                       | Reader extension; niche             |
+|   59 | Vicinity                             | SLIB-specific; not portable         |
+|   60 | Integers as Bits                     | Superseded by SRFI 151              |
+|   63 | Homogeneous and Heterogeneous Arrays | Superseded by SRFI 164              |
+|   64 | Test suites                          | Testing framework; not runtime      |
+|   66 | Octet Vectors                        | Superseded by R7RS bytevectors      |
+|   67 | Compare Procedures                   | Superseded by SRFI 128              |
+|   70 | Numbers                              | R6RS number tower; not R7RS         |
+|   72 | Hygienic macros                      | =define-macro=; non-R7RS            |
+|   74 | Octet-Addressed Binary Blocks        | Low-level memory; needs FFI         |
+|   90 | Extensible hash table constructor    | Superseded by SRFI 125/69           |
+|   94 | Type-Restricted Numerical Functions  | Needs numeric type dispatch         |
+|   96 | SLIB Prerequisites                   | SLIB-specific                       |
+|   97 | SRFI Libraries                       | R6RS library naming convention      |
+|   98 | Environment variables                | Covered by =(scheme process-context)= |
+|   99 | ERR5RS Records                       | Superseded by R7RS records          |
+|  100 | define-lambda-object                 | Niche object system                 |
+|  105 | Curly-infix-expressions              | Reader overhaul needed              |
+|  106 | Basic socket interface               | Needs OS socket APIs                |
+|  107 | XML reader syntax                    | Reader extension; very niche        |
+|  108 | Named quasi-literal constructors     | Reader extension; niche             |
+|  109 | Extended string quasi-literals       | Reader extension; niche             |
+|  110 | Sweet-expressions                    | Reader overhaul needed              |
+|  112 | Environment Inquiry                  | Needs OS queries (uname, etc.)      |
+|  118 | Adjustable-size strings              | Needs mutable string extension      |
+|  119 | wisp (indentation-sensitive scheme)  | Reader overhaul needed              |
+|  120 | Timer APIs                           | Needs OS timer support              |
+|  123 | Generic accessor and modifier        | Needs setter protocol               |
+|  124 | Ephemerons                           | Needs GC integration                |
+|  126 | R6RS-based hashtables                | R6RS API; use SRFI 125 instead      |
+|  131 | ERR5RS Record Syntax (reduced)       | Superseded by R7RS records          |
+|  136 | Extensible record types              | R6RS-style; needs VM changes        |
+|  137 | Minimal Unique Types                 | Needs new datum type                |
+|  138 | Compiling to executables             | Meta-SRFI; Wile has AOT already     |
+|  139 | Syntax parameters                    | Needs expander redesign             |
+|  140 | Immutable Strings                    | Wile uses mutable =bytes=           |
+|  141 | Integer division                     | R7RS already defines these          |
+|  143 | Fixnums                              | Needs fixnum-specific ops           |
+|  144 | Flonums                              | Needs flonum-specific ops           |
+|  147 | Custom macro transformers            | Needs =er-macro-transformer=        |
+|  150 | Hygienic ERR5RS Record Syntax        | Superseded by R7RS records          |
+|  160 | Homogeneous numeric vector libraries | Large API; needs typed vectors      |
+|  161 | Unifiable Boxes                      | Niche; logic programming            |
+|  163 | Enhanced array literals              | Reader extension needed             |
+|  164 | Enhanced multi-dimensional Arrays    | Very large API; significant effort  |
+|  165 | The Environment Monad                | Niche; functional patterns          |
+|  166 | Monadic Formatting                   | Niche; monadic I/O                  |
+|  167 | Ordered Key Value Store              | Needs balanced trees; large API     |
+|  168 | Generic Tuple Store Database         | Very niche; database layer          |
+|  169 | Underscores in numbers               | Reader change needed                |
+|  170 | POSIX API                            | Very large OS interface             |
+|  171 | Transducers                          | Pure Scheme; moderate effort        |
+|  172 | Two Safer Subsets of R7RS            | Meta-specification; not runtime     |
+|  173 | Hooks                                | Pure Scheme; niche                  |
+|  174 | POSIX Timespecs                      | Needs POSIX time APIs               |
+|  176 | Version flag                         | Reader/syntax extension             |
+|  178 | Bitvector library                    | Needs bitvector datum type          |
+|  179 | Nonempty Intervals and Gen. Arrays   | Depends on SRFI 164                 |
+|  180 | JSON                                 | Pure Scheme possible; moderate      |
+|  181 | Custom ports                         | Needs port extension mechanism      |
+|  185 | Linear adjustable-length strings     | Needs mutable string extension      |
+|  192 | Port Positioning                     | Needs =file-position= in Port      |
+|  193 | Command line                         | Overlaps =(scheme process-context)= |
+|  194 | Random data generators               | Needs PRNG; moderate effort         |
+|  203 | Picture Language (SICP)              | Needs graphics; out of scope        |
+|  211 | Scheme Macro Libraries               | Needs expander changes              |
+|  212 | Aliases                              | Needs =alias= syntax support       |
+|  213 | Identifier Properties                | Needs symbol property lists         |
+|  215 | Central Log Exchange                 | Niche infrastructure                |
+|  216 | SICP Prerequisites                   | Depends on multiple other SRFIs     |
+|  217 | Integer Sets                         | Needs balanced trees; moderate      |
+|  224 | Integer Mappings                     | Needs specialized data structures   |
+|  227 | Optional Arguments                   | Pure Scheme; moderate effort        |
+|  229 | Tagged Procedures                    | Needs Datum/VM changes              |
+|  230 | Atomic Operations                    | Needs threading support             |
+|  231 | Intervals and Generalized Arrays     | Depends on SRFI 164                 |
+|  233 | INI files                            | Pure Scheme; niche                  |
+|  237 | R6RS Records (refined)               | R6RS-style records                  |
+|  238 | Codesets                             | Niche; internationalization         |
+|  240 | Reconciled Records                   | Needs both R6RS + R7RS records      |
+|  248 | Minimal delimited continuations      | Needs =shift=/=reset= in VM        |
+|  250 | Insertion-ordered hash tables        | Pure Scheme; moderate effort        |

@@ -192,6 +192,10 @@ let rec write_datum buf (d : Datum.t) =
     fasl_error "cannot serialize promise"
   | Hash_table _ ->
     fasl_error "cannot serialize hash-table"
+  | Char_set _ ->
+    fasl_error "cannot serialize char-set"
+  | Regexp _ ->
+    fasl_error "cannot serialize regexp"
 
 let rec read_datum symbols data pos =
   let tag = read_u8 data pos in

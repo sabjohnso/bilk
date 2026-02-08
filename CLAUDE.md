@@ -372,35 +372,45 @@ Changes to existing modules:
 
 **Milestone 16 (SRFI Support)** — complete.
 
-| Module | Purpose                                                       |
-|--------|---------------------------------------------------------------|
-| `Srfi` | Bundled SRFI library sources with lazy loading infrastructure |
-
-Adds infrastructure for bundled SRFIs + implements 15 SRFIs. Embedded
+Adds infrastructure for bundled SRFIs + implements 20 SRFIs. Embedded
 `define-library` source strings in `Srfi` module, loaded lazily when
 `(import (srfi N))` is first encountered and no on-disk `.sld` file exists.
 
+| Module          | Purpose                                                       |
+|-----------------|---------------------------------------------------------------|
+| `Srfi`          | Bundled SRFI library sources with lazy loading infrastructure |
+| `Regexp_engine` | Backtracking NFA regex engine for SRFI 115                    |
+
 Bundled SRFIs:
 - **Pure Scheme:** SRFI 1 (lists), 2 (and-let*), 8 (receive), 11 (let-values),
-  16 (case-lambda), 26 (cut/cute), 28 (format), 31 (rec), 111 (boxes),
-  125 (intermediate hash tables), 128 (comparators), 132 (sort), 133 (vectors)
-- **OCaml primitives:** SRFI 69 (basic hash tables, 26 primitives),
+  16 (case-lambda), 26 (cut/cute), 28 (format), 31 (rec), 41 (streams),
+  111 (boxes), 113 (sets/bags), 125 (intermediate hash tables),
+  128 (comparators), 132 (sort), 133 (vectors)
+- **OCaml primitives:** SRFI 14 (char-sets, ~37 primitives),
+  SRFI 69 (basic hash tables, 26 primitives),
+  SRFI 115 (regex, ~15 primitives + Regexp_engine module),
   SRFI 151 (bitwise operations, 20 primitives)
+- **Mixed OCaml/Scheme:** SRFI 13 (strings, ~34 OCaml primitives)
 
 Changes to existing modules:
 - `Datum`: Added `Hash_table of hash_table` variant with mutable bucket
   array, configurable equality/hash, size tracking, mutability flag;
-  updated `equal` (identity), `pp` (shows size)
-- `Syntax`: `from_datum` maps `Hash_table` to `Symbol "#<hash-table>"`
-- `Fasl`: `write_datum` raises `Fasl_error` for `Hash_table`
+  added `Char_set of char_set` (256-bit bitset for Latin-1 range);
+  added `Regexp of regexp` (compiled regex with SRE source);
+  updated `equal` (identity for Hash_table/Regexp, structural for Char_set),
+  `pp` (shows size/#<char-set>/#<regexp>)
+- `Syntax`: `from_datum` maps `Hash_table`/`Char_set`/`Regexp` to symbols
+- `Fasl`: `write_datum` raises `Fasl_error` for `Hash_table`/`Char_set`/`Regexp`
 - `Expander`: Added `let-values`, `let*-values` to `core_forms`; expansion
   via nested `call-with-values` / `lambda`
 - `Instance`: Added SRFI fallback in `try_load_library` (after file search
   fails, checks `Srfi.lookup`); added `Srfi.bundled_features` to
-  `detect_features`; registered 26 SRFI 69 hash table primitives and
-  20 SRFI 151 bitwise primitives; added `let-values`/`let*-values` to
-  `scheme_base_syntax_names`; built-in `(srfi 69)` and `(srfi 151)`
-  libraries via `build_library`
+  `detect_features`; registered 26 SRFI 69 hash table primitives,
+  20 SRFI 151 bitwise primitives, ~37 SRFI 14 char-set primitives,
+  ~34 SRFI 13 string primitives, ~15 SRFI 115 regex primitives;
+  added `let-values`/`let*-values` to `scheme_base_syntax_names`;
+  built-in `(srfi 14)`, `(srfi 13)`, `(srfi 69)`, `(srfi 115)`, and
+  `(srfi 151)` libraries via `build_library`
 
 **V1 (Virtual Environments & Search Paths)** — complete.
 
@@ -483,9 +493,10 @@ Tests live in `test/` as per-topic files and are run via `dune test`.
 | `test/test_semver.ml`      | Semver (34 tests)                                   |
 | `test/test_package.ml`     | Package (16 tests)                                  |
 | `test/test_pkg_manager.ml` | Pkg_manager (25 tests)                              |
-| `test/test_srfi.ml`        | SRFI (124 tests)                                    |
+| `test/test_srfi.ml`        | SRFI (281 tests)                                    |
 | `test/test_venv.ml`        | Venv (11 tests)                                     |
 | `test/test_search_path.ml` | Search_path (13 tests)                              |
+| `test/test_regexp_engine.ml` | Regexp_engine (32 tests)                            |
 
 Test dependencies:
 - **alcotest** — unit test framework with readable output

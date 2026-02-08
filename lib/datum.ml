@@ -33,6 +33,8 @@ and t =
   | Port of Port.t
   | Promise of promise
   | Hash_table of hash_table
+  | Char_set of char_set
+  | Regexp of regexp
 
 and promise = {
   mutable promise_done : bool;
@@ -45,6 +47,15 @@ and hash_table = {
   ht_equal : t;
   ht_hash : t;
   ht_mutable : bool;
+}
+
+and char_set = {
+  cs_bits : bytes;  (* 32 bytes = 256 bits, one per code point 0-255 *)
+}
+
+and regexp = {
+  rx_compiled : Obj.t;  (* actually Regexp_engine.compiled *)
+  rx_source : t;        (* original SRE datum for display *)
 }
 
 and primitive = {
@@ -131,6 +142,8 @@ let rec equal a b =
   | Port _, Port _ -> false
   | Promise _, Promise _ -> false
   | Hash_table _, Hash_table _ -> false
+  | Char_set a, Char_set b -> Bytes.equal a.cs_bits b.cs_bits
+  | Regexp _, Regexp _ -> false
   | _ -> false
 
 let rec pp fmt = function
@@ -189,6 +202,10 @@ let rec pp fmt = function
       Format.fprintf fmt "#<promise>"
   | Hash_table ht ->
     Format.fprintf fmt "#<hash-table (%d)>" ht.ht_size
+  | Char_set _ ->
+    Format.fprintf fmt "#<char-set>"
+  | Regexp _ ->
+    Format.fprintf fmt "#<regexp>"
 
 and pp_tail fmt = function
   | Nil -> ()

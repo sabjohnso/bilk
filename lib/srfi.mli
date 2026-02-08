@@ -5,8 +5,10 @@
     is found, {!Instance} falls back to {!lookup} to check for a bundled
     implementation.
 
-    Currently bundled: SRFI 1, 2, 8, 11, 16, 26, 28, 31, 111, 125, 128, 132, 133.
-    SRFI 69 and 151 are registered as built-in libraries with OCaml primitives. *)
+    Currently bundled: SRFI 1, 2, 8, 11, 13, 14, 16, 26, 28, 31, 41, 111,
+    113, 115, 125, 128, 132, 133.
+    SRFI 14, 69, 115, and 151 are registered as built-in libraries with
+    OCaml primitives.  SRFI 13 is a mixed OCaml/Scheme library. *)
 
 val lookup : string list -> string option
 (** [lookup name] returns the embedded source for a bundled SRFI library,

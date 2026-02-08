@@ -850,6 +850,729 @@ let sources : (string list * string) list = [
        (hash-table-hash-function ht)))))
 |});
 
+  (* SRFI 41 — streams (primitive) *)
+  (["srfi"; "41"; "primitive"], {|
+(define-library (srfi 41 primitive)
+  (import (scheme base) (scheme lazy))
+  (export stream-null stream-cons stream? stream-null?
+         stream-pair? stream-car stream-cdr stream-lambda
+         make-stream-promise stream-type-promise)
+  (begin
+    (define-record-type <stream-type>
+      (make-stream-promise promise)
+      stream-type?
+      (promise stream-type-promise))
+    (define stream-null (make-stream-promise (delay '())))
+    (define-syntax stream-cons
+      (syntax-rules ()
+        ((stream-cons a b)
+         (make-stream-promise (delay (cons a b))))))
+    (define (stream? x) (stream-type? x))
+    (define (stream-null? x)
+      (and (stream? x)
+           (null? (force (stream-type-promise x)))))
+    (define (stream-pair? x)
+      (and (stream? x)
+           (pair? (force (stream-type-promise x)))))
+    (define (stream-car s)
+      (if (stream-null? s)
+          (error "stream-car: empty stream")
+          (car (force (stream-type-promise s)))))
+    (define (stream-cdr s)
+      (if (stream-null? s)
+          (error "stream-cdr: empty stream")
+          (cdr (force (stream-type-promise s)))))
+    (define-syntax stream-lambda
+      (syntax-rules ()
+        ((stream-lambda formals body ...)
+         (lambda formals
+           (make-stream-promise (delay (begin body ...)))))))))
+|});
+
+  (* SRFI 41 — streams (full) *)
+  (["srfi"; "41"], {|
+(define-library (srfi 41)
+  (import (scheme base) (scheme lazy) (srfi 41 primitive))
+  (export
+    stream-null stream-cons stream? stream-null?
+    stream-pair? stream-car stream-cdr stream-lambda
+    make-stream-promise stream-type-promise
+    stream stream-unfold stream-map stream-for-each
+    stream-filter stream-fold stream-take stream-take-while
+    stream-drop stream-drop-while stream-zip
+    stream-constant stream-range stream-iterate
+    stream-append stream-concat stream-scan
+    stream-length stream->list list->stream)
+  (begin
+    (define-syntax stream
+      (syntax-rules ()
+        ((stream) stream-null)
+        ((stream x rest ...)
+         (stream-cons x (stream rest ...)))))
+
+    (define (stream-unfold map? base gen seed)
+      (let loop ((s seed))
+        (if (map? s)
+            (stream-cons (base s) (loop (gen s)))
+            stream-null)))
+
+    (define (stream-map proc s . rest)
+      (if (null? rest)
+          (let loop ((s s))
+            (if (stream-null? s) stream-null
+                (stream-cons (proc (stream-car s))
+                             (loop (stream-cdr s)))))
+          (let loop ((streams (cons s rest)))
+            (if (any stream-null? streams) stream-null
+                (stream-cons
+                  (apply proc (map stream-car streams))
+                  (loop (map stream-cdr streams)))))))
+
+    (define (any pred lst)
+      (cond ((null? lst) #f)
+            ((pred (car lst)) #t)
+            (else (any pred (cdr lst)))))
+
+    (define (stream-for-each proc s . rest)
+      (if (null? rest)
+          (let loop ((s s))
+            (unless (stream-null? s)
+              (proc (stream-car s))
+              (loop (stream-cdr s))))
+          (let loop ((streams (cons s rest)))
+            (unless (any stream-null? streams)
+              (apply proc (map stream-car streams))
+              (loop (map stream-cdr streams))))))
+
+    (define (stream-filter pred s)
+      (let loop ((s s))
+        (cond
+          ((stream-null? s) stream-null)
+          ((pred (stream-car s))
+           (stream-cons (stream-car s) (loop (stream-cdr s))))
+          (else (loop (stream-cdr s))))))
+
+    (define (stream-fold proc base s)
+      (let loop ((s s) (acc base))
+        (if (stream-null? s) acc
+            (loop (stream-cdr s) (proc acc (stream-car s))))))
+
+    (define (stream-take n s)
+      (let loop ((n n) (s s))
+        (if (or (= n 0) (stream-null? s)) stream-null
+            (stream-cons (stream-car s)
+                         (loop (- n 1) (stream-cdr s))))))
+
+    (define (stream-take-while pred s)
+      (let loop ((s s))
+        (if (or (stream-null? s)
+                (not (pred (stream-car s))))
+            stream-null
+            (stream-cons (stream-car s)
+                         (loop (stream-cdr s))))))
+
+    (define (stream-drop n s)
+      (let loop ((n n) (s s))
+        (if (or (= n 0) (stream-null? s)) s
+            (loop (- n 1) (stream-cdr s)))))
+
+    (define (stream-drop-while pred s)
+      (let loop ((s s))
+        (if (or (stream-null? s)
+                (not (pred (stream-car s))))
+            s
+            (loop (stream-cdr s)))))
+
+    (define (stream-zip s . rest)
+      (let loop ((streams (cons s rest)))
+        (if (any stream-null? streams) stream-null
+            (stream-cons
+              (map stream-car streams)
+              (loop (map stream-cdr streams))))))
+
+    (define (stream-constant . objs)
+      (let ((lst objs))
+        (let loop ((rest lst))
+          (if (null? rest)
+              (loop lst)
+              (stream-cons (car rest) (loop (cdr rest)))))))
+
+    (define (stream-range first past . maybe-step)
+      (let ((step (if (null? maybe-step) 1 (car maybe-step))))
+        (let loop ((n first))
+          (if (if (> step 0) (>= n past) (<= n past))
+              stream-null
+              (stream-cons n (loop (+ n step)))))))
+
+    (define (stream-iterate proc base)
+      (stream-cons base (stream-iterate proc (proc base))))
+
+    (define (stream-append . streams)
+      (if (null? streams) stream-null
+          (let loop ((s (car streams)) (rest (cdr streams)))
+            (if (stream-null? s)
+                (if (null? rest) stream-null
+                    (loop (car rest) (cdr rest)))
+                (stream-cons (stream-car s)
+                             (loop (stream-cdr s) rest))))))
+
+    (define (stream-concat s)
+      (let loop ((s s))
+        (if (stream-null? s) stream-null
+            (let inner ((cur (stream-car s)))
+              (if (stream-null? cur)
+                  (loop (stream-cdr s))
+                  (stream-cons (stream-car cur)
+                               (inner (stream-cdr cur))))))))
+
+    (define (stream-scan proc base s)
+      (stream-cons base
+        (if (stream-null? s) stream-null
+            (stream-scan proc
+                         (proc base (stream-car s))
+                         (stream-cdr s)))))
+
+    (define (stream-length s)
+      (let loop ((s s) (n 0))
+        (if (stream-null? s) n
+            (loop (stream-cdr s) (+ n 1)))))
+
+    (define (stream->list . args)
+      (let ((s (if (null? (cdr args)) (car args) (cadr args)))
+            (n (if (null? (cdr args)) -1 (car args))))
+        (let loop ((s s) (n n) (acc '()))
+          (if (or (stream-null? s) (= n 0))
+              (reverse acc)
+              (loop (stream-cdr s) (- n 1)
+                    (cons (stream-car s) acc))))))
+
+    (define (list->stream lst)
+      (if (null? lst) stream-null
+          (stream-cons (car lst) (list->stream (cdr lst)))))))
+|});
+
+  (* SRFI 113 — sets and bags *)
+  (["srfi"; "113"], {|
+(define-library (srfi 113)
+  (import (scheme base) (srfi 69) (srfi 128))
+  (export
+    set set? set-contains? set-empty? set-disjoint?
+    set-member set-element-comparator
+    set-adjoin set-adjoin! set-replace set-replace!
+    set-delete set-delete! set-delete-all set-delete-all!
+    set-size set-find set-count set-any? set-every?
+    set-map set-for-each set-fold
+    set-filter set-filter! set-remove set-remove!
+    set-copy set->list list->set
+    set-union set-union! set-intersection set-intersection!
+    set-difference set-difference! set-xor set-xor!
+    set=? set<? set>? set<=? set>=?
+    bag bag? bag-contains? bag-empty? bag-disjoint?
+    bag-member bag-element-comparator
+    bag-adjoin bag-adjoin! bag-replace bag-replace!
+    bag-delete bag-delete! bag-delete-all bag-delete-all!
+    bag-size bag-find bag-count bag-any? bag-every?
+    bag-map bag-for-each bag-fold
+    bag-filter bag-filter! bag-remove bag-remove!
+    bag-copy bag->list list->bag
+    bag-union bag-union! bag-intersection bag-intersection!
+    bag-difference bag-difference! bag-xor bag-xor!
+    bag=? bag<? bag>? bag<=? bag>=?
+    bag-element-count bag-for-each-unique bag-fold-unique
+    bag-increment! bag-decrement!
+    bag->set set->bag bag->alist alist->bag)
+  (begin
+    ;; -- Set type --
+    (define-record-type <set>
+      (%make-set ht comparator)
+      set?
+      (ht set-ht)
+      (comparator set-comparator))
+
+    (define (make-set-ht cmp)
+      (make-hash-table (comparator-equality-predicate cmp)
+                       (comparator-hash-function cmp)))
+
+    (define (set comparator . elts)
+      (let ((s (%make-set (make-set-ht comparator) comparator)))
+        (for-each (lambda (e) (hash-table-set! (set-ht s) e #t)) elts)
+        s))
+
+    (define (set-contains? s e) (hash-table-exists? (set-ht s) e))
+    (define (set-empty? s) (= 0 (hash-table-size (set-ht s))))
+    (define (set-size s) (hash-table-size (set-ht s)))
+
+    (define (set-member s e default)
+      (if (hash-table-exists? (set-ht s) e) e default))
+
+    (define (set-element-comparator s) (set-comparator s))
+
+    (define (set-disjoint? s1 s2)
+      (let ((result #t))
+        (hash-table-walk (set-ht s1)
+          (lambda (k v)
+            (when (hash-table-exists? (set-ht s2) k)
+              (set! result #f))))
+        result))
+
+    (define (set-adjoin s . elts)
+      (let ((r (set-copy s)))
+        (for-each (lambda (e) (hash-table-set! (set-ht r) e #t)) elts)
+        r))
+    (define (set-adjoin! s . elts)
+      (for-each (lambda (e) (hash-table-set! (set-ht s) e #t)) elts)
+      s)
+
+    (define (set-replace s e)
+      (let ((r (set-copy s)))
+        (hash-table-set! (set-ht r) e #t) r))
+    (define (set-replace! s e)
+      (hash-table-set! (set-ht s) e #t) s)
+
+    (define (set-delete s . elts)
+      (let ((r (set-copy s)))
+        (for-each (lambda (e) (hash-table-delete! (set-ht r) e)) elts)
+        r))
+    (define (set-delete! s . elts)
+      (for-each (lambda (e) (hash-table-delete! (set-ht s) e)) elts)
+      s)
+    (define (set-delete-all s elt-list)
+      (apply set-delete s elt-list))
+    (define (set-delete-all! s elt-list)
+      (apply set-delete! s elt-list))
+
+    (define (set-find pred s failure)
+      (let ((keys (hash-table-keys (set-ht s))))
+        (let loop ((keys keys))
+          (cond
+            ((null? keys) (failure))
+            ((pred (car keys)) (car keys))
+            (else (loop (cdr keys)))))))
+
+    (define (set-count pred s)
+      (hash-table-fold (set-ht s)
+        (lambda (k v acc) (if (pred k) (+ acc 1) acc)) 0))
+
+    (define (set-any? pred s)
+      (let ((keys (hash-table-keys (set-ht s))))
+        (let loop ((keys keys))
+          (cond
+            ((null? keys) #f)
+            ((pred (car keys)) #t)
+            (else (loop (cdr keys)))))))
+
+    (define (set-every? pred s)
+      (let ((keys (hash-table-keys (set-ht s))))
+        (let loop ((keys keys))
+          (cond
+            ((null? keys) #t)
+            ((not (pred (car keys))) #f)
+            (else (loop (cdr keys)))))))
+
+    (define (set-map cmp proc s)
+      (let ((r (%make-set (make-set-ht cmp) cmp)))
+        (hash-table-walk (set-ht s)
+          (lambda (k v) (hash-table-set! (set-ht r) (proc k) #t)))
+        r))
+
+    (define (set-for-each proc s)
+      (hash-table-walk (set-ht s) (lambda (k v) (proc k))))
+
+    (define (set-fold proc nil s)
+      (hash-table-fold (set-ht s) (lambda (k v acc) (proc k acc)) nil))
+
+    (define (set-filter pred s)
+      (let ((r (%make-set (make-set-ht (set-comparator s)) (set-comparator s))))
+        (hash-table-walk (set-ht s)
+          (lambda (k v) (when (pred k) (hash-table-set! (set-ht r) k #t))))
+        r))
+    (define (set-filter! pred s)
+      (let ((to-del '()))
+        (hash-table-walk (set-ht s)
+          (lambda (k v) (unless (pred k) (set! to-del (cons k to-del)))))
+        (for-each (lambda (k) (hash-table-delete! (set-ht s) k)) to-del)
+        s))
+    (define (set-remove pred s)
+      (set-filter (lambda (x) (not (pred x))) s))
+    (define (set-remove! pred s)
+      (set-filter! (lambda (x) (not (pred x))) s))
+
+    (define (set-copy s)
+      (let ((r (%make-set (make-set-ht (set-comparator s)) (set-comparator s))))
+        (hash-table-walk (set-ht s)
+          (lambda (k v) (hash-table-set! (set-ht r) k v)))
+        r))
+
+    (define (set->list s) (hash-table-keys (set-ht s)))
+    (define (list->set cmp lst)
+      (apply set cmp lst))
+
+    (define (set-union s . rest)
+      (let ((r (set-copy s)))
+        (for-each (lambda (s2)
+          (hash-table-walk (set-ht s2)
+            (lambda (k v) (hash-table-set! (set-ht r) k #t))))
+          rest)
+        r))
+    (define (set-union! s . rest)
+      (for-each (lambda (s2)
+        (hash-table-walk (set-ht s2)
+          (lambda (k v) (hash-table-set! (set-ht s) k #t))))
+        rest)
+      s)
+    (define (set-intersection s . rest)
+      (let ((r (set-copy s)))
+        (let ((to-del '()))
+          (hash-table-walk (set-ht r)
+            (lambda (k v)
+              (unless (every (lambda (s2) (hash-table-exists? (set-ht s2) k)) rest)
+                (set! to-del (cons k to-del)))))
+          (for-each (lambda (k) (hash-table-delete! (set-ht r) k)) to-del))
+        r))
+    (define (set-intersection! s . rest)
+      (let ((to-del '()))
+        (hash-table-walk (set-ht s)
+          (lambda (k v)
+            (unless (every (lambda (s2) (hash-table-exists? (set-ht s2) k)) rest)
+              (set! to-del (cons k to-del)))))
+        (for-each (lambda (k) (hash-table-delete! (set-ht s) k)) to-del))
+      s)
+    (define (set-difference s . rest)
+      (let ((r (set-copy s)))
+        (for-each (lambda (s2)
+          (hash-table-walk (set-ht s2)
+            (lambda (k v) (hash-table-delete! (set-ht r) k))))
+          rest)
+        r))
+    (define (set-difference! s . rest)
+      (for-each (lambda (s2)
+        (hash-table-walk (set-ht s2)
+          (lambda (k v) (hash-table-delete! (set-ht s) k))))
+        rest)
+      s)
+    (define (set-xor s1 s2)
+      (let ((r (%make-set (make-set-ht (set-comparator s1)) (set-comparator s1))))
+        (hash-table-walk (set-ht s1)
+          (lambda (k v)
+            (unless (hash-table-exists? (set-ht s2) k)
+              (hash-table-set! (set-ht r) k #t))))
+        (hash-table-walk (set-ht s2)
+          (lambda (k v)
+            (unless (hash-table-exists? (set-ht s1) k)
+              (hash-table-set! (set-ht r) k #t))))
+        r))
+    (define (set-xor! s1 s2)
+      (let ((to-del '()) (to-add '()))
+        (hash-table-walk (set-ht s1)
+          (lambda (k v)
+            (when (hash-table-exists? (set-ht s2) k)
+              (set! to-del (cons k to-del)))))
+        (hash-table-walk (set-ht s2)
+          (lambda (k v)
+            (unless (hash-table-exists? (set-ht s1) k)
+              (set! to-add (cons k to-add)))))
+        (for-each (lambda (k) (hash-table-delete! (set-ht s1) k)) to-del)
+        (for-each (lambda (k) (hash-table-set! (set-ht s1) k #t)) to-add))
+      s1)
+
+    ;; set comparisons
+    (define (every pred lst)
+      (cond ((null? lst) #t)
+            ((not (pred (car lst))) #f)
+            (else (every pred (cdr lst)))))
+
+    (define (set=? s1 s2)
+      (and (= (set-size s1) (set-size s2))
+           (every (lambda (k) (set-contains? s2 k)) (set->list s1))))
+    (define (set<? s1 s2)
+      (and (< (set-size s1) (set-size s2))
+           (every (lambda (k) (set-contains? s2 k)) (set->list s1))))
+    (define (set>? s1 s2) (set<? s2 s1))
+    (define (set<=? s1 s2)
+      (every (lambda (k) (set-contains? s2 k)) (set->list s1)))
+    (define (set>=? s1 s2) (set<=? s2 s1))
+
+    ;; -- Bag type --
+    (define-record-type <bag>
+      (%make-bag ht comparator)
+      bag?
+      (ht bag-ht)
+      (comparator bag-comparator))
+
+    (define (make-bag-ht cmp)
+      (make-hash-table (comparator-equality-predicate cmp)
+                       (comparator-hash-function cmp)))
+
+    (define (bag comparator . elts)
+      (let ((b (%make-bag (make-bag-ht comparator) comparator)))
+        (for-each (lambda (e) (bag-adjoin! b e)) elts)
+        b))
+
+    (define (bag-contains? b e) (hash-table-exists? (bag-ht b) e))
+    (define (bag-empty? b) (= 0 (hash-table-size (bag-ht b))))
+
+    (define (bag-size b)
+      (hash-table-fold (bag-ht b) (lambda (k v acc) (+ acc v)) 0))
+
+    (define (bag-element-count b e)
+      (if (hash-table-exists? (bag-ht b) e)
+          (hash-table-ref (bag-ht b) e) 0))
+
+    (define (bag-member b e default)
+      (if (hash-table-exists? (bag-ht b) e) e default))
+
+    (define (bag-element-comparator b) (bag-comparator b))
+
+    (define (bag-disjoint? b1 b2)
+      (let ((result #t))
+        (hash-table-walk (bag-ht b1)
+          (lambda (k v)
+            (when (hash-table-exists? (bag-ht b2) k)
+              (set! result #f))))
+        result))
+
+    (define (bag-adjoin b . elts)
+      (let ((r (bag-copy b)))
+        (for-each (lambda (e) (bag-adjoin! r e)) elts)
+        r))
+    (define (bag-adjoin! b . elts)
+      (for-each (lambda (e)
+        (let ((n (bag-element-count b e)))
+          (hash-table-set! (bag-ht b) e (+ n 1))))
+        elts)
+      b)
+
+    (define (bag-replace b e) (bag-adjoin b e))
+    (define (bag-replace! b e) (bag-adjoin! b e))
+
+    (define (bag-delete b . elts)
+      (let ((r (bag-copy b)))
+        (for-each (lambda (e) (bag-delete! r e)) elts)
+        r))
+    (define (bag-delete! b . elts)
+      (for-each (lambda (e)
+        (let ((n (bag-element-count b e)))
+          (if (<= n 1)
+              (hash-table-delete! (bag-ht b) e)
+              (hash-table-set! (bag-ht b) e (- n 1)))))
+        elts)
+      b)
+    (define (bag-delete-all b elt-list)
+      (apply bag-delete b elt-list))
+    (define (bag-delete-all! b elt-list)
+      (apply bag-delete! b elt-list))
+
+    (define (bag-find pred b failure)
+      (let ((keys (hash-table-keys (bag-ht b))))
+        (let loop ((keys keys))
+          (cond
+            ((null? keys) (failure))
+            ((pred (car keys)) (car keys))
+            (else (loop (cdr keys)))))))
+
+    (define (bag-count pred b)
+      (hash-table-fold (bag-ht b)
+        (lambda (k v acc) (if (pred k) (+ acc v) acc)) 0))
+
+    (define (bag-any? pred b)
+      (let ((keys (hash-table-keys (bag-ht b))))
+        (let loop ((keys keys))
+          (cond
+            ((null? keys) #f)
+            ((pred (car keys)) #t)
+            (else (loop (cdr keys)))))))
+
+    (define (bag-every? pred b)
+      (let ((keys (hash-table-keys (bag-ht b))))
+        (let loop ((keys keys))
+          (cond
+            ((null? keys) #t)
+            ((not (pred (car keys))) #f)
+            (else (loop (cdr keys)))))))
+
+    (define (bag-map cmp proc b)
+      (let ((r (%make-bag (make-bag-ht cmp) cmp)))
+        (hash-table-walk (bag-ht b)
+          (lambda (k v)
+            (let ((nk (proc k)))
+              (hash-table-set! (bag-ht r) nk
+                (+ (bag-element-count r nk) v)))))
+        r))
+
+    (define (bag-for-each proc b)
+      (hash-table-walk (bag-ht b) (lambda (k v) (proc k))))
+
+    (define (bag-fold proc nil b)
+      (hash-table-fold (bag-ht b)
+        (lambda (k v acc)
+          (let loop ((n v) (a acc))
+            (if (= n 0) a
+                (loop (- n 1) (proc k a)))))
+        nil))
+
+    (define (bag-filter pred b)
+      (let ((r (%make-bag (make-bag-ht (bag-comparator b)) (bag-comparator b))))
+        (hash-table-walk (bag-ht b)
+          (lambda (k v) (when (pred k) (hash-table-set! (bag-ht r) k v))))
+        r))
+    (define (bag-filter! pred b)
+      (let ((to-del '()))
+        (hash-table-walk (bag-ht b)
+          (lambda (k v) (unless (pred k) (set! to-del (cons k to-del)))))
+        (for-each (lambda (k) (hash-table-delete! (bag-ht b) k)) to-del)
+        b))
+    (define (bag-remove pred b)
+      (bag-filter (lambda (x) (not (pred x))) b))
+    (define (bag-remove! pred b)
+      (bag-filter! (lambda (x) (not (pred x))) b))
+
+    (define (bag-copy b)
+      (let ((r (%make-bag (make-bag-ht (bag-comparator b)) (bag-comparator b))))
+        (hash-table-walk (bag-ht b)
+          (lambda (k v) (hash-table-set! (bag-ht r) k v)))
+        r))
+
+    (define (bag->list b)
+      (hash-table-fold (bag-ht b)
+        (lambda (k v acc)
+          (let loop ((n v) (a acc))
+            (if (= n 0) a
+                (loop (- n 1) (cons k a)))))
+        '()))
+    (define (list->bag cmp lst)
+      (apply bag cmp lst))
+
+    (define (bag-union b . rest)
+      (let ((r (bag-copy b)))
+        (for-each (lambda (b2)
+          (hash-table-walk (bag-ht b2)
+            (lambda (k v)
+              (let ((cur (bag-element-count r k)))
+                (hash-table-set! (bag-ht r) k (max cur v))))))
+          rest)
+        r))
+    (define (bag-union! b . rest)
+      (for-each (lambda (b2)
+        (hash-table-walk (bag-ht b2)
+          (lambda (k v)
+            (let ((cur (bag-element-count b k)))
+              (hash-table-set! (bag-ht b) k (max cur v))))))
+        rest)
+      b)
+    (define (bag-intersection b . rest)
+      (let ((r (bag-copy b)))
+        (let ((to-del '()))
+          (hash-table-walk (bag-ht r)
+            (lambda (k v)
+              (let ((mn (apply min v
+                          (map (lambda (b2) (bag-element-count b2 k)) rest))))
+                (if (= mn 0)
+                    (set! to-del (cons k to-del))
+                    (hash-table-set! (bag-ht r) k mn)))))
+          (for-each (lambda (k) (hash-table-delete! (bag-ht r) k)) to-del))
+        r))
+    (define (bag-intersection! b . rest)
+      (let ((to-del '()))
+        (hash-table-walk (bag-ht b)
+          (lambda (k v)
+            (let ((mn (apply min v
+                        (map (lambda (b2) (bag-element-count b2 k)) rest))))
+              (if (= mn 0)
+                  (set! to-del (cons k to-del))
+                  (hash-table-set! (bag-ht b) k mn)))))
+        (for-each (lambda (k) (hash-table-delete! (bag-ht b) k)) to-del))
+      b)
+    (define (bag-difference b . rest)
+      (let ((r (bag-copy b)))
+        (for-each (lambda (b2)
+          (hash-table-walk (bag-ht b2)
+            (lambda (k v) (hash-table-delete! (bag-ht r) k))))
+          rest)
+        r))
+    (define (bag-difference! b . rest)
+      (for-each (lambda (b2)
+        (hash-table-walk (bag-ht b2)
+          (lambda (k v) (hash-table-delete! (bag-ht b) k))))
+        rest)
+      b)
+    (define (bag-xor b1 b2)
+      (let ((r (%make-bag (make-bag-ht (bag-comparator b1)) (bag-comparator b1))))
+        (hash-table-walk (bag-ht b1)
+          (lambda (k v)
+            (unless (hash-table-exists? (bag-ht b2) k)
+              (hash-table-set! (bag-ht r) k v))))
+        (hash-table-walk (bag-ht b2)
+          (lambda (k v)
+            (unless (hash-table-exists? (bag-ht b1) k)
+              (hash-table-set! (bag-ht r) k v))))
+        r))
+    (define (bag-xor! b1 b2)
+      (let ((to-del '()) (to-add '()))
+        (hash-table-walk (bag-ht b1)
+          (lambda (k v)
+            (when (hash-table-exists? (bag-ht b2) k)
+              (set! to-del (cons k to-del)))))
+        (hash-table-walk (bag-ht b2)
+          (lambda (k v)
+            (unless (hash-table-exists? (bag-ht b1) k)
+              (set! to-add (cons (cons k v) to-add)))))
+        (for-each (lambda (k) (hash-table-delete! (bag-ht b1) k)) to-del)
+        (for-each (lambda (kv) (hash-table-set! (bag-ht b1) (car kv) (cdr kv))) to-add))
+      b1)
+
+    (define (bag=? b1 b2)
+      (and (= (hash-table-size (bag-ht b1)) (hash-table-size (bag-ht b2)))
+           (every (lambda (k)
+             (= (bag-element-count b1 k) (bag-element-count b2 k)))
+             (hash-table-keys (bag-ht b1)))))
+    (define (bag<? b1 b2)
+      (and (< (bag-size b1) (bag-size b2))
+           (every (lambda (k) (<= (bag-element-count b1 k) (bag-element-count b2 k)))
+                  (hash-table-keys (bag-ht b1)))))
+    (define (bag>? b1 b2) (bag<? b2 b1))
+    (define (bag<=? b1 b2)
+      (every (lambda (k) (<= (bag-element-count b1 k) (bag-element-count b2 k)))
+             (hash-table-keys (bag-ht b1))))
+    (define (bag>=? b1 b2) (bag<=? b2 b1))
+
+    (define (bag-for-each-unique proc b)
+      (hash-table-walk (bag-ht b) (lambda (k v) (proc k v))))
+
+    (define (bag-fold-unique proc nil b)
+      (hash-table-fold (bag-ht b) (lambda (k v acc) (proc k v acc)) nil))
+
+    (define (bag-increment! b e n)
+      (let ((cur (bag-element-count b e)))
+        (hash-table-set! (bag-ht b) e (+ cur n)))
+      b)
+    (define (bag-decrement! b e n)
+      (let ((cur (bag-element-count b e)))
+        (if (<= cur n)
+            (hash-table-delete! (bag-ht b) e)
+            (hash-table-set! (bag-ht b) e (- cur n))))
+      b)
+
+    (define (bag->set b)
+      (let ((s (%make-set (make-set-ht (bag-comparator b)) (bag-comparator b))))
+        (hash-table-walk (bag-ht b)
+          (lambda (k v) (hash-table-set! (set-ht s) k #t)))
+        s))
+    (define (set->bag s)
+      (let ((b (%make-bag (make-bag-ht (set-comparator s)) (set-comparator s))))
+        (hash-table-walk (set-ht s)
+          (lambda (k v) (hash-table-set! (bag-ht b) k 1)))
+        b))
+    (define (bag->alist b)
+      (hash-table-fold (bag-ht b)
+        (lambda (k v acc) (cons (cons k v) acc)) '()))
+    (define (alist->bag cmp alist)
+      (let ((b (%make-bag (make-bag-ht cmp) cmp)))
+        (for-each (lambda (p)
+          (hash-table-set! (bag-ht b) (car p) (cdr p)))
+          alist)
+        b))))
+|});
+
   (* SRFI 1 — list library *)
   (["srfi"; "1"], {|
 (define-library (srfi 1)
@@ -1229,8 +1952,8 @@ let lookup name =
   List.assoc_opt name (List.map (fun (n, s) -> (n, s)) sources)
 
 let bundled_features =
-  (* Include srfi-151 and srfi-69 which are registered as built-in libraries *)
-  "srfi-151" :: "srfi-69" ::
+  (* Include SRFIs registered as built-in libraries with OCaml primitives *)
+  "srfi-151" :: "srfi-69" :: "srfi-14" :: "srfi-13" :: "srfi-115" ::
   List.filter_map (fun (name, _) ->
     match name with
     | ["srfi"; n] -> Some ("srfi-" ^ n)

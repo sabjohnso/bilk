@@ -48,6 +48,8 @@ and t =
   | Port of Port.t             (** First-class port value *)
   | Promise of promise         (** Lazy promise (delay/force) *)
   | Hash_table of hash_table   (** Mutable hash table (SRFI 69/125) *)
+  | Char_set of char_set       (** Character set (SRFI 14) *)
+  | Regexp of regexp           (** Compiled regular expression (SRFI 115) *)
 
 (** A lazy promise created by [delay] or [make-promise]. *)
 and promise = {
@@ -62,6 +64,17 @@ and hash_table = {
   ht_equal : t;       (** Equality proc, or [Bool true] for structural equality *)
   ht_hash : t;        (** Hash proc, or [Bool true] for built-in hash *)
   ht_mutable : bool;  (** Whether mutation is allowed *)
+}
+
+(** A 256-bit character set covering code points 0-255. *)
+and char_set = {
+  cs_bits : bytes;   (** 32 bytes = 256 bits, one bit per code point *)
+}
+
+(** A compiled regular expression with its original SRE source. *)
+and regexp = {
+  rx_compiled : Obj.t;  (** Compiled regex engine object *)
+  rx_source : t;        (** Original SRE datum for display *)
 }
 
 (** A built-in primitive function. *)

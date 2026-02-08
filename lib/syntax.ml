@@ -50,6 +50,8 @@ let rec from_datum loc (d : Datum.t) =
     | Datum.Port _ -> Symbol "#<port>"
     | Datum.Promise _ -> Symbol "#<promise>"
     | Datum.Hash_table _ -> Symbol "#<hash-table>"
+    | Datum.Char_set _ -> Symbol "#<char-set>"
+    | Datum.Regexp _ -> Symbol "#<regexp>"
   in
   { loc; datum }
 

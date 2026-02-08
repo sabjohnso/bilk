@@ -836,6 +836,946 @@ let test_srfi125_empty_copy () =
             (ht2 (hash-table-empty-copy ht))) \
        (hash-table-size ht2))")
 
+(* ===== SRFI 14 — char-sets ===== *)
+
+let test_srfi14_predicate () =
+  check_datum "char-set?"
+    (Datum.Bool true)
+    (eval_port "(import (srfi 14)) (char-set? (char-set #\\a #\\b))")
+
+let test_srfi14_predicate_false () =
+  check_datum "char-set? false"
+    (Datum.Bool false)
+    (eval_port "(import (srfi 14)) (char-set? 42)")
+
+let test_srfi14_contains () =
+  check_datum "char-set-contains?"
+    (Datum.Bool true)
+    (eval_port "(import (srfi 14)) (char-set-contains? (char-set #\\a #\\b #\\c) #\\b)")
+
+let test_srfi14_contains_false () =
+  check_datum "char-set-contains? false"
+    (Datum.Bool false)
+    (eval_port "(import (srfi 14)) (char-set-contains? (char-set #\\a #\\b) #\\z)")
+
+let test_srfi14_equal () =
+  check_datum "char-set=?"
+    (Datum.Bool true)
+    (eval_port "(import (srfi 14)) (char-set=? (char-set #\\a #\\b) (char-set #\\b #\\a))")
+
+let test_srfi14_subset () =
+  check_datum "char-set<=?"
+    (Datum.Bool true)
+    (eval_port "(import (srfi 14)) (char-set<=? (char-set #\\a) (char-set #\\a #\\b))")
+
+let test_srfi14_adjoin () =
+  check_datum "char-set-adjoin"
+    (Datum.Bool true)
+    (eval_port "(import (srfi 14)) \
+     (char-set-contains? (char-set-adjoin (char-set #\\a) #\\z) #\\z)")
+
+let test_srfi14_delete () =
+  check_datum "char-set-delete"
+    (Datum.Bool false)
+    (eval_port "(import (srfi 14)) \
+     (char-set-contains? (char-set-delete (char-set #\\a #\\b) #\\b) #\\b)")
+
+let test_srfi14_complement () =
+  check_datum "char-set-complement"
+    (Datum.Bool true)
+    (eval_port "(import (srfi 14)) \
+     (char-set-contains? (char-set-complement (char-set #\\a)) #\\z)")
+
+let test_srfi14_complement_excludes () =
+  check_datum "complement excludes"
+    (Datum.Bool false)
+    (eval_port "(import (srfi 14)) \
+     (char-set-contains? (char-set-complement (char-set #\\a)) #\\a)")
+
+let test_srfi14_union () =
+  check_datum "char-set-union"
+    (Datum.Fixnum 3)
+    (eval_port "(import (srfi 14)) \
+     (char-set-size (char-set-union (char-set #\\a #\\b) (char-set #\\b #\\c)))")
+
+let test_srfi14_intersection () =
+  check_datum "char-set-intersection"
+    (Datum.Fixnum 1)
+    (eval_port "(import (srfi 14)) \
+     (char-set-size (char-set-intersection (char-set #\\a #\\b) (char-set #\\b #\\c)))")
+
+let test_srfi14_difference () =
+  check_datum "char-set-difference"
+    (Datum.Fixnum 1)
+    (eval_port "(import (srfi 14)) \
+     (char-set-size (char-set-difference (char-set #\\a #\\b) (char-set #\\b #\\c)))")
+
+let test_srfi14_xor () =
+  check_datum "char-set-xor"
+    (Datum.Fixnum 2)
+    (eval_port "(import (srfi 14)) \
+     (char-set-size (char-set-xor (char-set #\\a #\\b) (char-set #\\b #\\c)))")
+
+let test_srfi14_list_roundtrip () =
+  check_datum "list->char-set->list"
+    (Datum.Fixnum 3)
+    (eval_port "(import (srfi 14)) \
+     (length (char-set->list (list->char-set '(#\\a #\\b #\\c))))")
+
+let test_srfi14_string_roundtrip () =
+  check_datum "string->char-set->string length"
+    (Datum.Fixnum 3)
+    (eval_port "(import (srfi 14)) \
+     (string-length (char-set->string (string->char-set \"abc\")))")
+
+let test_srfi14_ucs_range () =
+  check_datum "ucs-range->char-set"
+    (Datum.Fixnum 10)
+    (eval_port "(import (srfi 14)) \
+     (char-set-size (ucs-range->char-set 48 58))")
+
+let test_srfi14_fold () =
+  check_datum "char-set-fold"
+    (Datum.Fixnum 2)
+    (eval_port "(import (srfi 14)) \
+     (char-set-fold (lambda (c n) (+ n 1)) 0 (char-set #\\a #\\b))")
+
+let test_srfi14_count () =
+  check_datum "char-set-count"
+    (Datum.Fixnum 1)
+    (eval_port "(import (srfi 14)) \
+     (char-set-count (lambda (c) (char<=? #\\a c #\\a)) (char-set #\\a #\\b #\\c))")
+
+let test_srfi14_every () =
+  check_datum "char-set-every"
+    (Datum.Bool true)
+    (eval_port "(import (srfi 14)) \
+     (char-set-every char-alphabetic? (char-set #\\a #\\b))")
+
+let test_srfi14_any () =
+  check_datum "char-set-any"
+    (Datum.Bool true)
+    (eval_port "(import (srfi 14)) \
+     (char-set-any char-numeric? (char-set #\\a #\\1))")
+
+let test_srfi14_filter () =
+  check_datum "char-set-filter"
+    (Datum.Fixnum 1)
+    (eval_port "(import (srfi 14)) \
+     (char-set-size (char-set-filter char-numeric? (char-set #\\a #\\1)))")
+
+let test_srfi14_cursor () =
+  check_datum "char-set-cursor"
+    (Datum.Bool true)
+    (eval_port "(import (srfi 14)) \
+     (let ((cs (char-set #\\a #\\b))) \
+       (let ((c (char-set-cursor cs))) \
+         (and (not (end-of-char-set? c)) \
+              (char-alphabetic? (char-set-ref cs c)))))")
+
+let test_srfi14_size () =
+  check_datum "char-set-size"
+    (Datum.Fixnum 2)
+    (eval_port "(import (srfi 14)) (char-set-size (char-set #\\x #\\y))")
+
+let test_srfi14_letter () =
+  check_datum "char-set:letter"
+    (Datum.Bool true)
+    (eval_port "(import (srfi 14)) \
+     (and (char-set-contains? char-set:letter #\\A) \
+          (char-set-contains? char-set:letter #\\z))")
+
+let test_srfi14_digit () =
+  check_datum "char-set:digit"
+    (Datum.Bool true)
+    (eval_port "(import (srfi 14)) \
+     (and (char-set-contains? char-set:digit #\\0) \
+          (char-set-contains? char-set:digit #\\9) \
+          (not (char-set-contains? char-set:digit #\\a)))")
+
+let test_srfi14_whitespace () =
+  check_datum "char-set:whitespace"
+    (Datum.Bool true)
+    (eval_port "(import (srfi 14)) \
+     (and (char-set-contains? char-set:whitespace #\\space) \
+          (char-set-contains? char-set:whitespace #\\newline))")
+
+let test_srfi14_empty () =
+  check_datum "char-set:empty"
+    (Datum.Fixnum 0)
+    (eval_port "(import (srfi 14)) (char-set-size char-set:empty)")
+
+let test_srfi14_full () =
+  check_datum "char-set:full"
+    (Datum.Fixnum 256)
+    (eval_port "(import (srfi 14)) (char-set-size char-set:full)")
+
+let test_srfi14_copy () =
+  check_datum "char-set-copy"
+    (Datum.Bool true)
+    (eval_port "(import (srfi 14)) \
+     (let ((a (char-set #\\x)) (b (char-set-copy (char-set #\\x)))) \
+       (char-set=? a b))")
+
+let test_srfi14_union_mut () =
+  check_datum "char-set-union!"
+    (Datum.Fixnum 3)
+    (eval_port "(import (srfi 14)) \
+     (let ((cs (char-set #\\a))) \
+       (char-set-union! cs (char-set #\\b #\\c)) \
+       (char-set-size cs))")
+
+let test_srfi14_map () =
+  check_datum "char-set-map"
+    (Datum.Bool true)
+    (eval_port "(import (srfi 14)) \
+     (char-set-contains? \
+       (char-set-map (lambda (c) (integer->char (+ (char->integer c) 1))) \
+                     (char-set #\\a)) \
+       #\\b)")
+
+let test_srfi14_for_each () =
+  check_datum "char-set-for-each"
+    (Datum.Fixnum 2)
+    (eval_port "(import (srfi 14)) \
+     (let ((n 0)) \
+       (char-set-for-each (lambda (c) (set! n (+ n 1))) (char-set #\\a #\\b)) \
+       n)")
+
+let test_srfi14_cond_expand () =
+  check_datum "cond-expand srfi-14"
+    (Datum.Bool true)
+    (eval "(cond-expand (srfi-14 #t) (else #f))")
+
+(* ===== SRFI 41 — streams ===== *)
+
+let test_srfi41_null () =
+  check_datum "stream-null?"
+    (Datum.Bool true)
+    (eval_port "(import (srfi 41)) (stream-null? stream-null)")
+
+let test_srfi41_pair () =
+  check_datum "stream-pair?"
+    (Datum.Bool true)
+    (eval_port "(import (srfi 41)) (stream-pair? (stream-cons 1 stream-null))")
+
+let test_srfi41_car_cdr () =
+  check_datum "stream-car/cdr"
+    (Datum.Fixnum 3)
+    (eval_port "(import (srfi 41)) \
+     (let ((s (stream-cons 1 (stream-cons 2 stream-null)))) \
+       (+ (stream-car s) (stream-car (stream-cdr s))))")
+
+let test_srfi41_stream () =
+  check_datum "stream macro"
+    (Datum.Fixnum 6)
+    (eval_port "(import (srfi 41)) \
+     (let ((s (stream 1 2 3))) \
+       (+ (stream-car s) (stream-car (stream-cdr s)) \
+          (stream-car (stream-cdr (stream-cdr s)))))")
+
+let test_srfi41_to_list () =
+  check_datum "stream->list"
+    (Datum.Fixnum 3)
+    (eval_port "(import (srfi 41)) \
+     (length (stream->list (stream 1 2 3)))")
+
+let test_srfi41_list_to_stream () =
+  check_datum "list->stream"
+    (Datum.Fixnum 1)
+    (eval_port "(import (srfi 41)) \
+     (stream-car (list->stream '(1 2 3)))")
+
+let test_srfi41_map () =
+  check_datum "stream-map"
+    (Datum.Fixnum 2)
+    (eval_port "(import (srfi 41)) \
+     (stream-car (stream-map (lambda (x) (* x 2)) (stream 1 2 3)))")
+
+let test_srfi41_filter () =
+  check_datum "stream-filter"
+    (Datum.Fixnum 2)
+    (eval_port "(import (srfi 41)) \
+     (stream-car (stream-filter even? (stream 1 2 3 4)))")
+
+let test_srfi41_fold () =
+  check_datum "stream-fold"
+    (Datum.Fixnum 10)
+    (eval_port "(import (srfi 41)) \
+     (stream-fold + 0 (stream 1 2 3 4))")
+
+let test_srfi41_take () =
+  check_datum "stream-take"
+    (Datum.Fixnum 2)
+    (eval_port "(import (srfi 41)) \
+     (stream-length (stream-take 2 (stream 1 2 3 4 5)))")
+
+let test_srfi41_drop () =
+  check_datum "stream-drop"
+    (Datum.Fixnum 3)
+    (eval_port "(import (srfi 41)) \
+     (stream-car (stream-drop 2 (stream 1 2 3 4 5)))")
+
+let test_srfi41_range () =
+  check_datum "stream-range"
+    (Datum.Fixnum 5)
+    (eval_port "(import (srfi 41)) \
+     (stream-length (stream-take 5 (stream-range 0 10)))")
+
+let test_srfi41_iterate () =
+  check_datum "stream-iterate"
+    (Datum.Fixnum 8)
+    (eval_port "(import (srfi 41)) \
+     (stream-car (stream-drop 3 (stream-iterate (lambda (x) (* x 2)) 1)))")
+
+let test_srfi41_zip () =
+  check_datum "stream-zip"
+    (Datum.Fixnum 2)
+    (eval_port "(import (srfi 41)) \
+     (length (stream->list (stream-take 2 \
+       (stream-zip (stream 1 2 3) (stream 4 5 6)))))")
+
+let test_srfi41_append () =
+  check_datum "stream-append"
+    (Datum.Fixnum 6)
+    (eval_port "(import (srfi 41)) \
+     (stream-length (stream-append (stream 1 2 3) (stream 4 5 6)))")
+
+let test_srfi41_take_while () =
+  check_datum "stream-take-while"
+    (Datum.Fixnum 3)
+    (eval_port "(import (srfi 41)) \
+     (stream-length (stream-take-while (lambda (x) (< x 4)) (stream 1 2 3 4 5)))")
+
+let test_srfi41_drop_while () =
+  check_datum "stream-drop-while"
+    (Datum.Fixnum 4)
+    (eval_port "(import (srfi 41)) \
+     (stream-car (stream-drop-while (lambda (x) (< x 4)) (stream 1 2 3 4 5)))")
+
+let test_srfi41_length () =
+  check_datum "stream-length"
+    (Datum.Fixnum 4)
+    (eval_port "(import (srfi 41)) (stream-length (stream 1 2 3 4))")
+
+let test_srfi41_scan () =
+  check_datum "stream-scan"
+    (Datum.Fixnum 6)
+    (eval_port "(import (srfi 41)) \
+     (stream-car (stream-drop 3 (stream-scan + 0 (stream 1 2 3))))")
+
+let test_srfi41_unfold () =
+  check_datum "stream-unfold"
+    (Datum.Fixnum 5)
+    (eval_port "(import (srfi 41)) \
+     (stream-length (stream-unfold \
+       (lambda (x) (< x 5)) \
+       (lambda (x) x) \
+       (lambda (x) (+ x 1)) \
+       0))")
+
+let test_srfi41_cond_expand () =
+  check_datum "cond-expand srfi-41"
+    (Datum.Bool true)
+    (eval "(cond-expand (srfi-41 #t) (else #f))")
+
+(* ===== SRFI 113 — sets and bags ===== *)
+
+let test_srfi113_set_predicate () =
+  check_datum "set?"
+    (Datum.Bool true)
+    (eval_port "(import (srfi 113) (srfi 128)) \
+     (set? (set (make-default-comparator) 1 2 3))")
+
+let test_srfi113_set_contains () =
+  check_datum "set-contains?"
+    (Datum.Bool true)
+    (eval_port "(import (srfi 113) (srfi 128)) \
+     (set-contains? (set (make-default-comparator) 1 2 3) 2)")
+
+let test_srfi113_set_contains_false () =
+  check_datum "set-contains? false"
+    (Datum.Bool false)
+    (eval_port "(import (srfi 113) (srfi 128)) \
+     (set-contains? (set (make-default-comparator) 1 2 3) 5)")
+
+let test_srfi113_set_empty () =
+  check_datum "set-empty?"
+    (Datum.Bool true)
+    (eval_port "(import (srfi 113) (srfi 128)) \
+     (set-empty? (set (make-default-comparator)))")
+
+let test_srfi113_set_size () =
+  check_datum "set-size"
+    (Datum.Fixnum 3)
+    (eval_port "(import (srfi 113) (srfi 128)) \
+     (set-size (set (make-default-comparator) 1 2 3))")
+
+let test_srfi113_set_adjoin () =
+  check_datum "set-adjoin"
+    (Datum.Fixnum 4)
+    (eval_port "(import (srfi 113) (srfi 128)) \
+     (set-size (set-adjoin (set (make-default-comparator) 1 2 3) 4))")
+
+let test_srfi113_set_delete () =
+  check_datum "set-delete"
+    (Datum.Fixnum 2)
+    (eval_port "(import (srfi 113) (srfi 128)) \
+     (set-size (set-delete (set (make-default-comparator) 1 2 3) 2))")
+
+let test_srfi113_set_union () =
+  check_datum "set-union"
+    (Datum.Fixnum 4)
+    (eval_port "(import (srfi 113) (srfi 128)) \
+     (let ((c (make-default-comparator))) \
+       (set-size (set-union (set c 1 2) (set c 3 4))))")
+
+let test_srfi113_set_intersection () =
+  check_datum "set-intersection"
+    (Datum.Fixnum 1)
+    (eval_port "(import (srfi 113) (srfi 128)) \
+     (let ((c (make-default-comparator))) \
+       (set-size (set-intersection (set c 1 2 3) (set c 2 4))))")
+
+let test_srfi113_set_difference () =
+  check_datum "set-difference"
+    (Datum.Fixnum 2)
+    (eval_port "(import (srfi 113) (srfi 128)) \
+     (let ((c (make-default-comparator))) \
+       (set-size (set-difference (set c 1 2 3) (set c 2))))")
+
+let test_srfi113_set_xor () =
+  check_datum "set-xor"
+    (Datum.Fixnum 2)
+    (eval_port "(import (srfi 113) (srfi 128)) \
+     (let ((c (make-default-comparator))) \
+       (set-size (set-xor (set c 1 2) (set c 2 3))))")
+
+let test_srfi113_set_equal () =
+  check_datum "set=?"
+    (Datum.Bool true)
+    (eval_port "(import (srfi 113) (srfi 128)) \
+     (let ((c (make-default-comparator))) \
+       (set=? (set c 1 2 3) (set c 3 1 2)))")
+
+let test_srfi113_set_subset () =
+  check_datum "set<=?"
+    (Datum.Bool true)
+    (eval_port "(import (srfi 113) (srfi 128)) \
+     (let ((c (make-default-comparator))) \
+       (set<=? (set c 1 2) (set c 1 2 3)))")
+
+let test_srfi113_set_fold () =
+  check_datum "set-fold"
+    (Datum.Fixnum 6)
+    (eval_port "(import (srfi 113) (srfi 128)) \
+     (set-fold + 0 (set (make-default-comparator) 1 2 3))")
+
+let test_srfi113_set_map () =
+  check_datum "set-map"
+    (Datum.Fixnum 3)
+    (eval_port "(import (srfi 113) (srfi 128)) \
+     (let ((c (make-default-comparator))) \
+       (set-size (set-map c (lambda (x) (* x 2)) (set c 1 2 3))))")
+
+let test_srfi113_set_filter () =
+  check_datum "set-filter"
+    (Datum.Fixnum 1)
+    (eval_port "(import (srfi 113) (srfi 128)) \
+     (set-size (set-filter even? (set (make-default-comparator) 1 2 3)))")
+
+let test_srfi113_set_to_list () =
+  check_datum "set->list"
+    (Datum.Fixnum 3)
+    (eval_port "(import (srfi 113) (srfi 128)) \
+     (length (set->list (set (make-default-comparator) 1 2 3)))")
+
+let test_srfi113_list_to_set () =
+  check_datum "list->set"
+    (Datum.Fixnum 3)
+    (eval_port "(import (srfi 113) (srfi 128)) \
+     (set-size (list->set (make-default-comparator) '(1 2 3)))")
+
+let test_srfi113_set_copy () =
+  check_datum "set-copy"
+    (Datum.Bool true)
+    (eval_port "(import (srfi 113) (srfi 128)) \
+     (let ((s (set (make-default-comparator) 1 2 3))) \
+       (set=? s (set-copy s)))")
+
+let test_srfi113_set_disjoint () =
+  check_datum "set-disjoint?"
+    (Datum.Bool true)
+    (eval_port "(import (srfi 113) (srfi 128)) \
+     (let ((c (make-default-comparator))) \
+       (set-disjoint? (set c 1 2) (set c 3 4)))")
+
+let test_srfi113_set_any () =
+  check_datum "set-any?"
+    (Datum.Bool true)
+    (eval_port "(import (srfi 113) (srfi 128)) \
+     (set-any? even? (set (make-default-comparator) 1 2 3))")
+
+let test_srfi113_set_every () =
+  check_datum "set-every?"
+    (Datum.Bool false)
+    (eval_port "(import (srfi 113) (srfi 128)) \
+     (set-every? even? (set (make-default-comparator) 1 2 3))")
+
+let test_srfi113_bag_predicate () =
+  check_datum "bag?"
+    (Datum.Bool true)
+    (eval_port "(import (srfi 113) (srfi 128)) \
+     (bag? (bag (make-default-comparator) 1 1 2))")
+
+let test_srfi113_bag_count () =
+  check_datum "bag-element-count"
+    (Datum.Fixnum 3)
+    (eval_port "(import (srfi 113) (srfi 128)) \
+     (bag-element-count (bag (make-default-comparator) 1 1 1 2) 1)")
+
+let test_srfi113_bag_size () =
+  check_datum "bag-size"
+    (Datum.Fixnum 5)
+    (eval_port "(import (srfi 113) (srfi 128)) \
+     (bag-size (bag (make-default-comparator) 1 1 1 2 2))")
+
+let test_srfi113_bag_adjoin () =
+  check_datum "bag-adjoin"
+    (Datum.Fixnum 4)
+    (eval_port "(import (srfi 113) (srfi 128)) \
+     (bag-element-count (bag-adjoin (bag (make-default-comparator) 1 1 1) 1) 1)")
+
+let test_srfi113_bag_delete () =
+  check_datum "bag-delete"
+    (Datum.Fixnum 2)
+    (eval_port "(import (srfi 113) (srfi 128)) \
+     (bag-element-count (bag-delete (bag (make-default-comparator) 1 1 1) 1) 1)")
+
+let test_srfi113_bag_to_set () =
+  check_datum "bag->set"
+    (Datum.Fixnum 2)
+    (eval_port "(import (srfi 113) (srfi 128)) \
+     (set-size (bag->set (bag (make-default-comparator) 1 1 2)))")
+
+let test_srfi113_set_to_bag () =
+  check_datum "set->bag"
+    (Datum.Fixnum 1)
+    (eval_port "(import (srfi 113) (srfi 128)) \
+     (bag-element-count (set->bag (set (make-default-comparator) 1 2)) 1)")
+
+let test_srfi113_bag_union () =
+  check_datum "bag-union"
+    (Datum.Fixnum 3)
+    (eval_port "(import (srfi 113) (srfi 128)) \
+     (let ((c (make-default-comparator))) \
+       (bag-element-count (bag-union (bag c 1 1 1) (bag c 1 1)) 1))")
+
+let test_srfi113_bag_increment () =
+  check_datum "bag-increment!"
+    (Datum.Fixnum 5)
+    (eval_port "(import (srfi 113) (srfi 128)) \
+     (let ((b (bag (make-default-comparator) 1 1))) \
+       (bag-increment! b 1 3) \
+       (bag-element-count b 1))")
+
+let test_srfi113_bag_alist () =
+  check_datum "bag->alist length"
+    (Datum.Fixnum 2)
+    (eval_port "(import (srfi 113) (srfi 128)) \
+     (length (bag->alist (bag (make-default-comparator) 1 1 2)))")
+
+let test_srfi113_cond_expand () =
+  check_datum "cond-expand srfi-113"
+    (Datum.Bool true)
+    (eval "(cond-expand (srfi-113 #t) (else #f))")
+
+(* ===== SRFI 13 — string library ===== *)
+
+let test_srfi13_null () =
+  check_datum "string-null?"
+    (Datum.Bool true)
+    (eval_port "(import (srfi 13)) (string-null? \"\")")
+
+let test_srfi13_null_false () =
+  check_datum "string-null? false"
+    (Datum.Bool false)
+    (eval_port "(import (srfi 13)) (string-null? \"a\")")
+
+let test_srfi13_every () =
+  check_datum "string-every"
+    (Datum.Bool true)
+    (eval_port "(import (srfi 13)) (string-every char-alphabetic? \"abc\")")
+
+let test_srfi13_every_false () =
+  check_datum "string-every false"
+    (Datum.Bool false)
+    (eval_port "(import (srfi 13)) (string-every char-alphabetic? \"ab1\")")
+
+let test_srfi13_any () =
+  check_datum "string-any"
+    (Datum.Bool true)
+    (eval_port "(import (srfi 13)) (string-any char-numeric? \"ab1\")")
+
+let test_srfi13_tabulate () =
+  check_datum "string-tabulate"
+    (Datum.Str (Bytes.of_string "abcde"))
+    (eval_port "(import (srfi 13)) \
+     (string-tabulate (lambda (i) (integer->char (+ i 97))) 5)")
+
+let test_srfi13_take () =
+  check_datum "string-take"
+    (Datum.Str (Bytes.of_string "hel"))
+    (eval_port "(import (srfi 13)) (string-take \"hello\" 3)")
+
+let test_srfi13_take_right () =
+  check_datum "string-take-right"
+    (Datum.Str (Bytes.of_string "lo"))
+    (eval_port "(import (srfi 13)) (string-take-right \"hello\" 2)")
+
+let test_srfi13_drop () =
+  check_datum "string-drop"
+    (Datum.Str (Bytes.of_string "lo"))
+    (eval_port "(import (srfi 13)) (string-drop \"hello\" 3)")
+
+let test_srfi13_drop_right () =
+  check_datum "string-drop-right"
+    (Datum.Str (Bytes.of_string "hel"))
+    (eval_port "(import (srfi 13)) (string-drop-right \"hello\" 2)")
+
+let test_srfi13_pad () =
+  check_datum "string-pad"
+    (Datum.Str (Bytes.of_string "  hi"))
+    (eval_port "(import (srfi 13)) (string-pad \"hi\" 4)")
+
+let test_srfi13_pad_right () =
+  check_datum "string-pad-right"
+    (Datum.Str (Bytes.of_string "hi  "))
+    (eval_port "(import (srfi 13)) (string-pad-right \"hi\" 4)")
+
+let test_srfi13_trim () =
+  check_datum "string-trim"
+    (Datum.Str (Bytes.of_string "hello  "))
+    (eval_port "(import (srfi 13)) (string-trim \"  hello  \")")
+
+let test_srfi13_trim_right () =
+  check_datum "string-trim-right"
+    (Datum.Str (Bytes.of_string "  hello"))
+    (eval_port "(import (srfi 13)) (string-trim-right \"  hello  \")")
+
+let test_srfi13_trim_both () =
+  check_datum "string-trim-both"
+    (Datum.Str (Bytes.of_string "hello"))
+    (eval_port "(import (srfi 13)) (string-trim-both \"  hello  \")")
+
+let test_srfi13_prefix_length () =
+  check_datum "string-prefix-length"
+    (Datum.Fixnum 3)
+    (eval_port "(import (srfi 13)) (string-prefix-length \"abcdef\" \"abcxyz\")")
+
+let test_srfi13_suffix_length () =
+  check_datum "string-suffix-length"
+    (Datum.Fixnum 3)
+    (eval_port "(import (srfi 13)) (string-suffix-length \"abcde\" \"xxcde\")")
+
+let test_srfi13_prefix () =
+  check_datum "string-prefix?"
+    (Datum.Bool true)
+    (eval_port "(import (srfi 13)) (string-prefix? \"abc\" \"abcdef\")")
+
+let test_srfi13_suffix () =
+  check_datum "string-suffix?"
+    (Datum.Bool true)
+    (eval_port "(import (srfi 13)) (string-suffix? \"def\" \"abcdef\")")
+
+let test_srfi13_index () =
+  check_datum "string-index"
+    (Datum.Fixnum 2)
+    (eval_port "(import (srfi 13)) (string-index char-numeric? \"ab3cd\")")
+
+let test_srfi13_index_right () =
+  check_datum "string-index-right"
+    (Datum.Fixnum 4)
+    (eval_port "(import (srfi 13)) (string-index-right char-numeric? \"ab3c4\")")
+
+let test_srfi13_skip () =
+  check_datum "string-skip"
+    (Datum.Fixnum 2)
+    (eval_port "(import (srfi 13)) (string-skip char-alphabetic? \"ab3cd\")")
+
+let test_srfi13_contains () =
+  check_datum "string-contains"
+    (Datum.Fixnum 2)
+    (eval_port "(import (srfi 13)) (string-contains \"hello world\" \"llo\")")
+
+let test_srfi13_contains_ci () =
+  check_datum "string-contains-ci"
+    (Datum.Fixnum 2)
+    (eval_port "(import (srfi 13)) (string-contains-ci \"hello WORLD\" \"LLO\")")
+
+let test_srfi13_count () =
+  check_datum "string-count"
+    (Datum.Fixnum 3)
+    (eval_port "(import (srfi 13)) (string-count char-numeric? \"a1b2c3\")")
+
+let test_srfi13_reverse () =
+  check_datum "string-reverse"
+    (Datum.Str (Bytes.of_string "olleh"))
+    (eval_port "(import (srfi 13)) (string-reverse \"hello\")")
+
+let test_srfi13_concatenate () =
+  check_datum "string-concatenate"
+    (Datum.Str (Bytes.of_string "abcdef"))
+    (eval_port "(import (srfi 13)) (string-concatenate '(\"abc\" \"def\"))")
+
+let test_srfi13_fold () =
+  check_datum "string-fold"
+    (Datum.Fixnum 5)
+    (eval_port "(import (srfi 13)) \
+     (string-fold (lambda (c n) (+ n 1)) 0 \"hello\")")
+
+let test_srfi13_fold_right () =
+  check_datum "string-fold-right"
+    (Datum.Fixnum 5)
+    (eval_port "(import (srfi 13)) \
+     (string-fold-right (lambda (c n) (+ n 1)) 0 \"hello\")")
+
+let test_srfi13_filter () =
+  check_datum "string-filter"
+    (Datum.Str (Bytes.of_string "ace"))
+    (eval_port "(import (srfi 13)) (string-filter char-alphabetic? \"a1c2e3\")")
+
+let test_srfi13_delete () =
+  check_datum "string-delete"
+    (Datum.Str (Bytes.of_string "123"))
+    (eval_port "(import (srfi 13)) (string-delete char-alphabetic? \"a1b2c3\")")
+
+let test_srfi13_replace () =
+  check_datum "string-replace"
+    (Datum.Str (Bytes.of_string "aXYZef"))
+    (eval_port "(import (srfi 13)) (string-replace \"abcdef\" \"XYZ\" 1 4)")
+
+let test_srfi13_titlecase () =
+  check_datum "string-titlecase"
+    (Datum.Str (Bytes.of_string "Hello World"))
+    (eval_port "(import (srfi 13)) (string-titlecase \"hello world\")")
+
+let test_srfi13_xsubstring () =
+  check_datum "xsubstring"
+    (Datum.Str (Bytes.of_string "cdeab"))
+    (eval_port "(import (srfi 13)) (xsubstring \"abcde\" 2 7)")
+
+let test_srfi13_every_charset () =
+  check_datum "string-every with char-set"
+    (Datum.Bool true)
+    (eval_port "(import (srfi 13) (srfi 14)) \
+     (string-every char-set:letter \"abc\")")
+
+let test_srfi13_trim_charset () =
+  check_datum "string-trim with char-set"
+    (Datum.Str (Bytes.of_string "hello"))
+    (eval_port "(import (srfi 13) (srfi 14)) \
+     (string-trim \"  hello\" char-set:whitespace)")
+
+let test_srfi13_index_charset () =
+  check_datum "string-index with char-set"
+    (Datum.Fixnum 2)
+    (eval_port "(import (srfi 13) (srfi 14)) \
+     (string-index char-set:digit \"ab3cd\")")
+
+let test_srfi13_cond_expand () =
+  check_datum "cond-expand srfi-13"
+    (Datum.Bool true)
+    (eval "(cond-expand (srfi-13 #t) (else #f))")
+
+let test_srfi13_concatenate_reverse () =
+  check_datum "string-concatenate-reverse"
+    (Datum.Str (Bytes.of_string "defabc"))
+    (eval_port "(import (srfi 13)) (string-concatenate-reverse '(\"abc\" \"def\"))")
+
+(* ===== SRFI 115 — regexp ===== *)
+
+let test_srfi115_predicate () =
+  check_datum "regexp?"
+    (Datum.Bool true)
+    (eval_port "(import (srfi 115)) (regexp? (regexp \"abc\"))")
+
+let test_srfi115_predicate_false () =
+  check_datum "regexp? false"
+    (Datum.Bool false)
+    (eval_port "(import (srfi 115)) (regexp? 42)")
+
+let test_srfi115_matches_literal () =
+  check_datum "regexp-matches? literal"
+    (Datum.Bool true)
+    (eval_port "(import (srfi 115)) (regexp-matches? \"abc\" \"abc\")")
+
+let test_srfi115_matches_literal_false () =
+  check_datum "regexp-matches? literal false"
+    (Datum.Bool false)
+    (eval_port "(import (srfi 115)) (regexp-matches? \"abc\" \"abcd\")")
+
+let test_srfi115_search () =
+  check_datum "regexp-search"
+    (Datum.Bool true)
+    (eval_port "(import (srfi 115)) (regexp-match? (regexp-search \"bc\" \"abcde\"))")
+
+let test_srfi115_search_submatch () =
+  check_datum "regexp-search submatch"
+    (Datum.Str (Bytes.of_string "bc"))
+    (eval_port "(import (srfi 115)) \
+     (let ((m (regexp-search (regexp '(submatch \"bc\")) \"abcde\"))) \
+       (regexp-match-submatch m 1))")
+
+let test_srfi115_matches_obj () =
+  check_datum "regexp-matches obj"
+    (Datum.Str (Bytes.of_string "abc"))
+    (eval_port "(import (srfi 115)) \
+     (let ((m (regexp-matches \"abc\" \"abc\"))) \
+       (regexp-match-submatch m 0))")
+
+let test_srfi115_seq () =
+  check_datum "SRE seq"
+    (Datum.Bool true)
+    (eval_port "(import (srfi 115)) \
+     (regexp-matches? '(: \"ab\" \"cd\") \"abcd\")")
+
+let test_srfi115_or () =
+  check_datum "SRE or"
+    (Datum.Bool true)
+    (eval_port "(import (srfi 115)) \
+     (regexp-matches? '(or \"abc\" \"def\") \"def\")")
+
+let test_srfi115_star () =
+  check_datum "SRE *"
+    (Datum.Bool true)
+    (eval_port "(import (srfi 115)) \
+     (regexp-matches? '(* \"a\") \"aaa\")")
+
+let test_srfi115_plus () =
+  check_datum "SRE +"
+    (Datum.Bool true)
+    (eval_port "(import (srfi 115)) \
+     (regexp-matches? '(+ \"a\") \"aaa\")")
+
+let test_srfi115_plus_empty () =
+  check_datum "SRE + empty fails"
+    (Datum.Bool false)
+    (eval_port "(import (srfi 115)) \
+     (regexp-matches? '(+ \"a\") \"\")")
+
+let test_srfi115_question () =
+  check_datum "SRE ?"
+    (Datum.Bool true)
+    (eval_port "(import (srfi 115)) \
+     (regexp-matches? '(: \"a\" (? \"b\") \"c\") \"ac\")")
+
+let test_srfi115_any () =
+  check_datum "SRE any"
+    (Datum.Bool true)
+    (eval_port "(import (srfi 115)) \
+     (regexp-matches? '(: \"a\" any \"c\") \"abc\")")
+
+let test_srfi115_repeat_n () =
+  check_datum "SRE = (exact count)"
+    (Datum.Bool true)
+    (eval_port "(import (srfi 115)) \
+     (regexp-matches? '(= 3 \"a\") \"aaa\")")
+
+let test_srfi115_repeat_n_false () =
+  check_datum "SRE = wrong count"
+    (Datum.Bool false)
+    (eval_port "(import (srfi 115)) \
+     (regexp-matches? '(= 3 \"a\") \"aa\")")
+
+let test_srfi115_range () =
+  check_datum "SRE ** (range)"
+    (Datum.Bool true)
+    (eval_port "(import (srfi 115)) \
+     (regexp-matches? '(** 2 4 \"a\") \"aaa\")")
+
+let test_srfi115_alpha () =
+  check_datum "SRE alphabetic"
+    (Datum.Bool true)
+    (eval_port "(import (srfi 115)) \
+     (regexp-matches? '(+ alphabetic) \"abcXYZ\")")
+
+let test_srfi115_digit () =
+  check_datum "SRE numeric"
+    (Datum.Bool true)
+    (eval_port "(import (srfi 115)) \
+     (regexp-matches? '(+ numeric) \"12345\")")
+
+let test_srfi115_replace () =
+  check_datum "regexp-replace"
+    (Datum.Str (Bytes.of_string "xy23"))
+    (eval_port "(import (srfi 115)) \
+     (regexp-replace '(+ alphabetic) \"ab23\" \"xy\")")
+
+let test_srfi115_replace_all () =
+  check_datum "regexp-replace-all"
+    (Datum.Str (Bytes.of_string "X1X2X3X"))
+    (eval_port "(import (srfi 115)) \
+     (regexp-replace-all '(+ alphabetic) \"a1bc2d3ef\" \"X\")")
+
+let test_srfi115_extract () =
+  check_datum "regexp-extract"
+    (Datum.Fixnum 3)
+    (eval_port "(import (srfi 115)) \
+     (length (regexp-extract '(+ numeric) \"a12b34c56\"))")
+
+let test_srfi115_split () =
+  check_datum "regexp-split"
+    (Datum.Fixnum 4)
+    (eval_port "(import (srfi 115)) \
+     (length (regexp-split \",\" \"a,b,c,d\"))")
+
+let test_srfi115_match_count () =
+  check_datum "regexp-match-count"
+    (Datum.Fixnum 2)
+    (eval_port "(import (srfi 115)) \
+     (let ((m (regexp-matches '(: (submatch (+ alphabetic)) (+ numeric)) \"abc123\"))) \
+       (regexp-match-count m))")
+
+let test_srfi115_match_start () =
+  check_datum "regexp-match-submatch-start"
+    (Datum.Fixnum 1)
+    (eval_port "(import (srfi 115)) \
+     (let ((m (regexp-search '(submatch \"bc\") \"abcde\"))) \
+       (regexp-match-submatch-start m 1))")
+
+let test_srfi115_match_end () =
+  check_datum "regexp-match-submatch-end"
+    (Datum.Fixnum 3)
+    (eval_port "(import (srfi 115)) \
+     (let ((m (regexp-search '(submatch \"bc\") \"abcde\"))) \
+       (regexp-match-submatch-end m 1))")
+
+let test_srfi115_charset () =
+  check_datum "SRE with char-set"
+    (Datum.Bool true)
+    (eval_port "(import (srfi 115) (srfi 14)) \
+     (regexp-matches? (regexp char-set:digit) \"5\")")
+
+let test_srfi115_cond_expand () =
+  check_datum "cond-expand srfi-115"
+    (Datum.Bool true)
+    (eval "(cond-expand (srfi-115 #t) (else #f))")
+
+let test_srfi115_nocase () =
+  check_datum "SRE w/nocase"
+    (Datum.Bool true)
+    (eval_port "(import (srfi 115)) \
+     (regexp-matches? '(w/nocase \"abc\") \"ABC\")")
+
+let test_srfi115_fold () =
+  check_datum "regexp-fold"
+    (Datum.Fixnum 3)
+    (eval_port "(import (srfi 115)) \
+     (regexp-fold '(+ numeric) \
+       (lambda (i m acc) (+ acc 1)) \
+       0 \"a1b23c456\")")
+
 let () =
   Alcotest.run "SRFI"
     [ ("infrastructure",
@@ -975,6 +1915,173 @@ let () =
        ; Alcotest.test_case "clear!" `Quick test_srfi69_clear
        ; Alcotest.test_case "mutable?" `Quick test_srfi69_mutable
        ; Alcotest.test_case "cond-expand" `Quick test_srfi69_cond_expand
+       ])
+    ; ("srfi-14",
+       [ Alcotest.test_case "char-set?" `Quick test_srfi14_predicate
+       ; Alcotest.test_case "char-set? false" `Quick test_srfi14_predicate_false
+       ; Alcotest.test_case "contains?" `Quick test_srfi14_contains
+       ; Alcotest.test_case "contains? false" `Quick test_srfi14_contains_false
+       ; Alcotest.test_case "char-set=?" `Quick test_srfi14_equal
+       ; Alcotest.test_case "char-set<=?" `Quick test_srfi14_subset
+       ; Alcotest.test_case "adjoin" `Quick test_srfi14_adjoin
+       ; Alcotest.test_case "delete" `Quick test_srfi14_delete
+       ; Alcotest.test_case "complement" `Quick test_srfi14_complement
+       ; Alcotest.test_case "complement excludes" `Quick test_srfi14_complement_excludes
+       ; Alcotest.test_case "union" `Quick test_srfi14_union
+       ; Alcotest.test_case "intersection" `Quick test_srfi14_intersection
+       ; Alcotest.test_case "difference" `Quick test_srfi14_difference
+       ; Alcotest.test_case "xor" `Quick test_srfi14_xor
+       ; Alcotest.test_case "list roundtrip" `Quick test_srfi14_list_roundtrip
+       ; Alcotest.test_case "string roundtrip" `Quick test_srfi14_string_roundtrip
+       ; Alcotest.test_case "ucs-range" `Quick test_srfi14_ucs_range
+       ; Alcotest.test_case "fold" `Quick test_srfi14_fold
+       ; Alcotest.test_case "count" `Quick test_srfi14_count
+       ; Alcotest.test_case "every" `Quick test_srfi14_every
+       ; Alcotest.test_case "any" `Quick test_srfi14_any
+       ; Alcotest.test_case "filter" `Quick test_srfi14_filter
+       ; Alcotest.test_case "cursor" `Quick test_srfi14_cursor
+       ; Alcotest.test_case "size" `Quick test_srfi14_size
+       ; Alcotest.test_case "char-set:letter" `Quick test_srfi14_letter
+       ; Alcotest.test_case "char-set:digit" `Quick test_srfi14_digit
+       ; Alcotest.test_case "char-set:whitespace" `Quick test_srfi14_whitespace
+       ; Alcotest.test_case "char-set:empty" `Quick test_srfi14_empty
+       ; Alcotest.test_case "char-set:full" `Quick test_srfi14_full
+       ; Alcotest.test_case "copy" `Quick test_srfi14_copy
+       ; Alcotest.test_case "union!" `Quick test_srfi14_union_mut
+       ; Alcotest.test_case "map" `Quick test_srfi14_map
+       ; Alcotest.test_case "for-each" `Quick test_srfi14_for_each
+       ; Alcotest.test_case "cond-expand" `Quick test_srfi14_cond_expand
+       ])
+    ; ("srfi-41",
+       [ Alcotest.test_case "stream-null?" `Quick test_srfi41_null
+       ; Alcotest.test_case "stream-pair?" `Quick test_srfi41_pair
+       ; Alcotest.test_case "car/cdr" `Quick test_srfi41_car_cdr
+       ; Alcotest.test_case "stream macro" `Quick test_srfi41_stream
+       ; Alcotest.test_case "stream->list" `Quick test_srfi41_to_list
+       ; Alcotest.test_case "list->stream" `Quick test_srfi41_list_to_stream
+       ; Alcotest.test_case "stream-map" `Quick test_srfi41_map
+       ; Alcotest.test_case "stream-filter" `Quick test_srfi41_filter
+       ; Alcotest.test_case "stream-fold" `Quick test_srfi41_fold
+       ; Alcotest.test_case "stream-take" `Quick test_srfi41_take
+       ; Alcotest.test_case "stream-drop" `Quick test_srfi41_drop
+       ; Alcotest.test_case "stream-range" `Quick test_srfi41_range
+       ; Alcotest.test_case "stream-iterate" `Quick test_srfi41_iterate
+       ; Alcotest.test_case "stream-zip" `Quick test_srfi41_zip
+       ; Alcotest.test_case "stream-append" `Quick test_srfi41_append
+       ; Alcotest.test_case "stream-take-while" `Quick test_srfi41_take_while
+       ; Alcotest.test_case "stream-drop-while" `Quick test_srfi41_drop_while
+       ; Alcotest.test_case "stream-length" `Quick test_srfi41_length
+       ; Alcotest.test_case "stream-scan" `Quick test_srfi41_scan
+       ; Alcotest.test_case "stream-unfold" `Quick test_srfi41_unfold
+       ; Alcotest.test_case "cond-expand" `Quick test_srfi41_cond_expand
+       ])
+    ; ("srfi-113",
+       [ Alcotest.test_case "set?" `Quick test_srfi113_set_predicate
+       ; Alcotest.test_case "set-contains?" `Quick test_srfi113_set_contains
+       ; Alcotest.test_case "set-contains? false" `Quick test_srfi113_set_contains_false
+       ; Alcotest.test_case "set-empty?" `Quick test_srfi113_set_empty
+       ; Alcotest.test_case "set-size" `Quick test_srfi113_set_size
+       ; Alcotest.test_case "set-adjoin" `Quick test_srfi113_set_adjoin
+       ; Alcotest.test_case "set-delete" `Quick test_srfi113_set_delete
+       ; Alcotest.test_case "set-union" `Quick test_srfi113_set_union
+       ; Alcotest.test_case "set-intersection" `Quick test_srfi113_set_intersection
+       ; Alcotest.test_case "set-difference" `Quick test_srfi113_set_difference
+       ; Alcotest.test_case "set-xor" `Quick test_srfi113_set_xor
+       ; Alcotest.test_case "set=?" `Quick test_srfi113_set_equal
+       ; Alcotest.test_case "set<=?" `Quick test_srfi113_set_subset
+       ; Alcotest.test_case "set-fold" `Quick test_srfi113_set_fold
+       ; Alcotest.test_case "set-map" `Quick test_srfi113_set_map
+       ; Alcotest.test_case "set-filter" `Quick test_srfi113_set_filter
+       ; Alcotest.test_case "set->list" `Quick test_srfi113_set_to_list
+       ; Alcotest.test_case "list->set" `Quick test_srfi113_list_to_set
+       ; Alcotest.test_case "set-copy" `Quick test_srfi113_set_copy
+       ; Alcotest.test_case "set-disjoint?" `Quick test_srfi113_set_disjoint
+       ; Alcotest.test_case "set-any?" `Quick test_srfi113_set_any
+       ; Alcotest.test_case "set-every?" `Quick test_srfi113_set_every
+       ; Alcotest.test_case "bag?" `Quick test_srfi113_bag_predicate
+       ; Alcotest.test_case "bag-element-count" `Quick test_srfi113_bag_count
+       ; Alcotest.test_case "bag-size" `Quick test_srfi113_bag_size
+       ; Alcotest.test_case "bag-adjoin" `Quick test_srfi113_bag_adjoin
+       ; Alcotest.test_case "bag-delete" `Quick test_srfi113_bag_delete
+       ; Alcotest.test_case "bag->set" `Quick test_srfi113_bag_to_set
+       ; Alcotest.test_case "set->bag" `Quick test_srfi113_set_to_bag
+       ; Alcotest.test_case "bag-union" `Quick test_srfi113_bag_union
+       ; Alcotest.test_case "bag-increment!" `Quick test_srfi113_bag_increment
+       ; Alcotest.test_case "bag->alist" `Quick test_srfi113_bag_alist
+       ; Alcotest.test_case "cond-expand" `Quick test_srfi113_cond_expand
+       ])
+    ; ("srfi-13",
+       [ Alcotest.test_case "string-null?" `Quick test_srfi13_null
+       ; Alcotest.test_case "string-null? false" `Quick test_srfi13_null_false
+       ; Alcotest.test_case "string-every" `Quick test_srfi13_every
+       ; Alcotest.test_case "string-every false" `Quick test_srfi13_every_false
+       ; Alcotest.test_case "string-any" `Quick test_srfi13_any
+       ; Alcotest.test_case "string-tabulate" `Quick test_srfi13_tabulate
+       ; Alcotest.test_case "string-take" `Quick test_srfi13_take
+       ; Alcotest.test_case "string-take-right" `Quick test_srfi13_take_right
+       ; Alcotest.test_case "string-drop" `Quick test_srfi13_drop
+       ; Alcotest.test_case "string-drop-right" `Quick test_srfi13_drop_right
+       ; Alcotest.test_case "string-pad" `Quick test_srfi13_pad
+       ; Alcotest.test_case "string-pad-right" `Quick test_srfi13_pad_right
+       ; Alcotest.test_case "string-trim" `Quick test_srfi13_trim
+       ; Alcotest.test_case "string-trim-right" `Quick test_srfi13_trim_right
+       ; Alcotest.test_case "string-trim-both" `Quick test_srfi13_trim_both
+       ; Alcotest.test_case "string-prefix-length" `Quick test_srfi13_prefix_length
+       ; Alcotest.test_case "string-suffix-length" `Quick test_srfi13_suffix_length
+       ; Alcotest.test_case "string-prefix?" `Quick test_srfi13_prefix
+       ; Alcotest.test_case "string-suffix?" `Quick test_srfi13_suffix
+       ; Alcotest.test_case "string-index" `Quick test_srfi13_index
+       ; Alcotest.test_case "string-index-right" `Quick test_srfi13_index_right
+       ; Alcotest.test_case "string-skip" `Quick test_srfi13_skip
+       ; Alcotest.test_case "string-contains" `Quick test_srfi13_contains
+       ; Alcotest.test_case "string-contains-ci" `Quick test_srfi13_contains_ci
+       ; Alcotest.test_case "string-count" `Quick test_srfi13_count
+       ; Alcotest.test_case "string-reverse" `Quick test_srfi13_reverse
+       ; Alcotest.test_case "string-concatenate" `Quick test_srfi13_concatenate
+       ; Alcotest.test_case "string-fold" `Quick test_srfi13_fold
+       ; Alcotest.test_case "string-fold-right" `Quick test_srfi13_fold_right
+       ; Alcotest.test_case "string-filter" `Quick test_srfi13_filter
+       ; Alcotest.test_case "string-delete" `Quick test_srfi13_delete
+       ; Alcotest.test_case "string-replace" `Quick test_srfi13_replace
+       ; Alcotest.test_case "string-titlecase" `Quick test_srfi13_titlecase
+       ; Alcotest.test_case "xsubstring" `Quick test_srfi13_xsubstring
+       ; Alcotest.test_case "string-every char-set" `Quick test_srfi13_every_charset
+       ; Alcotest.test_case "string-trim char-set" `Quick test_srfi13_trim_charset
+       ; Alcotest.test_case "string-index char-set" `Quick test_srfi13_index_charset
+       ; Alcotest.test_case "cond-expand" `Quick test_srfi13_cond_expand
+       ; Alcotest.test_case "string-concatenate-reverse" `Quick test_srfi13_concatenate_reverse
+       ])
+    ; ("srfi-115",
+       [ Alcotest.test_case "regexp?" `Quick test_srfi115_predicate
+       ; Alcotest.test_case "regexp? false" `Quick test_srfi115_predicate_false
+       ; Alcotest.test_case "matches literal" `Quick test_srfi115_matches_literal
+       ; Alcotest.test_case "matches literal false" `Quick test_srfi115_matches_literal_false
+       ; Alcotest.test_case "search" `Quick test_srfi115_search
+       ; Alcotest.test_case "search submatch" `Quick test_srfi115_search_submatch
+       ; Alcotest.test_case "matches obj" `Quick test_srfi115_matches_obj
+       ; Alcotest.test_case "SRE seq" `Quick test_srfi115_seq
+       ; Alcotest.test_case "SRE or" `Quick test_srfi115_or
+       ; Alcotest.test_case "SRE *" `Quick test_srfi115_star
+       ; Alcotest.test_case "SRE +" `Quick test_srfi115_plus
+       ; Alcotest.test_case "SRE + empty" `Quick test_srfi115_plus_empty
+       ; Alcotest.test_case "SRE ?" `Quick test_srfi115_question
+       ; Alcotest.test_case "SRE any" `Quick test_srfi115_any
+       ; Alcotest.test_case "SRE = count" `Quick test_srfi115_repeat_n
+       ; Alcotest.test_case "SRE = wrong count" `Quick test_srfi115_repeat_n_false
+       ; Alcotest.test_case "SRE ** range" `Quick test_srfi115_range
+       ; Alcotest.test_case "SRE alphabetic" `Quick test_srfi115_alpha
+       ; Alcotest.test_case "SRE numeric" `Quick test_srfi115_digit
+       ; Alcotest.test_case "regexp-replace" `Quick test_srfi115_replace
+       ; Alcotest.test_case "regexp-replace-all" `Quick test_srfi115_replace_all
+       ; Alcotest.test_case "regexp-extract" `Quick test_srfi115_extract
+       ; Alcotest.test_case "regexp-split" `Quick test_srfi115_split
+       ; Alcotest.test_case "match-count" `Quick test_srfi115_match_count
+       ; Alcotest.test_case "submatch-start" `Quick test_srfi115_match_start
+       ; Alcotest.test_case "submatch-end" `Quick test_srfi115_match_end
+       ; Alcotest.test_case "char-set" `Quick test_srfi115_charset
+       ; Alcotest.test_case "cond-expand" `Quick test_srfi115_cond_expand
+       ; Alcotest.test_case "w/nocase" `Quick test_srfi115_nocase
+       ; Alcotest.test_case "regexp-fold" `Quick test_srfi115_fold
        ])
     ; ("srfi-125",
        [ Alcotest.test_case "constructor" `Quick test_srfi125_constructor
