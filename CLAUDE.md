@@ -288,6 +288,22 @@ Changes to existing modules:
 - `bin/main.ml`: Added `,paredit` REPL command to toggle paredit mode;
   `paredit_ref` threaded through command handler
 
+**Milestone 13 (Local Package Management)** — complete.
+
+| Module        | Purpose                                                        |
+|---------------|----------------------------------------------------------------|
+| `Semver`      | Semantic versioning: parse, compare, constraint matching       |
+| `Package`     | Package metadata parsing from `package.scm` files              |
+| `Pkg_manager` | Package registry: install, remove, list, resolve dependencies  |
+
+Changes to existing modules:
+- `Instance`: Added `setup_package_paths` — resolves package dependencies
+  and prepends dependency search paths to `inst.search_paths`
+- `bin/main.ml`: Added `wile pkg` subcommand group (`install`, `list`,
+  `remove`, `info`); auto-detection of `package.scm` in `run_file`,
+  `run_repl`, `run_expr`, `compile_file`, `run_fasl`; catches
+  `Package.Package_error` and `Pkg_manager.Pkg_error` in error handlers
+
 ## Development Workflow
 
 **This project uses TDD (Test-Driven Development).** Follow this cycle:
@@ -323,7 +339,7 @@ Tests live in `test/` as per-topic files and are run via `dune test`.
 | `test/test_reader.ml` | Reader (31 tests: 30 unit + 1 QCheck) |
 | `test/test_symbol.ml` | Symbol (8 tests: 6 unit + 2 QCheck) |
 | `test/test_env.ml` | Env (14 tests) |
-| `test/test_instance.ml` | Instance (28 tests) |
+| `test/test_instance.ml` | Instance (31 tests) |
 | `test/test_opcode.ml`   | Opcode (4 tests) |
 | `test/test_compiler.ml` | Compiler (14 tests) |
 | `test/test_vm.ml`       | VM (296 tests: end-to-end via Instance.eval_string) |
@@ -338,6 +354,9 @@ Tests live in `test/` as per-topic files and are run via `dune test`.
 | `test/test_tokenizer.ml` | Tokenizer (26 tests) |
 | `test/test_highlight.ml` | Highlight (18 tests) |
 | `test/test_paredit.ml` | Paredit (72 tests) |
+| `test/test_semver.ml` | Semver (34 tests) |
+| `test/test_package.ml` | Package (16 tests) |
+| `test/test_pkg_manager.ml` | Pkg_manager (25 tests) |
 
 Test dependencies:
 - **alcotest** — unit test framework with readable output

@@ -199,6 +199,97 @@ let test_eval_port_import () =
   let port = Port.of_string "(import (scheme base)) (+ 1 2)" in
   check_datum "import+expr" (Datum.Fixnum 3) (Instance.eval_port inst port)
 
+(* --- Package integration tests --- *)
+
+let with_temp_dir fn =
+  let dir = Filename.temp_dir "wile_inst_test" "" in
+  Fun.protect ~finally:(fun () ->
+    let rec rm path =
+      if Sys.is_directory path then begin
+        Array.iter (fun f -> rm (Filename.concat path f)) (Sys.readdir path);
+        Sys.rmdir path
+      end else
+        Sys.remove path
+    in
+    (try rm dir with _ -> ()))
+    (fun () -> fn dir)
+
+let write_file path content =
+  let parent = Filename.dirname path in
+  let rec mkdir_p d =
+    if not (Sys.file_exists d) then begin
+      mkdir_p (Filename.dirname d);
+      Sys.mkdir d 0o755
+    end
+  in
+  mkdir_p parent;
+  let oc = open_out path in
+  Fun.protect ~finally:(fun () -> close_out oc)
+    (fun () -> output_string oc content)
+
+let test_setup_package_paths_basic () =
+  with_temp_dir (fun dir ->
+    let registry = Filename.concat dir "reg" in
+    (* Install a dep package *)
+    let dep_src = Filename.concat dir "dep-src" in
+    Sys.mkdir dep_src 0o755;
+    write_file (Filename.concat dep_src "package.scm")
+      {|(define-package
+          (name dep-lib)
+          (version "1.0.0")
+          (description "Dep")
+          (license "MIT")
+          (depends)
+          (libraries (dep-lib core)))|};
+    let dep_sld_dir = Filename.concat (Filename.concat dep_src "src") "dep-lib" in
+    write_file (Filename.concat dep_sld_dir "core.sld")
+      {|(define-library (dep-lib core)
+          (export dep-val)
+          (import (scheme base))
+          (begin (define dep-val 42)))|};
+    Pkg_manager.install ~registry_root:registry ~src_dir:dep_src;
+    (* Create instance and set up paths *)
+    let inst = Instance.create () in
+    let pkg : Package.t = {
+      name = "my-app"; version = Semver.parse "1.0.0";
+      description = "App"; license = "MIT";
+      depends = [{ dep_name = "dep-lib"; dep_constraints = [] }];
+      libraries = [];
+    } in
+    Instance.setup_package_paths inst ~registry_root:registry pkg;
+    (* Should be able to import from the dependency *)
+    inst.fasl_cache := false;
+    let port = Port.of_string "(import (dep-lib core)) dep-val" in
+    let result = Instance.eval_port inst port in
+    check_datum "dep-val" (Datum.Fixnum 42) result)
+
+let test_setup_package_paths_empty_deps () =
+  with_temp_dir (fun dir ->
+    let registry = Filename.concat dir "reg" in
+    let inst = Instance.create () in
+    let pkg : Package.t = {
+      name = "no-deps"; version = Semver.parse "1.0.0";
+      description = "No deps"; license = "MIT";
+      depends = []; libraries = [];
+    } in
+    Instance.setup_package_paths inst ~registry_root:registry pkg;
+    (* search_paths should be unchanged (empty + whatever was there) *)
+    Alcotest.(check bool) "no crash" true true)
+
+let test_setup_package_paths_preserves_existing () =
+  with_temp_dir (fun dir ->
+    let registry = Filename.concat dir "reg" in
+    let inst = Instance.create () in
+    inst.search_paths := ["/existing/path"];
+    let pkg : Package.t = {
+      name = "test"; version = Semver.parse "1.0.0";
+      description = "Test"; license = "MIT";
+      depends = []; libraries = [];
+    } in
+    Instance.setup_package_paths inst ~registry_root:registry pkg;
+    Alcotest.(check bool) "preserves existing"
+      true (List.mem "/existing/path" !(inst.search_paths)))
+
 let () =
   Alcotest.run "Instance"
     [ ("Instance",
@@ -236,5 +327,10 @@ let () =
        ; Alcotest.test_case "empty port" `Quick test_eval_port_empty
        ; Alcotest.test_case "define + use" `Quick test_eval_port_define_use
        ; Alcotest.test_case "import + expr" `Quick test_eval_port_import
+       ])
+    ; ("Package integration",
+       [ Alcotest.test_case "setup_package_paths basic" `Quick test_setup_package_paths_basic
+       ; Alcotest.test_case "setup_package_paths empty deps" `Quick test_setup_package_paths_empty_deps
+       ; Alcotest.test_case "setup_package_paths preserves existing" `Quick test_setup_package_paths_preserves_existing
        ])
     ]

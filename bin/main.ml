@@ -22,6 +22,8 @@ let handle_errors f =
   | Compiler.Compile_error (loc, msg) -> format_loc_error loc msg; 1
   | Vm.Runtime_error msg -> format_error msg; 1
   | Fasl.Fasl_error msg -> format_error msg; 1
+  | Package.Package_error msg -> format_error msg; 1
+  | Pkg_manager.Pkg_error msg -> format_error msg; 1
   | Sys_error msg -> format_error msg; 1
   | Failure msg -> format_error msg; 1
 
@@ -45,11 +47,27 @@ let chop_extension path =
     try Filename.chop_extension path
     with Invalid_argument _ -> path
 
+(* --- Package auto-detection --- *)
+
+let setup_package inst start_dir =
+  match Package.find_package_file start_dir with
+  | None -> ()
+  | Some pkg_path ->
+    let pkg = Package.parse inst.Instance.readtable pkg_path in
+    let pkg_dir = Filename.dirname pkg_path in
+    let pkg_src = Filename.concat pkg_dir "src" in
+    let registry_root = Pkg_manager.default_registry_root () in
+    Instance.setup_package_paths inst ~registry_root pkg;
+    (* Prepend the package's own src/ directory *)
+    if Sys.file_exists pkg_src && Sys.is_directory pkg_src then
+      inst.search_paths := pkg_src :: !(inst.search_paths)
+
 (* --- Expression mode (-e) --- *)
 
 let run_expr expr =
   let inst = make_instance () in
   inst.search_paths := [Sys.getcwd ()];
+  setup_package inst (Sys.getcwd ());
   handle_errors (fun () ->
     let port = Port.of_string expr in
     let result = Instance.eval_port inst port in
@@ -62,6 +80,7 @@ let run_expr expr =
 let run_file path =
   let inst = make_instance () in
   inst.search_paths := [dir_for_path path];
+  setup_package inst (dir_for_path path);
   handle_errors (fun () ->
     let port = Port.of_file path in
     ignore (Instance.eval_port inst port))
@@ -132,6 +151,7 @@ let generate_executable prog output_path =
 let compile_file path output exe =
   let inst = make_instance () in
   inst.search_paths := [dir_for_path path];
+  setup_package inst (dir_for_path path);
   handle_errors (fun () ->
     let port = Port.of_file path in
     let prog = Instance.compile_port inst port in
@@ -154,6 +174,7 @@ let compile_file path output exe =
 let run_fasl path =
   let inst = make_instance () in
   inst.search_paths := [dir_for_path path];
+  setup_package inst (dir_for_path path);
   handle_errors (fun () ->
     let prog = Fasl.read_program_fasl inst.symbols path in
     let result = Instance.run_program inst prog in
@@ -193,6 +214,8 @@ let repl_load inst path =
   | Compiler.Compile_error (loc, msg) -> format_loc_error loc msg
   | Vm.Runtime_error msg -> format_error msg
   | Fasl.Fasl_error msg -> format_error msg
+  | Package.Package_error msg -> format_error msg
+  | Pkg_manager.Pkg_error msg -> format_error msg
   | Failure msg -> format_error msg
   | Sys_error msg -> format_error msg
 
@@ -269,6 +292,7 @@ let is_complete inst text =
 let run_repl theme_name =
   let inst = make_instance () in
   inst.search_paths := [Sys.getcwd ()];
+  setup_package inst (Sys.getcwd ());
   Printf.printf "Wile Scheme %s\nType ,help for REPL commands, Ctrl-D to exit.\n%!" version;
   let initial_theme = match theme_name with
     | Some name -> resolve_theme name
@@ -315,6 +339,8 @@ let run_repl theme_name =
           | Compiler.Compile_error (loc, msg) -> format_loc_error loc msg
           | Vm.Runtime_error msg -> format_error msg
           | Fasl.Fasl_error msg -> format_error msg
+          | Package.Package_error msg -> format_error msg
+          | Pkg_manager.Pkg_error msg -> format_error msg
           | Failure msg -> format_error msg
           end;
           eval_loop ()
@@ -377,7 +403,8 @@ let make_default_cmd () =
                 command-line expression.";
             `S "SUBCOMMANDS";
             `P "Use $(b,wile compile) to ahead-of-time compile Scheme source.";
-            `P "Use $(b,wile run) to execute a compiled program FASL."]
+            `P "Use $(b,wile run) to execute a compiled program FASL.";
+            `P "Use $(b,wile pkg) to manage local packages."]
   in
   Cmd.v info term
 
@@ -429,6 +456,151 @@ let make_run_cmd () =
   in
   Cmd.v info term
 
+(* --- Package subcommands --- *)
+
+let pkg_install path =
+  handle_errors (fun () ->
+    let src_dir = match path with
+      | Some p -> p
+      | None -> Sys.getcwd ()
+    in
+    let registry_root = Pkg_manager.default_registry_root () in
+    Pkg_manager.install ~registry_root ~src_dir;
+    let pkg = Package.parse Readtable.default
+      (Filename.concat src_dir "package.scm") in
+    Printf.printf "Installed %s %s\n%!" pkg.name (Semver.to_string pkg.version))
+
+let pkg_list () =
+  handle_errors (fun () ->
+    let registry_root = Pkg_manager.default_registry_root () in
+    let pkgs = Pkg_manager.list_packages ~registry_root in
+    if pkgs = [] then
+      print_endline "No packages installed."
+    else
+      List.iter (fun (name, versions) ->
+        Printf.printf "%s: %s\n" name
+          (String.concat ", " (List.map Semver.to_string versions))
+      ) pkgs)
+
+let pkg_remove name ver =
+  handle_errors (fun () ->
+    let registry_root = Pkg_manager.default_registry_root () in
+    Pkg_manager.remove ~registry_root ~name ~version:ver;
+    Printf.printf "Removed %s %s\n%!" name ver)
+
+let pkg_info name version =
+  handle_errors (fun () ->
+    let registry_root = Pkg_manager.default_registry_root () in
+    match version with
+    | Some ver ->
+      let pkg = Pkg_manager.package_info ~registry_root ~name ~version:ver in
+      Printf.printf "Name:        %s\n" pkg.name;
+      Printf.printf "Version:     %s\n" (Semver.to_string pkg.version);
+      Printf.printf "Description: %s\n" pkg.description;
+      Printf.printf "License:     %s\n" pkg.license;
+      if pkg.depends <> [] then begin
+        Printf.printf "Depends:     ";
+        List.iter (fun (dep : Package.dependency) ->
+          Printf.printf "%s " dep.dep_name
+        ) pkg.depends;
+        print_newline ()
+      end;
+      if pkg.libraries <> [] then begin
+        Printf.printf "Libraries:   ";
+        List.iter (fun lib ->
+          Printf.printf "(%s) " (String.concat " " lib)
+        ) pkg.libraries;
+        print_newline ()
+      end
+    | None ->
+      let pkgs = Pkg_manager.list_packages ~registry_root in
+      match List.assoc_opt name pkgs with
+      | None -> Printf.eprintf "Package not found: %s\n%!" name; exit 1
+      | Some versions ->
+        List.iter (fun ver ->
+          let pkg = Pkg_manager.package_info ~registry_root ~name
+              ~version:(Semver.to_string ver) in
+          Printf.printf "%s %s — %s\n" pkg.name
+            (Semver.to_string pkg.version) pkg.description
+        ) versions)
+
+let make_pkg_install_cmd () =
+  let open Cmdliner in
+  let path_arg =
+    Arg.(value & pos 0 (some string) None &
+         info [] ~docv:"PATH" ~doc:"Package directory (default: current directory).")
+  in
+  let cmd path = exit (pkg_install path) in
+  let term = Term.(const cmd $ path_arg) in
+  let info =
+    Cmd.info "install" ~version
+      ~doc:"Install a package from a local directory"
+  in
+  Cmd.v info term
+
+let make_pkg_list_cmd () =
+  let open Cmdliner in
+  let cmd () = exit (pkg_list ()) in
+  let term = Term.(const cmd $ const ()) in
+  let info =
+    Cmd.info "list" ~version
+      ~doc:"List installed packages"
+  in
+  Cmd.v info term
+
+let make_pkg_remove_cmd () =
+  let open Cmdliner in
+  let name_arg =
+    Arg.(required & pos 0 (some string) None &
+         info [] ~docv:"NAME" ~doc:"Package name.")
+  in
+  let version_arg =
+    Arg.(required & pos 1 (some string) None &
+         info [] ~docv:"VERSION" ~doc:"Package version.")
+  in
+  let cmd name ver = exit (pkg_remove name ver) in
+  let term = Term.(const cmd $ name_arg $ version_arg) in
+  let info =
+    Cmd.info "remove" ~version
+      ~doc:"Remove an installed package version"
+  in
+  Cmd.v info term
+
+let make_pkg_info_cmd () =
+  let open Cmdliner in
+  let name_arg =
+    Arg.(required & pos 0 (some string) None &
+         info [] ~docv:"NAME" ~doc:"Package name.")
+  in
+  let version_arg =
+    Arg.(value & pos 1 (some string) None &
+         info [] ~docv:"VERSION" ~doc:"Package version (optional, shows all if omitted).")
+  in
+  let cmd name ver = exit (pkg_info name ver) in
+  let term = Term.(const cmd $ name_arg $ version_arg) in
+  let info =
+    Cmd.info "info" ~version
+      ~doc:"Show package details"
+  in
+  Cmd.v info term
+
+let make_pkg_cmd () =
+  let open Cmdliner in
+  let info =
+    Cmd.info "pkg" ~version
+      ~doc:"Package management commands"
+      ~man:[`S "DESCRIPTION";
+            `P "Manage local packages. Use $(b,wile pkg install), \
+                $(b,wile pkg list), $(b,wile pkg remove), or \
+                $(b,wile pkg info)."]
+  in
+  Cmd.group info [
+    make_pkg_install_cmd ();
+    make_pkg_list_cmd ();
+    make_pkg_remove_cmd ();
+    make_pkg_info_cmd ();
+  ]
+
 (* Manual subcommand dispatch to avoid Cmd.group intercepting positional
    file arguments (e.g. "wile file.scm") as unknown subcommand names. *)
 let () =
@@ -448,6 +620,12 @@ let () =
         Array.sub Sys.argv 2 (argc - 2)
       ] in
       exit (Cmd.eval ~argv (make_run_cmd ()))
+    | "pkg" ->
+      let argv = Array.concat [
+        [| Sys.argv.(0) |];
+        Array.sub Sys.argv 2 (argc - 2)
+      ] in
+      exit (Cmd.eval ~argv (make_pkg_cmd ()))
     | _ -> exit (Cmd.eval (make_default_cmd ()))
   end else
     exit (Cmd.eval (make_default_cmd ()))

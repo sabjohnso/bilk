@@ -67,7 +67,7 @@ val strip_ansi : string -> string
 (** {1 Theme loading} *)
 
 (** [load_theme path] loads a theme from an s-expression file.
-    @raise Failure if the file cannot be read or parsed. *)
+    Raises [Failure] if the file cannot be read or parsed. *)
 val load_theme : string -> theme
 
 (** {1 Style constructors} *)

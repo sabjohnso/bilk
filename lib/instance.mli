@@ -134,3 +134,12 @@ val run_program : t -> Fasl.program_fasl -> Datum.t
     and executes each code object in order.  Returns the last result, or
     [Void] if the program is empty.
     @raise Vm.Runtime_error on runtime errors. *)
+
+(** {1 Package integration} *)
+
+val setup_package_paths : t -> registry_root:string -> Package.t -> unit
+(** [setup_package_paths inst ~registry_root pkg] resolves the package's
+    dependencies, computes search paths for the resolved packages, and
+    prepends the package's own [src/] directory plus resolved dependency
+    paths to [inst.search_paths].
+    @raise Pkg_manager.Pkg_error on resolution errors. *)

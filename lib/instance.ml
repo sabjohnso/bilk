@@ -2302,3 +2302,14 @@ let run_program inst prog =
       last := Vm.execute ~winds:inst.winds inst.global_env code
   ) prog.Fasl.declarations;
   !last
+
+(* --- Package integration --- *)
+
+let setup_package_paths inst ~registry_root pkg =
+  let resolved = Pkg_manager.resolve ~registry_root pkg.Package.depends in
+  let dep_paths = Pkg_manager.search_paths_for ~registry_root resolved in
+  (* The package's own src/ dir is determined from its package.scm location,
+     but since we receive the parsed Package.t, we compute it from the
+     registry if the package is installed there, or the caller provides
+     the appropriate src/ path via search_paths. *)
+  inst.search_paths := dep_paths @ !(inst.search_paths)
