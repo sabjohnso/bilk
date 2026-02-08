@@ -120,8 +120,9 @@ let test_backspace_skip_open () =
   check_edit "skip open" "(abc)" 1 result
 
 let test_backspace_skip_close () =
+  (* Backspace after close paren moves cursor inside *)
   let result = Paredit.backspace_paredit rt "(abc)" 5 in
-  check_edit "skip close" "(abc)" 5 result
+  check_edit "move inside close" "(abc)" 4 result
 
 let test_backspace_empty_pair () =
   let result = Paredit.backspace_paredit rt "()" 1 in
@@ -150,6 +151,53 @@ let test_delete_empty_pair () =
 let test_delete_at_end () =
   let result = Paredit.delete_paredit rt "abc" 3 in
   check_edit "at end" "abc" 3 result
+
+(* String-aware backspace *)
+let test_backspace_skip_open_quote () =
+  (* Cursor after opening quote of non-empty string — skip *)
+  let result = Paredit.backspace_paredit rt "\"abc\"" 1 in
+  check_edit "skip open quote" "\"abc\"" 1 result
+
+let test_backspace_skip_close_quote () =
+  (* Cursor after closing quote — move inside *)
+  let result = Paredit.backspace_paredit rt "\"abc\"" 5 in
+  check_edit "move inside close quote" "\"abc\"" 4 result
+
+let test_backspace_empty_string () =
+  (* Empty string "" — delete both quotes *)
+  let result = Paredit.backspace_paredit rt "\"\"" 1 in
+  check_edit "empty string" "" 0 result
+
+let test_backspace_inside_string () =
+  (* Inside string body — normal delete *)
+  let result = Paredit.backspace_paredit rt "\"abc\"" 3 in
+  check_edit "inside string" "\"ac\"" 2 result
+
+let test_backspace_string_after_text () =
+  (* x"abc" with cursor at pos 2 (after opening quote) — skip *)
+  let result = Paredit.backspace_paredit rt "x\"abc\"" 2 in
+  check_edit "skip open quote after text" "x\"abc\"" 2 result
+
+(* String-aware delete *)
+let test_delete_skip_open_quote () =
+  (* Cursor on opening quote of non-empty string — skip *)
+  let result = Paredit.delete_paredit rt "\"abc\"" 0 in
+  check_edit "skip open quote" "\"abc\"" 0 result
+
+let test_delete_skip_close_quote () =
+  (* Cursor on closing quote — skip *)
+  let result = Paredit.delete_paredit rt "\"abc\"" 4 in
+  check_edit "skip close quote" "\"abc\"" 4 result
+
+let test_delete_empty_string () =
+  (* Empty string "" — delete both quotes *)
+  let result = Paredit.delete_paredit rt "\"\"" 0 in
+  check_edit "empty string" "" 0 result
+
+let test_delete_inside_string () =
+  (* Inside string body — normal delete *)
+  let result = Paredit.delete_paredit rt "\"abc\"" 1 in
+  check_edit "inside string" "\"bc\"" 1 result
 
 (* === Structural operations === *)
 
@@ -258,6 +306,15 @@ let () =
       Alcotest.test_case "delete skip open" `Quick test_delete_skip_open;
       Alcotest.test_case "delete empty pair" `Quick test_delete_empty_pair;
       Alcotest.test_case "delete at end" `Quick test_delete_at_end;
+      Alcotest.test_case "backspace skip open quote" `Quick test_backspace_skip_open_quote;
+      Alcotest.test_case "backspace skip close quote" `Quick test_backspace_skip_close_quote;
+      Alcotest.test_case "backspace empty string" `Quick test_backspace_empty_string;
+      Alcotest.test_case "backspace inside string" `Quick test_backspace_inside_string;
+      Alcotest.test_case "backspace string after text" `Quick test_backspace_string_after_text;
+      Alcotest.test_case "delete skip open quote" `Quick test_delete_skip_open_quote;
+      Alcotest.test_case "delete skip close quote" `Quick test_delete_skip_close_quote;
+      Alcotest.test_case "delete empty string" `Quick test_delete_empty_string;
+      Alcotest.test_case "delete inside string" `Quick test_delete_inside_string;
     ];
     "structural operations", [
       Alcotest.test_case "slurp forward" `Quick test_slurp_forward;

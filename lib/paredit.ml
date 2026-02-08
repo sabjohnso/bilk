@@ -243,96 +243,97 @@ let insert_double_quote rt text cursor =
 
 (* --- Balanced deletion --- *)
 
+let delete_char_at text pos =
+  let len = String.length text in
+  let before = String.sub text 0 pos in
+  let after = String.sub text (pos + 1) (len - pos - 1) in
+  before ^ after
+
+let delete_range text start stop =
+  let len = String.length text in
+  let before = String.sub text 0 start in
+  let after = String.sub text stop (len - stop) in
+  before ^ after
+
 let backspace_paredit rt text cursor =
   if cursor <= 0 then no_change text cursor
   else
-    let len = String.length text in
     let prev = text.[cursor - 1] in
-    if in_string_or_comment rt text (cursor - 1) then begin
-      (* Inside string/comment — check for empty string "" *)
-      if prev = '"' && cursor < len && text.[cursor] = '"' then begin
-        (* Check if this is the opening quote of an empty string *)
-        let tok = token_at rt text (cursor - 1) in
-        match tok with
-        | Some t when t.kind = Tokenizer.String_lit &&
-                       t.span.stop - t.span.start = 2 ->
-          (* Empty string — delete both quotes *)
-          let before = String.sub text 0 (cursor - 1) in
-          let after = String.sub text (cursor + 1) (len - cursor - 1) in
-          { text = before ^ after; cursor = cursor - 1 }
-        | _ ->
-          (* Inside string — normal delete *)
-          let before = String.sub text 0 (cursor - 1) in
-          let after = String.sub text cursor (len - cursor) in
-          { text = before ^ after; cursor = cursor - 1 }
-      end else begin
-        (* Normal delete inside string/comment *)
-        let before = String.sub text 0 (cursor - 1) in
-        let after = String.sub text cursor (len - cursor) in
-        { text = before ^ after; cursor = cursor - 1 }
-      end
-    end else if is_open prev then begin
-      (* Opening delimiter *)
-      if cursor < len && is_close text.[cursor] then begin
-        (* Empty pair — delete both *)
-        let before = String.sub text 0 (cursor - 1) in
-        let after = String.sub text (cursor + 1) (len - cursor - 1) in
-        { text = before ^ after; cursor = cursor - 1 }
-      end else
-        (* Non-empty list — skip (don't unbalance) *)
-        no_change text cursor
-    end else if is_close prev then
-      (* Closing delimiter — skip *)
-      no_change text cursor
-    else begin
-      (* Normal character — delete it *)
-      let before = String.sub text 0 (cursor - 1) in
-      let after = String.sub text cursor (len - cursor) in
-      { text = before ^ after; cursor = cursor - 1 }
-    end
+    (* Check what token the character before cursor belongs to *)
+    let tok = token_at rt text (cursor - 1) in
+    match tok with
+    | Some t when t.kind = Tokenizer.String_lit ->
+      if cursor - 1 = t.span.start then
+        (* prev is the opening quote *)
+        if t.span.stop - t.span.start = 2 then
+          (* Empty string "" — delete both quotes *)
+          { text = delete_range text (cursor - 1) (cursor + 1);
+            cursor = cursor - 1 }
+        else
+          (* Non-empty string — skip opening quote *)
+          no_change text cursor
+      else if cursor - 1 = t.span.stop - 1 then
+        (* prev is the closing quote — move inside *)
+        { text; cursor = cursor - 1 }
+      else
+        (* Inside string body — normal delete *)
+        { text = delete_char_at text (cursor - 1); cursor = cursor - 1 }
+    | Some t when t.kind = Tokenizer.Comment ->
+      (* Inside comment — normal delete *)
+      { text = delete_char_at text (cursor - 1); cursor = cursor - 1 }
+    | _ ->
+      if is_open prev then begin
+        let len = String.length text in
+        if cursor < len && is_close text.[cursor] then
+          (* Empty pair — delete both *)
+          { text = delete_range text (cursor - 1) (cursor + 1);
+            cursor = cursor - 1 }
+        else
+          (* Non-empty list — skip *)
+          no_change text cursor
+      end else if is_close prev then
+        (* Move inside the closing delimiter *)
+        { text; cursor = cursor - 1 }
+      else
+        (* Normal character — delete it *)
+        { text = delete_char_at text (cursor - 1); cursor = cursor - 1 }
 
 let delete_paredit rt text cursor =
   let len = String.length text in
   if cursor >= len then no_change text cursor
   else
     let ch = text.[cursor] in
-    if in_string_or_comment rt text cursor then begin
-      (* Inside string/comment — check for empty string *)
-      if ch = '"' && cursor > 0 && text.[cursor - 1] = '"' then begin
-        let tok = token_at rt text (cursor - 1) in
-        match tok with
-        | Some t when t.kind = Tokenizer.String_lit &&
-                       t.span.stop - t.span.start = 2 ->
-          let before = String.sub text 0 (cursor - 1) in
-          let after = String.sub text (cursor + 1) (len - cursor - 1) in
-          { text = before ^ after; cursor = cursor - 1 }
-        | _ ->
-          let before = String.sub text 0 cursor in
-          let after = String.sub text (cursor + 1) (len - cursor - 1) in
-          { text = before ^ after; cursor }
-      end else begin
-        let before = String.sub text 0 cursor in
-        let after = String.sub text (cursor + 1) (len - cursor - 1) in
-        { text = before ^ after; cursor }
-      end
-    end else if is_close ch then
-      (* Closing delimiter — skip *)
-      no_change text cursor
-    else if is_open ch then begin
-      (* Opening delimiter *)
-      if cursor + 1 < len && is_close text.[cursor + 1] then begin
-        (* Empty pair — delete both *)
-        let before = String.sub text 0 cursor in
-        let after = String.sub text (cursor + 2) (len - cursor - 2) in
-        { text = before ^ after; cursor }
-      end else
-        (* Non-empty list — skip *)
+    let tok = token_at rt text cursor in
+    match tok with
+    | Some t when t.kind = Tokenizer.String_lit ->
+      if cursor = t.span.start then
+        (* ch is the opening quote *)
+        if t.span.stop - t.span.start = 2 then
+          (* Empty string "" — delete both *)
+          { text = delete_range text cursor (cursor + 2); cursor }
+        else
+          (* Non-empty string — skip *)
+          no_change text cursor
+      else if cursor = t.span.stop - 1 then
+        (* ch is the closing quote — skip *)
         no_change text cursor
-    end else begin
-      let before = String.sub text 0 cursor in
-      let after = String.sub text (cursor + 1) (len - cursor - 1) in
-      { text = before ^ after; cursor }
-    end
+      else
+        (* Inside string body — normal delete *)
+        { text = delete_char_at text cursor; cursor }
+    | Some t when t.kind = Tokenizer.Comment ->
+      { text = delete_char_at text cursor; cursor }
+    | _ ->
+      if is_open ch then begin
+        if cursor + 1 < len && is_close text.[cursor + 1] then
+          (* Empty pair — delete both *)
+          { text = delete_range text cursor (cursor + 2); cursor }
+        else
+          (* Non-empty — skip *)
+          no_change text cursor
+      end else if is_close ch then
+        no_change text cursor
+      else
+        { text = delete_char_at text cursor; cursor }
 
 (* --- Structural operations --- *)
 
