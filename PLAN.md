@@ -541,7 +541,147 @@ my-package/
 
 ---
 
-### Milestone 14 — C Embedding API
+### Milestone 14 — Output Ports & File I/O
+
+The biggest gap in the current implementation. `Port` is currently
+input-only. R7RS requires output ports, file I/O, and port-based
+`read`/`write`/`display`.
+
+**`Port` module** — extend with output ports:
+
+- New type: output port (wraps `Buffer.t` for string ports, `out_channel`
+  for file ports)
+- `open-output-string`, `get-output-string`
+- `open-input-file`, `open-output-file`
+- `close-input-port`, `close-output-port`, `close-port`
+- `input-port?`, `output-port?`, `port?`, `input-port-open?`,
+  `output-port-open?`, `textual-port?`, `binary-port?`
+- `write-char`, `write-string`, `write-u8`, `write-bytevector`
+- `read-line`, `read-string`, `read-u8`, `read-bytevector`
+- `peek-u8`
+- `flush-output-port`
+- Port as a `Datum.t` variant: `Port of port_obj` (with direction tag)
+
+**`Instance` module** — current ports + updated primitives:
+
+- `current-input-port`, `current-output-port`, `current-error-port`
+  as parameter-like fields on `Instance.t`
+- `display`, `write`, `newline` take optional port argument
+- `with-input-from-file`, `with-output-to-file`
+- `call-with-input-file`, `call-with-output-file`
+- `call-with-port`
+- `read` as Scheme procedure (wraps `Reader.read_syntax` + `Syntax.to_datum`)
+
+**New libraries:**
+
+- `(scheme file)` — file-specific operations
+- `(scheme read)` — `read` procedure
+
+**Tests:** ~40 (port creation, read/write round-trips, file I/O, string
+ports, current port management, error cases)
+
+---
+
+### Milestone 15 — Remaining R7RS Standard Libraries
+
+Complete the 10 unimplemented R7RS standard libraries. Most are small.
+Grouped by dependency:
+
+**No new infrastructure needed:**
+
+1. **`(scheme case-lambda)`** — Add `case-lambda` to compiler (dispatch on
+   argument count, try each clause). ~5 tests.
+
+2. **`(scheme lazy)`** — `delay`, `force`, `make-promise`, `promise?`,
+   `delay-force`. New `Promise` variant in `Datum.t` with mutable
+   `forced`/`value` fields. ~10 tests.
+
+3. **`(scheme inexact)`** — Transcendental functions on floats: `exp`,
+   `log`, `sin`, `cos`, `tan`, `asin`, `acos`, `atan`, `sqrt`, `finite?`,
+   `infinite?`, `nan?`. Mostly direct OCaml `Float` module calls. ~10 tests.
+
+4. **`(scheme complex)`** — Stub library. We don't implement full complex
+   numbers but export the subset that works on reals: `real-part`,
+   `imag-part`, `magnitude`, `angle`, `make-rectangular`, `make-polar`.
+   Real numbers are trivially their own real-part. ~5 tests.
+
+5. **`(scheme process-context)`** — `command-line`, `exit`,
+   `emergency-exit`, `get-environment-variable`,
+   `get-environment-variables`. Uses `Sys.argv`, `Sys.getenv`, `exit`.
+   Instance needs a `command_line` field. ~8 tests.
+
+6. **`(scheme time)`** — `current-second` (Unix epoch float),
+   `current-jiffy` (monotonic clock), `jiffies-per-second`. Uses
+   `Unix.gettimeofday` and `Mtime` or `clock_gettime`. ~5 tests.
+
+**Depends on M14 (ports):**
+
+7. **`(scheme eval)`** — `eval` (compile+run in given environment),
+   `environment` (creates env from library imports). Wraps existing
+   `Instance.eval_syntax` machinery. ~10 tests.
+
+8. **`(scheme load)`** — `load` procedure (read+eval from file port).
+   Wraps `Instance.eval_port`. ~5 tests.
+
+9. **`(scheme repl)`** — `interaction-environment` (returns the global
+   env). Tiny library. ~3 tests.
+
+10. **`(scheme r5rs)`** — Compatibility library re-exporting R5RS subset.
+    Optional per R7RS. Low priority. ~3 tests.
+
+**Total: ~64 tests across all sub-libraries**
+
+---
+
+### Milestone 16 — SRFI Support
+
+**Infrastructure:**
+
+- **Naming convention:** `(srfi N)` maps to `srfi/N.sld` on the search
+  path. E.g., `(srfi 1)` → `<search_dir>/srfi/1.sld`.
+- **Bundled SRFIs:** Ship a `srfi/` directory alongside the wile library,
+  added to default search paths. No separate installation needed.
+- **Feature identifiers:** Each SRFI adds `srfi-N` to the features list
+  for `cond-expand`.
+- **Instance change:** Add `<lib-dir>/srfi/` to default `search_paths`.
+- **Self-hosted where possible:** Most SRFIs are pure Scheme `.sld` files
+  that import `(scheme base)` and define their exports.
+
+**Tier 1 — Trivial (self-hosted Scheme, ~5 lines each):**
+
+| SRFI | Name | Notes |
+|------|------|-------|
+| 8 | `receive` | Macro wrapping `call-with-values` |
+| 11 | `let-values` | Already in base as syntax; re-export |
+| 16 | `case-lambda` | Re-export from `(scheme case-lambda)` |
+| 26 | `cut` / `cute` | Macro for partial application |
+| 28 | Basic format strings | Simple `format` procedure |
+| 31 | `rec` | Macro for self-referential definitions |
+| 111 | Boxes | `box`, `unbox`, `set-box!` — trivial record type |
+
+**Tier 2 — Moderate (mix of Scheme + OCaml primitives):**
+
+| SRFI | Name | Notes |
+|------|------|-------|
+| 1 | List library | ~50 procedures, mostly Scheme, some OCaml for perf |
+| 2 | `and-let*` | Macro |
+| 69 | Basic hash tables | Needs OCaml `Hashtbl` backing |
+| 125 | Intermediate hash tables | Supersedes 69, uses comparators |
+| 128 | Comparators | Pure Scheme records |
+| 132 | Sort libraries | Merge sort in Scheme + vector sort |
+| 133 | Vector library | ~30 procedures |
+| 151 | Bitwise operations | Needs OCaml integer primitives |
+
+**Tier 3 — Future (not in initial milestone):**
+
+SRFI 13 (strings), 14 (char-sets), 41 (streams), 113 (sets/bags),
+115 (regex) — deferred until demand arises.
+
+**Tests:** ~30 for infrastructure + tier 1, ~50 for tier 2
+
+---
+
+### Milestone 17 — C Embedding API
 
 Built via OCaml's C FFI. Exposes the same operations as the OCaml embedding
 API (M11) with C-friendly types:
@@ -640,7 +780,13 @@ M6 (stdlib)     M7 (macros)
        │
   M13 (packages)
        │
-  M14 (C embedding)
+  M14 (output ports & file I/O)
+       │
+  M15 (std libraries)
+       │
+  M16 (SRFIs)
+       │
+  M17 (C embedding)
 ```
 
 Each milestone is usable and testable on its own. The first meaningful
