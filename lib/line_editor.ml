@@ -139,6 +139,14 @@ let effective_prompt t =
   else
     t.config.prompt
 
+let effective_continuation_prompt t =
+  let prompt = effective_prompt t in
+  let target_len = String.length prompt in
+  let cont = t.config.continuation_prompt in
+  let cont_len = String.length cont in
+  if cont_len >= target_len then cont
+  else cont ^ String.make (target_len - cont_len) ' '
+
 let render t st =
   let text = content_string st in
   let lines = lines_of_text text in
@@ -146,6 +154,7 @@ let render t st =
   let cur_row = cursor_row text st.cursor in
   let cur_col = cursor_col text st.cursor in
   let prompt = effective_prompt t in
+  let cont_prompt = effective_continuation_prompt t in
   (* Move to start of editing area — use the cursor row from the
      previous render so we move up the correct number of lines even
      when the content changed (e.g. history navigation from a multi-line
@@ -162,7 +171,7 @@ let render t st =
   in
   (* Write each line with appropriate prompt *)
   List.iteri (fun i _line ->
-    let line_prompt = if i = 0 then prompt else t.config.continuation_prompt in
+    let line_prompt = if i = 0 then prompt else cont_prompt in
     Terminal.write_string t.term line_prompt;
     let display_line =
       if i < List.length highlighted_lines then List.nth highlighted_lines i
@@ -181,7 +190,7 @@ let render t st =
   if lines_up > 0 then
     Terminal.write_string t.term (Printf.sprintf "\x1b[%dA" lines_up);
   let prompt_len = if cur_row = 0 then String.length prompt
-                   else String.length t.config.continuation_prompt in
+                   else String.length cont_prompt in
   Terminal.move_to_column t.term (prompt_len + cur_col + 1);
   st.rendered_row <- cur_row
 
