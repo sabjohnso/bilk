@@ -319,6 +319,26 @@ let test_cond_test_only () =
   (* (cond (42)) → 42, the test value is returned *)
   check_datum "cond test only" (Datum.Fixnum 42) (eval "(cond (42))")
 
+let test_cond_arrow () =
+  check_datum "cond =>" (Datum.Fixnum 2)
+    (eval "(cond ((assv 'b '((a 1) (b 2))) => cadr))")
+
+let test_cond_arrow_false () =
+  check_datum "cond => false" (Datum.Symbol "nope")
+    (eval "(cond ((assv 'z '((a 1) (b 2))) => cdr) (else 'nope))")
+
+let test_cond_arrow_builtin () =
+  check_datum "cond => builtin" (Datum.Fixnum (-42))
+    (eval "(cond (42 => -) (else 0))")
+
+let test_cond_arrow_lambda () =
+  check_datum "cond => lambda" (Datum.Fixnum 100)
+    (eval "(cond (10 => (lambda (x) (* x x))))")
+
+let test_cond_arrow_non_last () =
+  check_datum "cond => non-last" (Datum.Str (Bytes.of_string "hello"))
+    (eval "(cond (#f 'no) (\"hello\" => (lambda (x) x)) (else 'no))")
+
 (* --- case --- *)
 
 let test_case_match () =
@@ -2974,6 +2994,11 @@ let () =
        ; Alcotest.test_case "cond expr" `Quick test_cond_expr
        ; Alcotest.test_case "cond multi body" `Quick test_cond_multi_body
        ; Alcotest.test_case "cond test only" `Quick test_cond_test_only
+       ; Alcotest.test_case "cond =>" `Quick test_cond_arrow
+       ; Alcotest.test_case "cond => false" `Quick test_cond_arrow_false
+       ; Alcotest.test_case "cond => builtin" `Quick test_cond_arrow_builtin
+       ; Alcotest.test_case "cond => lambda" `Quick test_cond_arrow_lambda
+       ; Alcotest.test_case "cond => non-last" `Quick test_cond_arrow_non_last
        ])
     ; ("case",
        [ Alcotest.test_case "case match" `Quick test_case_match

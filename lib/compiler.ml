@@ -455,6 +455,10 @@ and compile_cond_clauses st loc clauses ~tail =
        | [test] ->
          (* (cond (test)) → return test value *)
          compile_expr st test ~tail
+       | [test; { Syntax.datum = Syntax.Symbol "=>"; _ }; proc_expr] ->
+         compile_cond_arrow st test proc_expr end_jumps ~tail;
+         let void_idx = add_constant st Datum.Void in
+         emit st (Opcode.Const void_idx)
        | test :: body ->
          compile_expr st test ~tail:false;
          let jf_pc = current_pc st in
@@ -487,6 +491,9 @@ and compile_cond_clauses st loc clauses ~tail =
          let next_pc = current_pc st in
          patch_jump st jf_pc next_pc;
          go rest
+       | [test; { Syntax.datum = Syntax.Symbol "=>"; _ }; proc_expr] ->
+         compile_cond_arrow st test proc_expr end_jumps ~tail;
+         go rest
        | test :: body ->
          compile_expr st test ~tail:false;
          let jf_pc = current_pc st in
@@ -504,6 +511,32 @@ and compile_cond_clauses st loc clauses ~tail =
   let end_pc = current_pc st in
   List.iter (fun pc -> patch_jump st pc end_pc) !end_jumps;
   ignore loc
+
+and compile_cond_arrow st test proc_expr end_jumps ~tail =
+  (* (cond (test => proc) ...) — compile test, if truthy call proc with test value *)
+  compile_expr st test ~tail:false;
+  let jf_pc = current_pc st in
+  emit st (Opcode.JumpFalse 0);
+  (* Test was truthy — push test value, build closure (lambda (%v) (proc %v)), call it *)
+  emit st Opcode.Push;
+  let child_st = create_state st.sym_table in
+  let val_name = "%cond-val" in
+  let val_idx = add_symbol child_st val_name in
+  emit child_st (Opcode.Lookup val_idx);
+  emit child_st Opcode.Push;
+  compile_expr child_st proc_expr ~tail:false;
+  emit child_st (Opcode.TailCall 1);
+  emit child_st Opcode.Return;
+  let child_code = package_code child_st [val_name] false "<cond-arrow>" in
+  let idx = add_child st child_code in
+  emit st (Opcode.MakeClosure idx);
+  if tail then emit st (Opcode.TailCall 1)
+  else emit st (Opcode.Call 1);
+  let jump_pc = current_pc st in
+  emit st (Opcode.Jump 0);
+  end_jumps := jump_pc :: !end_jumps;
+  let next_pc = current_pc st in
+  patch_jump st jf_pc next_pc
 
 and compile_case st (s : Syntax.t) ~tail =
   let args = syntax_list_to_list s in
