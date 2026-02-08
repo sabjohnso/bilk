@@ -304,6 +304,44 @@ Changes to existing modules:
   `run_repl`, `run_expr`, `compile_file`, `run_fasl`; catches
   `Package.Package_error` and `Pkg_manager.Pkg_error` in error handlers
 
+**Milestone 14 (Output Ports & File I/O)** — complete.
+
+No new modules. Adds bidirectional ports, first-class port values, file I/O,
+string ports, the `read` procedure, and `(scheme file)`/`(scheme read)`
+libraries.
+
+Changes to existing modules:
+- `Port`: Restructured from input-only to bidirectional with `input_source`,
+  `output_sink`, `direction` internal types; added output constructors
+  (`of_out_channel`, `open_output_string`, `open_output_file`), write
+  operations (`write_char`, `write_uchar`, `write_string`, `write_u8`,
+  `write_bytes`, `flush`), read operations (`read_line`, `read_u8`,
+  `peek_u8`), `close`, predicates (`is_input`, `is_output`, `is_open`),
+  `file_name`; readtable field changed to `Obj.t option` to break
+  Datum→Port→Readtable→Datum cycle
+- `Datum`: Added `Port of Port.t` variant; `equal` returns false (identity);
+  `pp` shows `#<input-port file>` or `#<output-port file>`
+- `Syntax`: `from_datum` maps `Port` to `Symbol "#<port>"`
+- `Fasl`: `write_datum` raises `Fasl_error` for `Port`
+- `Reader`: Updated to use `Port.readtable_obj`/`set_readtable_obj` with
+  `Obj.repr`/`Obj.obj` casts
+- `Instance`: Added `current_input`, `current_output`, `current_error` fields
+  (Port.t refs for stdin/stdout/stderr); updated `display`/`write`/`newline`
+  for optional port argument; added port predicates (`port?`, `input-port?`,
+  `output-port?`, `input-port-open?`, `output-port-open?`, `textual-port?`,
+  `binary-port?`), current port procedures, string port constructors
+  (`open-input-string`, `open-output-string`, `get-output-string`), write
+  primitives (`write-char`, `write-string`, `write-u8`, `write-bytevector`,
+  `flush-output-port`), read primitives (`read-char`, `peek-char`,
+  `read-line`, `read-string`, `read-u8`, `peek-u8`, `read-bytevector`,
+  `char-ready?`), file I/O (`open-input-file`, `open-output-file`,
+  `close-input-port`, `close-output-port`, `close-port`, `file-exists?`,
+  `delete-file`), higher-order port procedures (`call-with-port`,
+  `call-with-input-file`, `call-with-output-file`, `with-input-from-file`,
+  `with-output-to-file`), `read`; added `write-shared`/`write-simple`
+  aliases; built-in `(scheme file)`, `(scheme read)` libraries; updated
+  `(scheme write)` with `write-shared`/`write-simple`
+
 ## Development Workflow
 
 **This project uses TDD (Test-Driven Development).** Follow this cycle:
@@ -331,18 +369,18 @@ Tests live in `test/` as per-topic files and are run via `dune test`.
 | File | Scope |
 |---|---|
 | `test/test_char_type.ml` | Char_type (4 tests) |
-| `test/test_datum.ml` | Datum (20 tests) |
+| `test/test_datum.ml` | Datum (21 tests) |
 | `test/test_readtable.ml` | Readtable (24 tests: 20 unit + 4 QCheck) |
 | `test/test_loc.ml` | Loc (4 tests) |
 | `test/test_syntax.ml` | Syntax (12 tests) |
-| `test/test_port.ml` | Port (13 tests: 12 unit + 1 QCheck) |
+| `test/test_port.ml` | Port (31 tests: 30 unit + 1 QCheck) |
 | `test/test_reader.ml` | Reader (31 tests: 30 unit + 1 QCheck) |
 | `test/test_symbol.ml` | Symbol (8 tests: 6 unit + 2 QCheck) |
 | `test/test_env.ml` | Env (14 tests) |
 | `test/test_instance.ml` | Instance (31 tests) |
 | `test/test_opcode.ml`   | Opcode (4 tests) |
 | `test/test_compiler.ml` | Compiler (14 tests) |
-| `test/test_vm.ml`       | VM (296 tests: end-to-end via Instance.eval_string) |
+| `test/test_vm.ml`       | VM (338 tests: end-to-end via Instance.eval_string) |
 | `test/test_m6_review.ml` | M6 bugfix regression (7 tests) |
 | `test/test_expander.ml` | Expander (11 tests) |
 | `test/test_library.ml` | Library (25 tests) |

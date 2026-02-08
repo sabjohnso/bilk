@@ -2137,6 +2137,329 @@ let test_import_rename_empty () =
    with Compiler.Compile_error (_, msg) ->
      Alcotest.(check string) "msg" "rename: expected import set and pairs" msg)
 
+(* --- Port tests --- *)
+
+let test_port_predicates () =
+  check_datum "port?" (Datum.Bool true)
+    (eval "(port? (current-input-port))");
+  check_datum "input-port?" (Datum.Bool true)
+    (eval "(input-port? (current-input-port))");
+  check_datum "output-port?" (Datum.Bool true)
+    (eval "(output-port? (current-output-port))");
+  check_datum "input-port-open?" (Datum.Bool true)
+    (eval "(input-port-open? (current-input-port))");
+  check_datum "output-port-open?" (Datum.Bool true)
+    (eval "(output-port-open? (current-output-port))")
+
+let test_port_pred_false () =
+  check_datum "not port?" (Datum.Bool false) (eval "(port? 42)");
+  check_datum "input not output" (Datum.Bool false)
+    (eval "(output-port? (current-input-port))");
+  check_datum "output not input" (Datum.Bool false)
+    (eval "(input-port? (current-output-port))")
+
+let test_port_textual_binary () =
+  check_datum "textual?" (Datum.Bool true)
+    (eval "(textual-port? (current-input-port))");
+  check_datum "binary?" (Datum.Bool false)
+    (eval "(binary-port? (current-input-port))")
+
+let test_display_to_port () =
+  check_datum "display to port"
+    (Datum.Str (Bytes.of_string "42"))
+    (eval "(let ((p (open-output-string)))
+             (display 42 p)
+             (get-output-string p))")
+
+let test_write_to_port () =
+  check_datum "write to port"
+    (Datum.Str (Bytes.of_string "\"hello\""))
+    (eval "(let ((p (open-output-string)))
+             (write \"hello\" p)
+             (get-output-string p))")
+
+let test_newline_to_port () =
+  check_datum "newline to port"
+    (Datum.Str (Bytes.of_string "\n"))
+    (eval "(let ((p (open-output-string)))
+             (newline p)
+             (get-output-string p))")
+
+let test_display_default () =
+  (* display to default port (stdout) should not error *)
+  let inst = Instance.create () in
+  let out = Port.open_output_string () in
+  inst.current_output := out;
+  ignore (Instance.eval_string inst "(display 42)");
+  Alcotest.(check string) "captured" "42" (Port.get_output_string out)
+
+let test_current_error_port () =
+  check_datum "current-error-port is output"
+    (Datum.Bool true)
+    (eval "(output-port? (current-error-port))")
+
+(* --- String port + read/write tests --- *)
+
+let test_open_input_string_read_char () =
+  check_datum "read-char from input string"
+    (Datum.Char (Uchar.of_char 'a'))
+    (eval "(let ((p (open-input-string \"abc\")))
+             (read-char p))")
+
+let test_open_output_string_write_char () =
+  check_datum "write-char + get-output-string"
+    (Datum.Str (Bytes.of_string "X"))
+    (eval "(let ((p (open-output-string)))
+             (write-char #\\X p)
+             (get-output-string p))")
+
+let test_write_string_port () =
+  check_datum "write-string to port"
+    (Datum.Str (Bytes.of_string "hello"))
+    (eval "(let ((p (open-output-string)))
+             (write-string \"hello\" p)
+             (get-output-string p))")
+
+let test_read_line_port () =
+  check_datum "read-line"
+    (Datum.Str (Bytes.of_string "hello"))
+    (eval "(let ((p (open-input-string \"hello\\nworld\")))
+             (read-line p))")
+
+let test_peek_char_port () =
+  check_datum "peek-char"
+    (Datum.Char (Uchar.of_char 'a'))
+    (eval "(let ((p (open-input-string \"abc\")))
+             (peek-char p))")
+
+let test_peek_char_no_consume () =
+  check_datum "peek-char does not consume"
+    (Datum.Bool true)
+    (eval "(let ((p (open-input-string \"abc\")))
+             (peek-char p)
+             (eq? (read-char p) #\\a))")
+
+let test_read_u8_port () =
+  check_datum "read-u8"
+    (Datum.Fixnum 65)
+    (eval "(let ((p (open-input-string \"A\")))
+             (read-u8 p))")
+
+let test_write_u8_port () =
+  check_datum "write-u8"
+    (Datum.Str (Bytes.of_string "A"))
+    (eval "(let ((p (open-output-string)))
+             (write-u8 65 p)
+             (get-output-string p))")
+
+let test_read_eof () =
+  check_datum "read-char eof"
+    (Datum.Bool true)
+    (eval "(eof-object? (read-char (open-input-string \"\")))")
+
+let test_read_string_port () =
+  check_datum "read-string"
+    (Datum.Str (Bytes.of_string "hel"))
+    (eval "(let ((p (open-input-string \"hello\")))
+             (read-string 3 p))")
+
+let test_read_bytevector_port () =
+  check_datum "read-bytevector"
+    (Datum.Bytevector (Bytes.of_string "AB"))
+    (eval "(let ((p (open-input-string \"ABC\")))
+             (read-bytevector 2 p))")
+
+let test_write_bytevector_port () =
+  check_datum "write-bytevector"
+    (Datum.Str (Bytes.of_string "\x01\x02\x03"))
+    (eval "(let ((p (open-output-string)))
+             (write-bytevector #u8(1 2 3) p)
+             (get-output-string p))")
+
+let test_display_write_newline_to_string_port () =
+  check_datum "display+write+newline to string port"
+    (Datum.Str (Bytes.of_string "42\"hello\"\n"))
+    (eval "(let ((p (open-output-string)))
+             (display 42 p)
+             (write \"hello\" p)
+             (newline p)
+             (get-output-string p))")
+
+let test_write_to_input_error () =
+  (try ignore (eval "(write-string \"x\" (open-input-string \"y\"))");
+       Alcotest.fail "expected error"
+   with Failure msg | Vm.Runtime_error msg ->
+     Alcotest.(check bool) "error msg" true
+       (String.length msg > 0))
+
+let test_read_from_output_error () =
+  (try ignore (eval "(read-char (open-output-string))");
+       Alcotest.fail "expected error"
+   with Failure msg ->
+     Alcotest.(check bool) "error msg" true
+       (String.length msg > 0))
+
+let test_get_output_string_wrong_type () =
+  (try ignore (eval "(get-output-string (open-input-string \"x\"))");
+       Alcotest.fail "expected error"
+   with Failure msg ->
+     Alcotest.(check bool) "error msg" true
+       (String.length msg > 0))
+
+let test_flush_output_port () =
+  check_datum "flush no error"
+    Datum.Void
+    (eval "(let ((p (open-output-string)))
+             (flush-output-port p))")
+
+let test_char_ready () =
+  check_datum "char-ready?"
+    (Datum.Bool true)
+    (eval "(char-ready? (open-input-string \"x\"))")
+
+let test_peek_u8_port () =
+  check_datum "peek-u8"
+    (Datum.Fixnum 65)
+    (eval "(let ((p (open-input-string \"A\")))
+             (peek-u8 p))")
+
+(* --- File I/O tests --- *)
+
+let test_file_read_write_roundtrip () =
+  let tmp = Filename.temp_file "wile_test" ".txt" in
+  let inst = Instance.create () in
+  let code = Printf.sprintf
+    "(begin
+       (let ((p (open-output-file \"%s\")))
+         (write-string \"hello file\" p)
+         (close-output-port p))
+       (let ((p (open-input-file \"%s\")))
+         (let ((result (read-line p)))
+           (close-input-port p)
+           result)))" tmp tmp in
+  let result = Instance.eval_string inst code in
+  check_datum "file roundtrip"
+    (Datum.Str (Bytes.of_string "hello file")) result;
+  Sys.remove tmp
+
+let test_close_port_error () =
+  check_datum "close-port closes input"
+    (Datum.Bool false)
+    (eval "(let ((p (open-input-string \"x\")))
+             (close-port p)
+             (input-port-open? p))")
+
+let test_call_with_port () =
+  check_datum "call-with-port"
+    (Datum.Str (Bytes.of_string "abc"))
+    (eval "(call-with-port (open-input-string \"abc\")
+             (lambda (p) (read-line p)))")
+
+let test_call_with_port_closes () =
+  check_datum "call-with-port closes"
+    (Datum.Bool false)
+    (eval "(let ((saved #f))
+             (call-with-port (open-input-string \"x\")
+               (lambda (p) (set! saved p)))
+             (input-port-open? saved))")
+
+let test_with_output_to_file () =
+  let tmp = Filename.temp_file "wile_test" ".txt" in
+  let inst = Instance.create () in
+  let code = Printf.sprintf
+    "(begin
+       (with-output-to-file \"%s\"
+         (lambda () (display \"captured\")))
+       (let ((p (open-input-file \"%s\")))
+         (let ((r (read-line p)))
+           (close-port p) r)))" tmp tmp in
+  let result = Instance.eval_string inst code in
+  check_datum "with-output-to-file"
+    (Datum.Str (Bytes.of_string "captured")) result;
+  Sys.remove tmp
+
+let test_read_from_string () =
+  check_datum "read from string"
+    (Datum.Fixnum 42)
+    (eval "(read (open-input-string \"42\"))")
+
+let test_read_nested () =
+  check_datum "read nested list"
+    (Datum.Pair { car = Datum.Fixnum 1;
+                  cdr = Datum.Pair { car = Datum.Fixnum 2;
+                                     cdr = Datum.Nil } })
+    (eval "(read (open-input-string \"(1 2)\"))")
+
+let test_read_eof_obj () =
+  check_datum "read eof"
+    (Datum.Bool true)
+    (eval "(eof-object? (read (open-input-string \"\")))")
+
+let test_file_exists () =
+  let tmp = Filename.temp_file "wile_test" ".txt" in
+  let inst = Instance.create () in
+  let code = Printf.sprintf "(file-exists? \"%s\")" tmp in
+  check_datum "file-exists? true"
+    (Datum.Bool true) (Instance.eval_string inst code);
+  Sys.remove tmp;
+  check_datum "file-exists? false after remove"
+    (Datum.Bool false) (Instance.eval_string inst code)
+
+let test_delete_file () =
+  let tmp = Filename.temp_file "wile_test" ".txt" in
+  let inst = Instance.create () in
+  let code = Printf.sprintf
+    "(begin (delete-file \"%s\") (file-exists? \"%s\"))" tmp tmp in
+  check_datum "delete-file"
+    (Datum.Bool false) (Instance.eval_string inst code)
+
+let test_call_with_input_file () =
+  let tmp = Filename.temp_file "wile_test" ".txt" in
+  let oc = open_out tmp in
+  output_string oc "hello"; close_out oc;
+  let inst = Instance.create () in
+  let code = Printf.sprintf
+    "(call-with-input-file \"%s\" read-line)" tmp in
+  let result = Instance.eval_string inst code in
+  check_datum "call-with-input-file"
+    (Datum.Str (Bytes.of_string "hello")) result;
+  Sys.remove tmp
+
+(* --- Library tests --- *)
+
+let test_import_scheme_file () =
+  let tmp = Filename.temp_file "wile_test" ".txt" in
+  let inst = Instance.create () in
+  ignore (Instance.eval_string inst "(import (scheme file))");
+  let result = Instance.eval_string inst
+    (Printf.sprintf "(file-exists? \"%s\")" tmp) in
+  check_datum "import (scheme file)"
+    (Datum.Bool true) result;
+  Sys.remove tmp
+
+let test_import_scheme_read () =
+  check_datum "import (scheme read)"
+    (Datum.Fixnum 42)
+    (eval_seq ["(import (scheme read))";
+               "(read (open-input-string \"42\"))"])
+
+let test_import_scheme_write () =
+  check_datum "(scheme write) write-shared"
+    (Datum.Str (Bytes.of_string "42"))
+    (eval_seq ["(import (scheme write))";
+               "(let ((p (open-output-string)))
+                  (write-shared 42 p)
+                  (get-output-string p))"])
+
+let test_file_exists_delete () =
+  let tmp = Filename.temp_file "wile_test" ".txt" in
+  let inst = Instance.create () in
+  ignore (Instance.eval_string inst "(import (scheme file))");
+  let code = Printf.sprintf
+    "(begin (delete-file \"%s\") (file-exists? \"%s\"))" tmp tmp in
+  check_datum "delete via (scheme file)"
+    (Datum.Bool false) (Instance.eval_string inst code)
+
 let () =
   Alcotest.run "VM"
     [ ("self-evaluating",
@@ -2536,5 +2859,55 @@ let () =
        ; Alcotest.test_case "rename bad source" `Quick test_import_rename_bad_source
        ; Alcotest.test_case "only empty" `Quick test_import_only_empty
        ; Alcotest.test_case "rename empty" `Quick test_import_rename_empty
+       ])
+    ; ("ports",
+       [ Alcotest.test_case "predicates" `Quick test_port_predicates
+       ; Alcotest.test_case "pred false" `Quick test_port_pred_false
+       ; Alcotest.test_case "textual/binary" `Quick test_port_textual_binary
+       ; Alcotest.test_case "display to port" `Quick test_display_to_port
+       ; Alcotest.test_case "write to port" `Quick test_write_to_port
+       ; Alcotest.test_case "newline to port" `Quick test_newline_to_port
+       ; Alcotest.test_case "display default" `Quick test_display_default
+       ; Alcotest.test_case "current-error-port" `Quick test_current_error_port
+       ])
+    ; ("string-ports",
+       [ Alcotest.test_case "open-input-string read-char" `Quick test_open_input_string_read_char
+       ; Alcotest.test_case "open-output-string write-char" `Quick test_open_output_string_write_char
+       ; Alcotest.test_case "write-string" `Quick test_write_string_port
+       ; Alcotest.test_case "read-line" `Quick test_read_line_port
+       ; Alcotest.test_case "peek-char" `Quick test_peek_char_port
+       ; Alcotest.test_case "peek-char no consume" `Quick test_peek_char_no_consume
+       ; Alcotest.test_case "read-u8" `Quick test_read_u8_port
+       ; Alcotest.test_case "write-u8" `Quick test_write_u8_port
+       ; Alcotest.test_case "read eof" `Quick test_read_eof
+       ; Alcotest.test_case "read-string" `Quick test_read_string_port
+       ; Alcotest.test_case "read-bytevector" `Quick test_read_bytevector_port
+       ; Alcotest.test_case "write-bytevector" `Quick test_write_bytevector_port
+       ; Alcotest.test_case "display+write+newline" `Quick test_display_write_newline_to_string_port
+       ; Alcotest.test_case "write to input error" `Quick test_write_to_input_error
+       ; Alcotest.test_case "read from output error" `Quick test_read_from_output_error
+       ; Alcotest.test_case "get-output-string wrong" `Quick test_get_output_string_wrong_type
+       ; Alcotest.test_case "flush-output-port" `Quick test_flush_output_port
+       ; Alcotest.test_case "char-ready?" `Quick test_char_ready
+       ; Alcotest.test_case "peek-u8" `Quick test_peek_u8_port
+       ])
+    ; ("file-io",
+       [ Alcotest.test_case "file roundtrip" `Quick test_file_read_write_roundtrip
+       ; Alcotest.test_case "close-port" `Quick test_close_port_error
+       ; Alcotest.test_case "call-with-port" `Quick test_call_with_port
+       ; Alcotest.test_case "call-with-port closes" `Quick test_call_with_port_closes
+       ; Alcotest.test_case "with-output-to-file" `Quick test_with_output_to_file
+       ; Alcotest.test_case "read from string" `Quick test_read_from_string
+       ; Alcotest.test_case "read nested" `Quick test_read_nested
+       ; Alcotest.test_case "read eof" `Quick test_read_eof_obj
+       ; Alcotest.test_case "file-exists?" `Quick test_file_exists
+       ; Alcotest.test_case "delete-file" `Quick test_delete_file
+       ; Alcotest.test_case "call-with-input-file" `Quick test_call_with_input_file
+       ])
+    ; ("port-libraries",
+       [ Alcotest.test_case "import (scheme file)" `Quick test_import_scheme_file
+       ; Alcotest.test_case "import (scheme read)" `Quick test_import_scheme_read
+       ; Alcotest.test_case "import (scheme write)" `Quick test_import_scheme_write
+       ; Alcotest.test_case "file-exists?+delete" `Quick test_file_exists_delete
        ])
     ]

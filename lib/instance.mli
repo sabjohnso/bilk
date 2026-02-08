@@ -39,6 +39,12 @@ type t = {
   (** When [true], compiled library code is cached to [.fasl] files
       alongside the source [.sld] files, and loaded from cache when
       the cache is fresh.  Defaults to [false]. *)
+  current_input : Port.t ref;
+  (** The current input port (default: stdin). *)
+  current_output : Port.t ref;
+  (** The current output port (default: stdout). *)
+  current_error : Port.t ref;
+  (** The current error port (default: stderr). *)
 }
 
 (** {1 Constructors} *)

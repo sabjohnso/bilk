@@ -8,8 +8,8 @@ type state = {
 
 let make_state readtable port =
   (* Use port's stored readtable if available (persists #!fold-case) *)
-  let rt = match Port.readtable port with
-    | Some rt -> rt
+  let rt = match Port.readtable_obj port with
+    | Some obj -> (Obj.obj obj : Readtable.t)
     | None -> readtable
   in
   { port; readtable = rt; labels = Hashtbl.create 16 }
@@ -679,11 +679,11 @@ and read_directive state =
   | "fold-case" ->
     let rt = Readtable.with_fold_case true state.readtable in
     state.readtable <- rt;
-    Port.set_readtable state.port rt
+    Port.set_readtable_obj state.port (Obj.repr rt)
   | "no-fold-case" ->
     let rt = Readtable.with_fold_case false state.readtable in
     state.readtable <- rt;
-    Port.set_readtable state.port rt
+    Port.set_readtable_obj state.port (Obj.repr rt)
   | _ ->
     error state (Printf.sprintf "unknown directive: #!%s" directive)
 

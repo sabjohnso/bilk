@@ -186,6 +186,8 @@ let rec write_datum buf (d : Datum.t) =
     fasl_error "cannot serialize multiple values"
   | Error_object _ ->
     fasl_error "cannot serialize error object"
+  | Port _ ->
+    fasl_error "cannot serialize port"
 
 let rec read_datum symbols data pos =
   let tag = read_u8 data pos in

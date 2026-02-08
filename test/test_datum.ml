@@ -189,6 +189,18 @@ let test_datum_pp () =
   Alcotest.(check string) "bytevector" "#u8(1 2 3)"
     (Datum.to_string (Bytevector (Bytes.of_string "\x01\x02\x03")))
 
+let test_datum_port () =
+  let ip = Port.of_string "x" in
+  let op = Port.open_output_string () in
+  Alcotest.(check string) "input port pp"
+    "#<input-port <string>>"
+    (Datum.to_string (Datum.Port ip));
+  Alcotest.(check string) "output port pp"
+    "#<output-port <string>>"
+    (Datum.to_string (Datum.Port op));
+  Alcotest.(check bool) "ports not equal" false
+    (Datum.equal (Datum.Port ip) (Datum.Port ip))
+
 let () =
   Alcotest.run "Datum"
     [ ("Datum",
@@ -209,6 +221,7 @@ let () =
        ; Alcotest.test_case "closure" `Quick test_datum_closure
        ; Alcotest.test_case "continuation" `Quick test_datum_continuation
        ; Alcotest.test_case "values" `Quick test_datum_values
+       ; Alcotest.test_case "port" `Quick test_datum_port
        ])
     ; ("Helpers",
        [ Alcotest.test_case "is_true" `Quick test_is_true

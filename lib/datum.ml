@@ -30,6 +30,7 @@ and t =
   | Continuation of continuation
   | Values of t list
   | Error_object of error_obj
+  | Port of Port.t
 
 and primitive = {
   prim_name : string;
@@ -112,6 +113,7 @@ let rec equal a b =
     && a.err_tag = b.err_tag
     && List.length a.err_irritants = List.length b.err_irritants
     && List.for_all2 equal a.err_irritants b.err_irritants
+  | Port _, Port _ -> false
   | _ -> false
 
 let rec pp fmt = function
@@ -158,6 +160,11 @@ let rec pp fmt = function
   | Continuation _ -> Format.fprintf fmt "#<continuation>"
   | Values vs -> Format.fprintf fmt "#<values %d>" (List.length vs)
   | Error_object e -> Format.fprintf fmt "#<error \"%s\">" e.err_message
+  | Port p ->
+    if Port.is_input p then
+      Format.fprintf fmt "#<input-port %s>" (Port.file_name p)
+    else
+      Format.fprintf fmt "#<output-port %s>" (Port.file_name p)
 
 and pp_tail fmt = function
   | Nil -> ()

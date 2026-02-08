@@ -139,6 +139,128 @@ let test_of_file_loc () =
   check_loc "line 2" (Loc.make tmp 2 1) (Port.current_loc p);
   Sys.remove tmp
 
+(* --- Output port tests --- *)
+
+let test_output_string_basic () =
+  let p = Port.open_output_string () in
+  Port.write_char p 'a';
+  Port.write_char p 'b';
+  Port.write_char p 'c';
+  Alcotest.(check string) "abc" "abc" (Port.get_output_string p)
+
+let test_output_string_write_string () =
+  let p = Port.open_output_string () in
+  Port.write_string p "hello";
+  Port.write_string p " world";
+  Alcotest.(check string) "hello world" "hello world" (Port.get_output_string p)
+
+let test_output_string_write_uchar () =
+  let p = Port.open_output_string () in
+  Port.write_uchar p (Uchar.of_int 0x03BB);  (* lambda *)
+  Alcotest.(check string) "lambda" "\xCE\xBB" (Port.get_output_string p)
+
+let test_output_string_close () =
+  let p = Port.open_output_string () in
+  Port.write_string p "test";
+  Alcotest.(check bool) "open" true (Port.is_open p);
+  Port.close p;
+  Alcotest.(check bool) "closed" false (Port.is_open p)
+
+let test_output_channel () =
+  let tmp = Filename.temp_file "wile_test" ".out" in
+  let p = Port.open_output_file tmp in
+  Port.write_string p "hello file";
+  Port.close p;
+  let content = In_channel.with_open_bin tmp In_channel.input_all in
+  Alcotest.(check string) "file content" "hello file" content;
+  Sys.remove tmp
+
+let test_read_line_basic () =
+  let p = Port.of_string "hello\nworld" in
+  Alcotest.(check (option string)) "line 1" (Some "hello") (Port.read_line p);
+  Alcotest.(check (option string)) "line 2" (Some "world") (Port.read_line p);
+  Alcotest.(check (option string)) "eof" None (Port.read_line p)
+
+let test_read_line_newline () =
+  let p = Port.of_string "abc\n\n" in
+  Alcotest.(check (option string)) "line" (Some "abc") (Port.read_line p);
+  Alcotest.(check (option string)) "empty after newline" (Some "") (Port.read_line p);
+  Alcotest.(check (option string)) "eof" None (Port.read_line p)
+
+let test_read_line_eof () =
+  let p = Port.of_string "" in
+  Alcotest.(check (option string)) "eof" None (Port.read_line p)
+
+let test_read_u8 () =
+  let p = Port.of_string "\x41\x42\x43" in
+  Alcotest.(check (option int)) "A" (Some 0x41) (Port.read_u8 p);
+  Alcotest.(check (option int)) "B" (Some 0x42) (Port.read_u8 p);
+  Alcotest.(check (option int)) "C" (Some 0x43) (Port.read_u8 p);
+  Alcotest.(check (option int)) "eof" None (Port.read_u8 p)
+
+let test_peek_u8 () =
+  let p = Port.of_string "\xFF" in
+  Alcotest.(check (option int)) "peek" (Some 0xFF) (Port.peek_u8 p);
+  Alcotest.(check (option int)) "peek again" (Some 0xFF) (Port.peek_u8 p);
+  ignore (Port.read_u8 p);
+  Alcotest.(check (option int)) "eof" None (Port.peek_u8 p)
+
+let test_is_input_output () =
+  let ip = Port.of_string "x" in
+  let op = Port.open_output_string () in
+  Alcotest.(check bool) "input is input" true (Port.is_input ip);
+  Alcotest.(check bool) "input not output" false (Port.is_output ip);
+  Alcotest.(check bool) "output is output" true (Port.is_output op);
+  Alcotest.(check bool) "output not input" false (Port.is_input op)
+
+let test_close_prevents_io () =
+  let p = Port.of_string "abc" in
+  Port.close p;
+  Alcotest.check_raises "read after close"
+    (Failure "read-char: port is closed")
+    (fun () -> ignore (Port.read_char p))
+
+let test_write_to_input_fails () =
+  let p = Port.of_string "abc" in
+  Alcotest.check_raises "write to input"
+    (Failure "write-string: not an output port")
+    (fun () -> Port.write_string p "x")
+
+let test_read_from_output_fails () =
+  let p = Port.open_output_string () in
+  Alcotest.check_raises "read from output"
+    (Failure "peek-char: not an input port")
+    (fun () -> ignore (Port.peek_char p))
+
+let test_write_u8 () =
+  let p = Port.open_output_string () in
+  Port.write_u8 p 0x41;
+  Port.write_u8 p 0x42;
+  Alcotest.(check string) "AB" "AB" (Port.get_output_string p)
+
+let test_write_bytes () =
+  let p = Port.open_output_string () in
+  let data = Bytes.of_string "hello world" in
+  Port.write_bytes p data 6 5;
+  Alcotest.(check string) "world" "world" (Port.get_output_string p)
+
+let test_file_name () =
+  let p = Port.of_string ~file:"test.scm" "x" in
+  Alcotest.(check string) "file name" "test.scm" (Port.file_name p);
+  let op = Port.open_output_string () in
+  Alcotest.(check string) "string output" "<string>" (Port.file_name op)
+
+let test_open_input_file () =
+  let tmp = Filename.temp_file "wile_test" ".scm" in
+  let () =
+    let oc = open_out tmp in
+    output_string oc "abc";
+    close_out oc
+  in
+  let p = Port.open_input_file tmp in
+  Alcotest.(check (option char)) "first char" (Some 'a') (Port.read_char p);
+  Sys.remove tmp
+
 let () =
   Alcotest.run "Port"
     [ ("Port",
@@ -157,5 +279,29 @@ let () =
        [ Alcotest.test_case "of_file basic" `Quick test_of_file_basic
        ; Alcotest.test_case "of_file not found" `Quick test_of_file_not_found
        ; Alcotest.test_case "of_file loc" `Quick test_of_file_loc
+       ])
+    ; ("Output",
+       [ Alcotest.test_case "string basic" `Quick test_output_string_basic
+       ; Alcotest.test_case "write_string" `Quick test_output_string_write_string
+       ; Alcotest.test_case "write_uchar" `Quick test_output_string_write_uchar
+       ; Alcotest.test_case "close" `Quick test_output_string_close
+       ; Alcotest.test_case "channel" `Quick test_output_channel
+       ; Alcotest.test_case "write_u8" `Quick test_write_u8
+       ; Alcotest.test_case "write_bytes" `Quick test_write_bytes
+       ])
+    ; ("Read ops",
+       [ Alcotest.test_case "read_line basic" `Quick test_read_line_basic
+       ; Alcotest.test_case "read_line newline" `Quick test_read_line_newline
+       ; Alcotest.test_case "read_line eof" `Quick test_read_line_eof
+       ; Alcotest.test_case "read_u8" `Quick test_read_u8
+       ; Alcotest.test_case "peek_u8" `Quick test_peek_u8
+       ])
+    ; ("Predicates",
+       [ Alcotest.test_case "is_input/is_output" `Quick test_is_input_output
+       ; Alcotest.test_case "close prevents io" `Quick test_close_prevents_io
+       ; Alcotest.test_case "write to input" `Quick test_write_to_input_fails
+       ; Alcotest.test_case "read from output" `Quick test_read_from_output_fails
+       ; Alcotest.test_case "file_name" `Quick test_file_name
+       ; Alcotest.test_case "open_input_file" `Quick test_open_input_file
        ])
     ]

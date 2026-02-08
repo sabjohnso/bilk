@@ -45,6 +45,7 @@ and t =
   | Continuation of continuation (** First-class continuation *)
   | Values of t list           (** Multiple return values *)
   | Error_object of error_obj  (** R7RS error object *)
+  | Port of Port.t             (** First-class port value *)
 
 (** A built-in primitive function. *)
 and primitive = {

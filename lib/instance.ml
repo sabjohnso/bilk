@@ -11,6 +11,9 @@ type t = {
   features : string list;
   loading_libs : string list list ref;
   fasl_cache : bool ref;
+  current_input : Port.t ref;
+  current_output : Port.t ref;
+  current_error : Port.t ref;
 }
 
 (* --- Primitive helpers --- *)
@@ -153,20 +156,26 @@ let prim_ge args = chain_compare ">=" (>=) args
 
 (* --- I/O primitives --- *)
 
-let prim_display args =
+let prim_display current_output args =
   match args with
-  | [v] -> print_string (Datum.to_display_string v); Datum.Void
-  | _ -> runtime_error (Printf.sprintf "display: expected 1 argument, got %d" (List.length args))
+  | [v] -> Port.write_string !current_output (Datum.to_display_string v); Datum.Void
+  | [v; Datum.Port p] -> Port.write_string p (Datum.to_display_string v); Datum.Void
+  | [_; _] -> runtime_error "display: second argument must be an output port"
+  | _ -> runtime_error (Printf.sprintf "display: expected 1 or 2 arguments, got %d" (List.length args))
 
-let prim_write args =
+let prim_write_val current_output args =
   match args with
-  | [v] -> print_string (Datum.to_string v); Datum.Void
-  | _ -> runtime_error (Printf.sprintf "write: expected 1 argument, got %d" (List.length args))
+  | [v] -> Port.write_string !current_output (Datum.to_string v); Datum.Void
+  | [v; Datum.Port p] -> Port.write_string p (Datum.to_string v); Datum.Void
+  | [_; _] -> runtime_error "write: second argument must be an output port"
+  | _ -> runtime_error (Printf.sprintf "write: expected 1 or 2 arguments, got %d" (List.length args))
 
-let prim_newline args =
+let prim_newline current_output args =
   match args with
-  | [] -> print_newline (); Datum.Void
-  | _ -> runtime_error (Printf.sprintf "newline: expected 0 arguments, got %d" (List.length args))
+  | [] -> Port.write_char !current_output '\n'; Datum.Void
+  | [Datum.Port p] -> Port.write_char p '\n'; Datum.Void
+  | [_] -> runtime_error "newline: argument must be an output port"
+  | _ -> runtime_error (Printf.sprintf "newline: expected 0 or 1 arguments, got %d" (List.length args))
 
 (* --- Intrinsic dummy --- *)
 
@@ -1446,7 +1455,8 @@ let prim_error_object_type_pred args =
 
 (* --- Primitive registration --- *)
 
-let register_primitives symbols env handlers =
+let register_primitives symbols env handlers
+    ~current_input ~current_output ~current_error =
   let register name fn =
     let sym = Symbol.intern symbols name in
     Env.define env sym (make_prim name fn)
@@ -1467,9 +1477,11 @@ let register_primitives symbols env handlers =
   register "null?" prim_null;
   register "pair?" prim_pair;
   register "not" prim_not;
-  register "display" prim_display;
-  register "write" prim_write;
-  register "newline" prim_newline;
+  register "display" (prim_display current_output);
+  register "write" (prim_write_val current_output);
+  register "write-shared" (prim_write_val current_output);
+  register "write-simple" (prim_write_val current_output);
+  register "newline" (prim_newline current_output);
   register "eqv?" prim_eqv;
   register "eq?" prim_eq;
   register "list" prim_list;
@@ -1644,7 +1656,227 @@ let register_primitives symbols env handlers =
   register "error-object-irritants" prim_error_object_irritants;
   register "read-error?" prim_read_error_pred;
   register "file-error?" prim_file_error_pred;
-  register "error-object-type?" prim_error_object_type_pred
+  register "error-object-type?" prim_error_object_type_pred;
+  (* Port predicates *)
+  register "port?" (fun args -> match args with
+    | [Datum.Port _] -> Datum.Bool true
+    | [_] -> Datum.Bool false
+    | _ -> runtime_error (Printf.sprintf "port?: expected 1 argument, got %d" (List.length args)));
+  register "input-port?" (fun args -> match args with
+    | [Datum.Port p] -> Datum.Bool (Port.is_input p)
+    | [_] -> Datum.Bool false
+    | _ -> runtime_error (Printf.sprintf "input-port?: expected 1 argument, got %d" (List.length args)));
+  register "output-port?" (fun args -> match args with
+    | [Datum.Port p] -> Datum.Bool (Port.is_output p)
+    | [_] -> Datum.Bool false
+    | _ -> runtime_error (Printf.sprintf "output-port?: expected 1 argument, got %d" (List.length args)));
+  register "input-port-open?" (fun args -> match args with
+    | [Datum.Port p] -> Datum.Bool (Port.is_input p && Port.is_open p)
+    | [_] -> runtime_error "input-port-open?: expected input port"
+    | _ -> runtime_error (Printf.sprintf "input-port-open?: expected 1 argument, got %d" (List.length args)));
+  register "output-port-open?" (fun args -> match args with
+    | [Datum.Port p] -> Datum.Bool (Port.is_output p && Port.is_open p)
+    | [_] -> runtime_error "output-port-open?: expected output port"
+    | _ -> runtime_error (Printf.sprintf "output-port-open?: expected 1 argument, got %d" (List.length args)));
+  register "textual-port?" (fun args -> match args with
+    | [Datum.Port _] -> Datum.Bool true
+    | [_] -> Datum.Bool false
+    | _ -> runtime_error (Printf.sprintf "textual-port?: expected 1 argument, got %d" (List.length args)));
+  register "binary-port?" (fun args -> match args with
+    | [Datum.Port _] -> Datum.Bool false
+    | [_] -> Datum.Bool false
+    | _ -> runtime_error (Printf.sprintf "binary-port?: expected 1 argument, got %d" (List.length args)));
+  (* Current port procedures *)
+  register "current-input-port" (fun args -> match args with
+    | [] -> Datum.Port !current_input
+    | _ -> runtime_error (Printf.sprintf "current-input-port: expected 0 arguments, got %d" (List.length args)));
+  register "current-output-port" (fun args -> match args with
+    | [] -> Datum.Port !current_output
+    | _ -> runtime_error (Printf.sprintf "current-output-port: expected 0 arguments, got %d" (List.length args)));
+  register "current-error-port" (fun args -> match args with
+    | [] -> Datum.Port !current_error
+    | _ -> runtime_error (Printf.sprintf "current-error-port: expected 0 arguments, got %d" (List.length args)));
+  (* String port constructors *)
+  register "open-input-string" (fun args -> match args with
+    | [Datum.Str s] -> Datum.Port (Port.of_string (Bytes.to_string s))
+    | [_] -> runtime_error "open-input-string: expected string"
+    | _ -> runtime_error (Printf.sprintf "open-input-string: expected 1 argument, got %d" (List.length args)));
+  register "open-output-string" (fun args -> match args with
+    | [] -> Datum.Port (Port.open_output_string ())
+    | _ -> runtime_error (Printf.sprintf "open-output-string: expected 0 arguments, got %d" (List.length args)));
+  register "get-output-string" (fun args -> match args with
+    | [Datum.Port p] -> Datum.Str (Bytes.of_string (Port.get_output_string p))
+    | [_] -> runtime_error "get-output-string: expected output string port"
+    | _ -> runtime_error (Printf.sprintf "get-output-string: expected 1 argument, got %d" (List.length args)));
+  (* Write primitives *)
+  register "write-char" (fun args -> match args with
+    | [Datum.Char c] ->
+      let buf = Buffer.create 4 in
+      Buffer.add_utf_8_uchar buf c;
+      Port.write_string !current_output (Buffer.contents buf); Datum.Void
+    | [Datum.Char c; Datum.Port p] ->
+      Port.write_uchar p c; Datum.Void
+    | [_] -> runtime_error "write-char: expected character"
+    | [_; _] -> runtime_error "write-char: expected character and optional port"
+    | _ -> runtime_error (Printf.sprintf "write-char: expected 1 or 2 arguments, got %d" (List.length args)));
+  register "write-string" (fun args -> match args with
+    | [Datum.Str s] ->
+      Port.write_string !current_output (Bytes.to_string s); Datum.Void
+    | [Datum.Str s; Datum.Port p] ->
+      Port.write_string p (Bytes.to_string s); Datum.Void
+    | [_] -> runtime_error "write-string: expected string"
+    | [_; _] -> runtime_error "write-string: expected string and optional port"
+    | _ -> runtime_error (Printf.sprintf "write-string: expected 1 or 2 arguments, got %d" (List.length args)));
+  register "write-u8" (fun args -> match args with
+    | [Datum.Fixnum n] ->
+      Port.write_u8 !current_output n; Datum.Void
+    | [Datum.Fixnum n; Datum.Port p] ->
+      Port.write_u8 p n; Datum.Void
+    | [_] -> runtime_error "write-u8: expected integer"
+    | [_; _] -> runtime_error "write-u8: expected integer and optional port"
+    | _ -> runtime_error (Printf.sprintf "write-u8: expected 1 or 2 arguments, got %d" (List.length args)));
+  register "write-bytevector" (fun args -> match args with
+    | [Datum.Bytevector bv] ->
+      Port.write_bytes !current_output bv 0 (Bytes.length bv); Datum.Void
+    | [Datum.Bytevector bv; Datum.Port p] ->
+      Port.write_bytes p bv 0 (Bytes.length bv); Datum.Void
+    | [_] -> runtime_error "write-bytevector: expected bytevector"
+    | [_; _] -> runtime_error "write-bytevector: expected bytevector and optional port"
+    | _ -> runtime_error (Printf.sprintf "write-bytevector: expected 1 or 2 arguments, got %d" (List.length args)));
+  register "flush-output-port" (fun args -> match args with
+    | [] -> Port.flush !current_output; Datum.Void
+    | [Datum.Port p] -> Port.flush p; Datum.Void
+    | [_] -> runtime_error "flush-output-port: expected output port"
+    | _ -> runtime_error (Printf.sprintf "flush-output-port: expected 0 or 1 arguments, got %d" (List.length args)));
+  (* Read primitives *)
+  register "read-char" (fun args -> match args with
+    | [] -> (match Port.read_char !current_input with
+             | Some c -> Datum.Char (Uchar.of_char c)
+             | None -> Datum.Eof)
+    | [Datum.Port p] -> (match Port.read_char p with
+                         | Some c -> Datum.Char (Uchar.of_char c)
+                         | None -> Datum.Eof)
+    | [_] -> runtime_error "read-char: expected input port"
+    | _ -> runtime_error (Printf.sprintf "read-char: expected 0 or 1 arguments, got %d" (List.length args)));
+  register "peek-char" (fun args -> match args with
+    | [] -> (match Port.peek_char !current_input with
+             | Some c -> Datum.Char (Uchar.of_char c)
+             | None -> Datum.Eof)
+    | [Datum.Port p] -> (match Port.peek_char p with
+                         | Some c -> Datum.Char (Uchar.of_char c)
+                         | None -> Datum.Eof)
+    | [_] -> runtime_error "peek-char: expected input port"
+    | _ -> runtime_error (Printf.sprintf "peek-char: expected 0 or 1 arguments, got %d" (List.length args)));
+  register "read-line" (fun args -> match args with
+    | [] -> (match Port.read_line !current_input with
+             | Some s -> Datum.Str (Bytes.of_string s)
+             | None -> Datum.Eof)
+    | [Datum.Port p] -> (match Port.read_line p with
+                         | Some s -> Datum.Str (Bytes.of_string s)
+                         | None -> Datum.Eof)
+    | [_] -> runtime_error "read-line: expected input port"
+    | _ -> runtime_error (Printf.sprintf "read-line: expected 0 or 1 arguments, got %d" (List.length args)));
+  register "read-string" (fun args -> match args with
+    | [Datum.Fixnum n] ->
+      let buf = Buffer.create n in
+      let rec loop i =
+        if i >= n then ()
+        else match Port.read_char !current_input with
+          | None -> ()
+          | Some c -> Buffer.add_char buf c; loop (i + 1)
+      in loop 0;
+      if Buffer.length buf = 0 then Datum.Eof
+      else Datum.Str (Bytes.of_string (Buffer.contents buf))
+    | [Datum.Fixnum n; Datum.Port p] ->
+      let buf = Buffer.create n in
+      let rec loop i =
+        if i >= n then ()
+        else match Port.read_char p with
+          | None -> ()
+          | Some c -> Buffer.add_char buf c; loop (i + 1)
+      in loop 0;
+      if Buffer.length buf = 0 then Datum.Eof
+      else Datum.Str (Bytes.of_string (Buffer.contents buf))
+    | [_] -> runtime_error "read-string: expected integer"
+    | [_; _] -> runtime_error "read-string: expected integer and optional port"
+    | _ -> runtime_error (Printf.sprintf "read-string: expected 1 or 2 arguments, got %d" (List.length args)));
+  register "read-u8" (fun args -> match args with
+    | [] -> (match Port.read_u8 !current_input with
+             | Some b -> Datum.Fixnum b
+             | None -> Datum.Eof)
+    | [Datum.Port p] -> (match Port.read_u8 p with
+                         | Some b -> Datum.Fixnum b
+                         | None -> Datum.Eof)
+    | [_] -> runtime_error "read-u8: expected input port"
+    | _ -> runtime_error (Printf.sprintf "read-u8: expected 0 or 1 arguments, got %d" (List.length args)));
+  register "peek-u8" (fun args -> match args with
+    | [] -> (match Port.peek_u8 !current_input with
+             | Some b -> Datum.Fixnum b
+             | None -> Datum.Eof)
+    | [Datum.Port p] -> (match Port.peek_u8 p with
+                         | Some b -> Datum.Fixnum b
+                         | None -> Datum.Eof)
+    | [_] -> runtime_error "peek-u8: expected input port"
+    | _ -> runtime_error (Printf.sprintf "peek-u8: expected 0 or 1 arguments, got %d" (List.length args)));
+  register "read-bytevector" (fun args -> match args with
+    | [Datum.Fixnum n] ->
+      let buf = Bytes.create n in
+      let rec loop i =
+        if i >= n then i
+        else match Port.read_u8 !current_input with
+          | None -> i
+          | Some b -> Bytes.set buf i (Char.chr b); loop (i + 1)
+      in let read = loop 0 in
+      if read = 0 then Datum.Eof
+      else Datum.Bytevector (Bytes.sub buf 0 read)
+    | [Datum.Fixnum n; Datum.Port p] ->
+      let buf = Bytes.create n in
+      let rec loop i =
+        if i >= n then i
+        else match Port.read_u8 p with
+          | None -> i
+          | Some b -> Bytes.set buf i (Char.chr b); loop (i + 1)
+      in let read = loop 0 in
+      if read = 0 then Datum.Eof
+      else Datum.Bytevector (Bytes.sub buf 0 read)
+    | [_] -> runtime_error "read-bytevector: expected integer"
+    | [_; _] -> runtime_error "read-bytevector: expected integer and optional port"
+    | _ -> runtime_error (Printf.sprintf "read-bytevector: expected 1 or 2 arguments, got %d" (List.length args)));
+  register "char-ready?" (fun args -> match args with
+    | [] -> Datum.Bool true  (* string ports are always ready *)
+    | [Datum.Port _] -> Datum.Bool true
+    | [_] -> runtime_error "char-ready?: expected input port"
+    | _ -> runtime_error (Printf.sprintf "char-ready?: expected 0 or 1 arguments, got %d" (List.length args)));
+  (* File I/O *)
+  register "open-input-file" (fun args -> match args with
+    | [Datum.Str s] -> Datum.Port (Port.open_input_file (Bytes.to_string s))
+    | [_] -> runtime_error "open-input-file: expected string"
+    | _ -> runtime_error (Printf.sprintf "open-input-file: expected 1 argument, got %d" (List.length args)));
+  register "open-output-file" (fun args -> match args with
+    | [Datum.Str s] -> Datum.Port (Port.open_output_file (Bytes.to_string s))
+    | [_] -> runtime_error "open-output-file: expected string"
+    | _ -> runtime_error (Printf.sprintf "open-output-file: expected 1 argument, got %d" (List.length args)));
+  register "close-input-port" (fun args -> match args with
+    | [Datum.Port p] -> Port.close p; Datum.Void
+    | [_] -> runtime_error "close-input-port: expected input port"
+    | _ -> runtime_error (Printf.sprintf "close-input-port: expected 1 argument, got %d" (List.length args)));
+  register "close-output-port" (fun args -> match args with
+    | [Datum.Port p] -> Port.close p; Datum.Void
+    | [_] -> runtime_error "close-output-port: expected output port"
+    | _ -> runtime_error (Printf.sprintf "close-output-port: expected 1 argument, got %d" (List.length args)));
+  register "close-port" (fun args -> match args with
+    | [Datum.Port p] -> Port.close p; Datum.Void
+    | [_] -> runtime_error "close-port: expected port"
+    | _ -> runtime_error (Printf.sprintf "close-port: expected 1 argument, got %d" (List.length args)));
+  (* File system *)
+  register "file-exists?" (fun args -> match args with
+    | [Datum.Str s] -> Datum.Bool (Sys.file_exists (Bytes.to_string s))
+    | [_] -> runtime_error "file-exists?: expected string"
+    | _ -> runtime_error (Printf.sprintf "file-exists?: expected 1 argument, got %d" (List.length args)));
+  register "delete-file" (fun args -> match args with
+    | [Datum.Str s] -> Sys.remove (Bytes.to_string s); Datum.Void
+    | [_] -> runtime_error "delete-file: expected string"
+    | _ -> runtime_error (Printf.sprintf "delete-file: expected 1 argument, got %d" (List.length args)))
 
 (* --- Instance creation --- *)
 
@@ -1776,6 +2008,23 @@ let scheme_base_runtime_names = [
   "utf8->string"; "string->utf8";
   (* I/O *)
   "display"; "write"; "newline";
+  (* Ports *)
+  "port?"; "input-port?"; "output-port?";
+  "input-port-open?"; "output-port-open?";
+  "textual-port?"; "binary-port?";
+  "current-input-port"; "current-output-port"; "current-error-port";
+  "open-input-string"; "open-output-string"; "get-output-string";
+  "write-char"; "write-string"; "write-u8"; "write-bytevector";
+  "flush-output-port";
+  "read-char"; "peek-char"; "read-line"; "read-string";
+  "read-u8"; "peek-u8"; "read-bytevector"; "char-ready?";
+  "open-input-file"; "open-output-file";
+  "close-input-port"; "close-output-port"; "close-port";
+  "file-exists?"; "delete-file";
+  "call-with-port";
+  "call-with-input-file"; "call-with-output-file";
+  "with-input-from-file"; "with-output-to-file";
+  "read";
   (* Control *)
   "apply"; "call/cc"; "call-with-current-continuation";
   "call-with-values"; "values"; "dynamic-wind";
@@ -1802,9 +2051,22 @@ let scheme_char_names = [
   "digit-value";
 ]
 
-let scheme_write_names = [ "display"; "write"; "newline" ]
+let scheme_write_names = [
+  "display"; "write"; "newline";
+  "write-shared"; "write-simple";
+]
 
 let scheme_cxr_names = [ "caar"; "cadr"; "cdar"; "cddr" ]
+
+let scheme_file_names = [
+  "open-input-file"; "open-output-file";
+  "close-input-port"; "close-output-port"; "close-port";
+  "call-with-input-file"; "call-with-output-file";
+  "with-input-from-file"; "with-output-to-file";
+  "file-exists?"; "delete-file";
+]
+
+let scheme_read_names = [ "read" ]
 
 let build_library inst name runtime_names syntax_names =
   let exports = Hashtbl.create (List.length runtime_names) in
@@ -1836,7 +2098,11 @@ let register_builtin_libraries inst =
   build_library inst ["scheme"; "write"]
     scheme_write_names [];
   build_library inst ["scheme"; "cxr"]
-    scheme_cxr_names []
+    scheme_cxr_names [];
+  build_library inst ["scheme"; "file"]
+    scheme_file_names [];
+  build_library inst ["scheme"; "read"]
+    scheme_read_names []
 
 (* --- Expander callbacks --- *)
 
@@ -1875,11 +2141,33 @@ let eval_boot inst src =
   let code = Compiler.compile inst.symbols expanded in
   ignore (Vm.execute ~winds:inst.winds inst.global_env code)
 
+let call inst proc args =
+  let n = List.length args in
+  let constants = Array.of_list (args @ [proc]) in
+  let instrs =
+    let buf = Array.make (2 * n + 3) Opcode.Halt in
+    List.iteri (fun i _ ->
+      buf.(2 * i) <- Opcode.Const i;
+      buf.(2 * i + 1) <- Opcode.Push) args;
+    buf.(2 * n) <- Opcode.Const n;
+    buf.(2 * n + 1) <- Opcode.Call n;
+    buf
+  in
+  let code : Datum.code = {
+    instructions = instrs; constants; symbols = [||]; children = [||];
+    params = [||]; variadic = false; name = "<call>";
+  } in
+  Vm.execute ~winds:inst.winds inst.global_env code
+
 let create ?(readtable = Readtable.default) () =
   let symbols = Symbol.create_table () in
   let global_env = Env.empty () in
   let handlers = ref [] in
-  register_primitives symbols global_env handlers;
+  let current_input = ref (Port.of_in_channel ~file:"<stdin>" stdin) in
+  let current_output = ref (Port.of_out_channel ~file:"<stdout>" stdout) in
+  let current_error = ref (Port.of_out_channel ~file:"<stderr>" stderr) in
+  register_primitives symbols global_env handlers
+    ~current_input ~current_output ~current_error;
   let syn_env = Expander.core_env () in
   let gensym_counter = ref 0 in
   let libraries = Library.create_registry () in
@@ -1887,8 +2175,64 @@ let create ?(readtable = Readtable.default) () =
   let inst = { symbols; global_env; readtable; winds = ref []; handlers;
                syn_env; gensym_counter; libraries;
                search_paths = ref []; features;
-               loading_libs = ref []; fasl_cache = ref false } in
+               loading_libs = ref []; fasl_cache = ref false;
+               current_input; current_output; current_error } in
   List.iter (eval_boot inst) boot_definitions;
+  (* Register higher-order port procedures that need the instance *)
+  let register_late name fn =
+    let sym = Symbol.intern inst.symbols name in
+    Env.define inst.global_env sym (make_prim name fn);
+    Expander.define_binding inst.syn_env name Expander.var_binding
+  in
+  register_late "call-with-port" (fun args -> match args with
+    | [Datum.Port p; proc] ->
+      let result = call inst proc [Datum.Port p] in
+      Port.close p;
+      result
+    | _ -> runtime_error "call-with-port: expected port and procedure");
+  register_late "call-with-input-file" (fun args -> match args with
+    | [Datum.Str s; proc] ->
+      let p = Port.open_input_file (Bytes.to_string s) in
+      Fun.protect ~finally:(fun () -> Port.close p) (fun () ->
+        call inst proc [Datum.Port p])
+    | _ -> runtime_error "call-with-input-file: expected string and procedure");
+  register_late "call-with-output-file" (fun args -> match args with
+    | [Datum.Str s; proc] ->
+      let p = Port.open_output_file (Bytes.to_string s) in
+      Fun.protect ~finally:(fun () -> Port.close p) (fun () ->
+        call inst proc [Datum.Port p])
+    | _ -> runtime_error "call-with-output-file: expected string and procedure");
+  register_late "with-input-from-file" (fun args -> match args with
+    | [Datum.Str s; proc] ->
+      let p = Port.open_input_file (Bytes.to_string s) in
+      let saved = !(inst.current_input) in
+      inst.current_input := p;
+      Fun.protect ~finally:(fun () ->
+        inst.current_input := saved;
+        Port.close p) (fun () ->
+        call inst proc [])
+    | _ -> runtime_error "with-input-from-file: expected string and procedure");
+  register_late "with-output-to-file" (fun args -> match args with
+    | [Datum.Str s; proc] ->
+      let p = Port.open_output_file (Bytes.to_string s) in
+      let saved = !(inst.current_output) in
+      inst.current_output := p;
+      Fun.protect ~finally:(fun () ->
+        inst.current_output := saved;
+        Port.close p) (fun () ->
+        call inst proc [])
+    | _ -> runtime_error "with-output-to-file: expected string and procedure");
+  register_late "read" (fun args ->
+    let port = match args with
+      | [] -> !(inst.current_input)
+      | [Datum.Port p] -> p
+      | [_] -> runtime_error "read: expected input port"
+      | _ -> runtime_error (Printf.sprintf "read: expected 0 or 1 arguments, got %d" (List.length args))
+    in
+    let s = Reader.read_syntax inst.readtable port in
+    match s.Syntax.datum with
+    | Syntax.Eof -> Datum.Eof
+    | _ -> Syntax.to_datum s);
   register_builtin_libraries inst;
   inst
 
@@ -2206,25 +2550,6 @@ let define_primitive inst name fn =
   let prim = Datum.Primitive { prim_name = name; prim_fn = fn; prim_intrinsic = None } in
   Env.define inst.global_env sym prim;
   Expander.define_binding inst.syn_env name (Expander.var_binding)
-
-let call inst proc args =
-  let n = List.length args in
-  let constants = Array.of_list (args @ [proc]) in
-  let instrs =
-    let buf = Array.make (2 * n + 3) Opcode.Halt in
-    List.iteri (fun i _ ->
-      buf.(2 * i) <- Opcode.Const i;
-      buf.(2 * i + 1) <- Opcode.Push) args;
-    buf.(2 * n) <- Opcode.Const n;
-    buf.(2 * n + 1) <- Opcode.Call n;
-    (* buf.(2 * n + 2) is already Halt *)
-    buf
-  in
-  let code : Datum.code = {
-    instructions = instrs; constants; symbols = [||]; children = [||];
-    params = [||]; variadic = false; name = "<call>";
-  } in
-  Vm.execute ~winds:inst.winds inst.global_env code
 
 let eval_syntax inst expr =
   match classify_top_level expr with

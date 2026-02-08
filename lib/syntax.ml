@@ -47,6 +47,7 @@ let rec from_datum loc (d : Datum.t) =
     | Datum.Continuation _ -> Symbol "#<continuation>"
     | Datum.Values _ -> Symbol "#<values>"
     | Datum.Error_object e -> Symbol (Printf.sprintf "#<error \"%s\">" e.err_message)
+    | Datum.Port _ -> Symbol "#<port>"
   in
   { loc; datum }
 
