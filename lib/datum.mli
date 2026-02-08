@@ -47,11 +47,21 @@ and t =
   | Error_object of error_obj  (** R7RS error object *)
   | Port of Port.t             (** First-class port value *)
   | Promise of promise         (** Lazy promise (delay/force) *)
+  | Hash_table of hash_table   (** Mutable hash table (SRFI 69/125) *)
 
 (** A lazy promise created by [delay] or [make-promise]. *)
 and promise = {
   mutable promise_done : bool;   (** Whether the promise has been forced *)
   mutable promise_value : t;     (** The thunk (unforced) or result (forced) *)
+}
+
+(** A mutable hash table with configurable equality and hash functions. *)
+and hash_table = {
+  mutable ht_data : (t * t) list array;  (** Bucket array *)
+  mutable ht_size : int;                  (** Number of entries *)
+  ht_equal : t;       (** Equality proc, or [Bool true] for structural equality *)
+  ht_hash : t;        (** Hash proc, or [Bool true] for built-in hash *)
+  ht_mutable : bool;  (** Whether mutation is allowed *)
 }
 
 (** A built-in primitive function. *)

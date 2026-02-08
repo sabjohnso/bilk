@@ -32,10 +32,19 @@ and t =
   | Error_object of error_obj
   | Port of Port.t
   | Promise of promise
+  | Hash_table of hash_table
 
 and promise = {
   mutable promise_done : bool;
   mutable promise_value : t;
+}
+
+and hash_table = {
+  mutable ht_data : (t * t) list array;
+  mutable ht_size : int;
+  ht_equal : t;
+  ht_hash : t;
+  ht_mutable : bool;
 }
 
 and primitive = {
@@ -121,6 +130,7 @@ let rec equal a b =
     && List.for_all2 equal a.err_irritants b.err_irritants
   | Port _, Port _ -> false
   | Promise _, Promise _ -> false
+  | Hash_table _, Hash_table _ -> false
   | _ -> false
 
 let rec pp fmt = function
@@ -177,6 +187,8 @@ let rec pp fmt = function
       Format.fprintf fmt "#<promise (forced %a)>" pp p.promise_value
     else
       Format.fprintf fmt "#<promise>"
+  | Hash_table ht ->
+    Format.fprintf fmt "#<hash-table (%d)>" ht.ht_size
 
 and pp_tail fmt = function
   | Nil -> ()

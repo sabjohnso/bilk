@@ -2435,7 +2435,21 @@ let register_builtin_libraries inst =
     "bit-field"; "bit-field-any?"; "bit-field-every?";
     "bit-field-replace"; "bit-field-rotate"; "bit-field-reverse";
   ] in
-  build_library inst ["srfi"; "151"] srfi_151_names []
+  build_library inst ["srfi"; "151"] srfi_151_names [];
+  (* SRFI 69 — basic hash tables (OCaml primitives) *)
+  let srfi_69_names = [
+    "make-hash-table"; "hash-table?"; "alist->hash-table";
+    "hash-table-equivalence-function"; "hash-table-hash-function";
+    "hash-table-ref"; "hash-table-ref/default";
+    "hash-table-set!"; "hash-table-delete!"; "hash-table-exists?";
+    "hash-table-update!"; "hash-table-update!/default";
+    "hash-table-size"; "hash-table-keys"; "hash-table-values";
+    "hash-table-walk"; "hash-table-fold";
+    "hash-table->alist"; "hash-table-copy"; "hash-table-merge!";
+    "hash"; "string-hash"; "string-ci-hash"; "hash-by-identity";
+    "hash-table-clear!"; "hash-table-mutable?";
+  ] in
+  build_library inst ["srfi"; "69"] srfi_69_names []
 
 (* --- Expander callbacks --- *)
 
@@ -2822,6 +2836,347 @@ let create ?(readtable = Readtable.default) () =
       let cleared = n land (lnot (mask lsl start)) in
       Datum.Fixnum (cleared lor (reversed lsl start))
     | _ -> runtime_error "bit-field-reverse: expected 3 integers");
+  (* --- SRFI 69 — Basic Hash Tables --- *)
+  let rec datum_hash (d : Datum.t) = match d with
+    | Bool b -> Hashtbl.hash b
+    | Fixnum n -> Hashtbl.hash n
+    | Flonum f -> Hashtbl.hash f
+    | Char c -> Uchar.to_int c
+    | Str s -> Hashtbl.hash (Bytes.to_string s)
+    | Symbol s -> Hashtbl.hash s
+    | Nil -> 0
+    | Pair { car; cdr } -> datum_hash car * 31 + datum_hash cdr
+    | Vector v -> Array.fold_left (fun h e -> h * 31 + datum_hash e) 0 v
+    | Bytevector bv -> Hashtbl.hash bv
+    | _ -> 0
+  in
+  let ht_raw_hash ht key = match ht.Datum.ht_hash with
+    | Datum.Bool true -> datum_hash key
+    | hash_fn ->
+      (match call inst hash_fn [key] with
+       | Datum.Fixnum n -> n
+       | v -> runtime_error (Printf.sprintf "hash function must return an integer, got %s" (Datum.to_string v)))
+  in
+  let ht_index h cap = (h land max_int) mod cap in
+  let ht_keys_equal ht a b = match ht.Datum.ht_equal with
+    | Datum.Bool true -> scheme_equal a b
+    | eq_fn -> Datum.is_true (call inst eq_fn [a; b])
+  in
+  let ht_maybe_resize ht =
+    let cap = Array.length ht.Datum.ht_data in
+    if ht.Datum.ht_size > cap * 2 && cap < max_int / 2 then begin
+      let new_cap = cap * 2 in
+      let new_data = Array.make new_cap [] in
+      Array.iter (List.iter (fun ((k, _v) as e) ->
+        let idx = ht_index (ht_raw_hash ht k) new_cap in
+        new_data.(idx) <- e :: new_data.(idx)
+      )) ht.Datum.ht_data;
+      ht.Datum.ht_data <- new_data
+    end
+  in
+  let require_ht name = function
+    | Datum.Hash_table ht -> ht
+    | v -> runtime_error (Printf.sprintf "%s: expected hash-table, got %s" name (Datum.to_string v))
+  in
+  let require_mutable name ht =
+    if not ht.Datum.ht_mutable then
+      runtime_error (Printf.sprintf "%s: hash-table is immutable" name)
+  in
+  let ht_find_bucket ht key =
+    let h = ht_raw_hash ht key in
+    let idx = ht_index h (Array.length ht.Datum.ht_data) in
+    (idx, ht.Datum.ht_data.(idx))
+  in
+  let ht_lookup ht key =
+    let (_idx, bucket) = ht_find_bucket ht key in
+    let rec search = function
+      | [] -> None
+      | (k, v) :: rest ->
+        if ht_keys_equal ht k key then Some v else search rest
+    in
+    search bucket
+  in
+  let ht_set ht key value =
+    let h = ht_raw_hash ht key in
+    let idx = ht_index h (Array.length ht.Datum.ht_data) in
+    let bucket = ht.Datum.ht_data.(idx) in
+    let rec replace = function
+      | [] ->
+        ht.Datum.ht_data.(idx) <- (key, value) :: bucket;
+        ht.Datum.ht_size <- ht.Datum.ht_size + 1;
+        ht_maybe_resize ht
+      | (k, _) :: rest ->
+        if ht_keys_equal ht k key then
+          ht.Datum.ht_data.(idx) <-
+            List.map (fun ((k2, _) as e) ->
+              if ht_keys_equal ht k2 key then (k2, value) else e
+            ) bucket
+        else
+          replace rest
+    in
+    replace bucket
+  in
+  let ht_delete ht key =
+    let h = ht_raw_hash ht key in
+    let idx = ht_index h (Array.length ht.Datum.ht_data) in
+    let bucket = ht.Datum.ht_data.(idx) in
+    let new_bucket = List.filter (fun (k, _) -> not (ht_keys_equal ht k key)) bucket in
+    let removed = List.length bucket - List.length new_bucket in
+    if removed > 0 then begin
+      ht.Datum.ht_data.(idx) <- new_bucket;
+      ht.Datum.ht_size <- ht.Datum.ht_size - removed
+    end
+  in
+  register_late "make-hash-table" (fun args ->
+    let (eq_fn, hash_fn, cap) = match args with
+      | [] -> (Datum.Bool true, Datum.Bool true, 16)
+      | [eq] -> (eq, Datum.Bool true, 16)
+      | [eq; hf] -> (eq, hf, 16)
+      | [eq; hf; Datum.Fixnum c] -> (eq, hf, (max 1 c))
+      | _ -> runtime_error "make-hash-table: expected 0-3 arguments"
+    in
+    Datum.Hash_table {
+      ht_data = Array.make cap [];
+      ht_size = 0;
+      ht_equal = eq_fn;
+      ht_hash = hash_fn;
+      ht_mutable = true;
+    });
+  register_late "hash-table?" (fun args -> match args with
+    | [Datum.Hash_table _] -> Datum.Bool true
+    | [_] -> Datum.Bool false
+    | _ -> runtime_error "hash-table?: expected 1 argument");
+  register_late "alist->hash-table" (fun args ->
+    let (alist, eq_fn, hash_fn) = match args with
+      | [a] -> (a, Datum.Bool true, Datum.Bool true)
+      | [a; eq] -> (a, eq, Datum.Bool true)
+      | [a; eq; hf] -> (a, eq, hf)
+      | _ -> runtime_error "alist->hash-table: expected 1-3 arguments"
+    in
+    let ht : Datum.hash_table = {
+      ht_data = Array.make 16 [];
+      ht_size = 0;
+      ht_equal = eq_fn;
+      ht_hash = hash_fn;
+      ht_mutable = true;
+    } in
+    (* Walk alist: earlier keys shadow later, so only insert if not present *)
+    let rec walk = function
+      | Datum.Nil -> ()
+      | Datum.Pair { car = Datum.Pair { car = k; cdr = v }; cdr = rest } ->
+        (match ht_lookup ht k with
+         | None -> ht_set ht k v
+         | Some _ -> ());
+        walk rest
+      | _ -> runtime_error "alist->hash-table: expected alist"
+    in
+    walk alist;
+    Datum.Hash_table ht);
+  register_late "hash-table-equivalence-function" (fun args -> match args with
+    | [ht_val] ->
+      let ht = require_ht "hash-table-equivalence-function" ht_val in
+      (match ht.ht_equal with
+       | Datum.Bool true ->
+         let sym = Symbol.intern inst.symbols "equal?" in
+         (match Env.lookup inst.global_env sym with
+          | Some v -> v
+          | None -> Datum.Bool true)
+       | proc -> proc)
+    | _ -> runtime_error "hash-table-equivalence-function: expected 1 argument");
+  register_late "hash-table-hash-function" (fun args -> match args with
+    | [ht_val] ->
+      let ht = require_ht "hash-table-hash-function" ht_val in
+      (match ht.ht_hash with
+       | Datum.Bool true ->
+         let sym = Symbol.intern inst.symbols "hash" in
+         (match Env.lookup inst.global_env sym with
+          | Some v -> v
+          | None -> Datum.Bool true)
+       | proc -> proc)
+    | _ -> runtime_error "hash-table-hash-function: expected 1 argument");
+  register_late "hash-table-ref" (fun args ->
+    match args with
+    | [ht_val; key] ->
+      let ht = require_ht "hash-table-ref" ht_val in
+      (match ht_lookup ht key with
+       | Some v -> v
+       | None -> runtime_error "hash-table-ref: key not found")
+    | [ht_val; key; thunk] ->
+      let ht = require_ht "hash-table-ref" ht_val in
+      (match ht_lookup ht key with
+       | Some v -> v
+       | None -> call inst thunk [])
+    | _ -> runtime_error "hash-table-ref: expected 2 or 3 arguments");
+  register_late "hash-table-ref/default" (fun args -> match args with
+    | [ht_val; key; default] ->
+      let ht = require_ht "hash-table-ref/default" ht_val in
+      (match ht_lookup ht key with
+       | Some v -> v
+       | None -> default)
+    | _ -> runtime_error "hash-table-ref/default: expected 3 arguments");
+  register_late "hash-table-set!" (fun args -> match args with
+    | [ht_val; key; value] ->
+      let ht = require_ht "hash-table-set!" ht_val in
+      require_mutable "hash-table-set!" ht;
+      ht_set ht key value;
+      Datum.Void
+    | _ -> runtime_error "hash-table-set!: expected 3 arguments");
+  register_late "hash-table-delete!" (fun args -> match args with
+    | [ht_val; key] ->
+      let ht = require_ht "hash-table-delete!" ht_val in
+      require_mutable "hash-table-delete!" ht;
+      ht_delete ht key;
+      Datum.Void
+    | _ -> runtime_error "hash-table-delete!: expected 2 arguments");
+  register_late "hash-table-exists?" (fun args -> match args with
+    | [ht_val; key] ->
+      let ht = require_ht "hash-table-exists?" ht_val in
+      Datum.Bool (ht_lookup ht key <> None)
+    | _ -> runtime_error "hash-table-exists?: expected 2 arguments");
+  register_late "hash-table-update!" (fun args ->
+    match args with
+    | [ht_val; key; fn] ->
+      let ht = require_ht "hash-table-update!" ht_val in
+      require_mutable "hash-table-update!" ht;
+      (match ht_lookup ht key with
+       | Some v -> ht_set ht key (call inst fn [v]); Datum.Void
+       | None -> runtime_error "hash-table-update!: key not found")
+    | [ht_val; key; fn; thunk] ->
+      let ht = require_ht "hash-table-update!" ht_val in
+      require_mutable "hash-table-update!" ht;
+      let old = match ht_lookup ht key with
+        | Some v -> v
+        | None -> call inst thunk []
+      in
+      ht_set ht key (call inst fn [old]);
+      Datum.Void
+    | _ -> runtime_error "hash-table-update!: expected 3 or 4 arguments");
+  register_late "hash-table-update!/default" (fun args -> match args with
+    | [ht_val; key; fn; default] ->
+      let ht = require_ht "hash-table-update!/default" ht_val in
+      require_mutable "hash-table-update!/default" ht;
+      let old = match ht_lookup ht key with
+        | Some v -> v
+        | None -> default
+      in
+      ht_set ht key (call inst fn [old]);
+      Datum.Void
+    | _ -> runtime_error "hash-table-update!/default: expected 4 arguments");
+  register_late "hash-table-size" (fun args -> match args with
+    | [ht_val] ->
+      let ht = require_ht "hash-table-size" ht_val in
+      Datum.Fixnum ht.ht_size
+    | _ -> runtime_error "hash-table-size: expected 1 argument");
+  register_late "hash-table-keys" (fun args -> match args with
+    | [ht_val] ->
+      let ht = require_ht "hash-table-keys" ht_val in
+      let keys = Array.fold_left (fun acc bucket ->
+        List.fold_left (fun a (k, _) -> k :: a) acc bucket
+      ) [] ht.ht_data in
+      Datum.list_of keys
+    | _ -> runtime_error "hash-table-keys: expected 1 argument");
+  register_late "hash-table-values" (fun args -> match args with
+    | [ht_val] ->
+      let ht = require_ht "hash-table-values" ht_val in
+      let vals = Array.fold_left (fun acc bucket ->
+        List.fold_left (fun a (_, v) -> v :: a) acc bucket
+      ) [] ht.ht_data in
+      Datum.list_of vals
+    | _ -> runtime_error "hash-table-values: expected 1 argument");
+  register_late "hash-table-walk" (fun args -> match args with
+    | [ht_val; proc] ->
+      let ht = require_ht "hash-table-walk" ht_val in
+      Array.iter (List.iter (fun (k, v) ->
+        ignore (call inst proc [k; v])
+      )) ht.ht_data;
+      Datum.Void
+    | _ -> runtime_error "hash-table-walk: expected 2 arguments");
+  register_late "hash-table-fold" (fun args -> match args with
+    | [ht_val; f; init] ->
+      let ht = require_ht "hash-table-fold" ht_val in
+      let acc = ref init in
+      Array.iter (List.iter (fun (k, v) ->
+        acc := call inst f [k; v; !acc]
+      )) ht.ht_data;
+      !acc
+    | _ -> runtime_error "hash-table-fold: expected 3 arguments");
+  register_late "hash-table->alist" (fun args -> match args with
+    | [ht_val] ->
+      let ht = require_ht "hash-table->alist" ht_val in
+      let pairs = Array.fold_left (fun acc bucket ->
+        List.fold_left (fun a (k, v) ->
+          Datum.Pair { car = k; cdr = v } :: a
+        ) acc bucket
+      ) [] ht.ht_data in
+      Datum.list_of pairs
+    | _ -> runtime_error "hash-table->alist: expected 1 argument");
+  register_late "hash-table-copy" (fun args ->
+    match args with
+    | [ht_val] | [ht_val; _] ->
+      let ht = require_ht "hash-table-copy" ht_val in
+      let mutable_ = match args with
+        | [_; Datum.Bool b] -> b
+        | [_] -> true
+        | _ -> true
+      in
+      let new_data = Array.copy ht.ht_data in
+      Datum.Hash_table {
+        ht_data = new_data;
+        ht_size = ht.ht_size;
+        ht_equal = ht.ht_equal;
+        ht_hash = ht.ht_hash;
+        ht_mutable = mutable_;
+      }
+    | _ -> runtime_error "hash-table-copy: expected 1 or 2 arguments");
+  register_late "hash-table-merge!" (fun args -> match args with
+    | [ht1_val; ht2_val] ->
+      let ht1 = require_ht "hash-table-merge!" ht1_val in
+      let ht2 = require_ht "hash-table-merge!" ht2_val in
+      require_mutable "hash-table-merge!" ht1;
+      Array.iter (List.iter (fun (k, v) ->
+        ht_set ht1 k v
+      )) ht2.ht_data;
+      ht1_val
+    | _ -> runtime_error "hash-table-merge!: expected 2 arguments");
+  register_late "hash" (fun args ->
+    match args with
+    | [obj] -> Datum.Fixnum (datum_hash obj land max_int)
+    | [obj; Datum.Fixnum bound] ->
+      Datum.Fixnum ((datum_hash obj land max_int) mod bound)
+    | _ -> runtime_error "hash: expected 1 or 2 arguments");
+  register_late "string-hash" (fun args ->
+    match args with
+    | [Datum.Str s] ->
+      Datum.Fixnum (Hashtbl.hash (Bytes.to_string s) land max_int)
+    | [Datum.Str s; Datum.Fixnum bound] ->
+      Datum.Fixnum ((Hashtbl.hash (Bytes.to_string s) land max_int) mod bound)
+    | _ -> runtime_error "string-hash: expected string and optional bound");
+  register_late "string-ci-hash" (fun args ->
+    match args with
+    | [Datum.Str s] ->
+      Datum.Fixnum (Hashtbl.hash (String.lowercase_ascii (Bytes.to_string s)) land max_int)
+    | [Datum.Str s; Datum.Fixnum bound] ->
+      Datum.Fixnum ((Hashtbl.hash (String.lowercase_ascii (Bytes.to_string s)) land max_int) mod bound)
+    | _ -> runtime_error "string-ci-hash: expected string and optional bound");
+  register_late "hash-by-identity" (fun args ->
+    match args with
+    | [obj] -> Datum.Fixnum (Hashtbl.hash obj land max_int)
+    | [obj; Datum.Fixnum bound] ->
+      Datum.Fixnum ((Hashtbl.hash obj land max_int) mod bound)
+    | _ -> runtime_error "hash-by-identity: expected 1 or 2 arguments");
+  register_late "hash-table-clear!" (fun args -> match args with
+    | [ht_val] ->
+      let ht = require_ht "hash-table-clear!" ht_val in
+      require_mutable "hash-table-clear!" ht;
+      Array.fill ht.ht_data 0 (Array.length ht.ht_data) [];
+      ht.ht_size <- 0;
+      Datum.Void
+    | _ -> runtime_error "hash-table-clear!: expected 1 argument");
+  register_late "hash-table-mutable?" (fun args -> match args with
+    | [ht_val] ->
+      let ht = require_ht "hash-table-mutable?" ht_val in
+      Datum.Bool ht.ht_mutable
+    | _ -> runtime_error "hash-table-mutable?: expected 1 argument");
   register_builtin_libraries inst;
   inst
 
