@@ -334,6 +334,20 @@ let test_indent_deep_nesting () =
   Alcotest.(check int) "if in define" 6
     (Paredit.compute_indent rt text (String.length text))
 
+let test_indent_binding_pairs () =
+  (* (let ((x 1) → inside bindings list, align (y 2) with (x 1) at col 6 *)
+  let text = "(let ((x 1)" in
+  Alcotest.(check int) "let binding pair" 6
+    (Paredit.compute_indent rt text (String.length text));
+  (* Same for let* *)
+  let text2 = "(let* ((x 1)" in
+  Alcotest.(check int) "let* binding pair" 7
+    (Paredit.compute_indent rt text2 (String.length text2));
+  (* Nested: (define (foo)\n  (let ((x 1) → inner bindings at col 8 *)
+  let text3 = "(define (foo)\n  (let ((x 1)" in
+  Alcotest.(check int) "nested let binding pair" 8
+    (Paredit.compute_indent rt text3 (String.length text3))
+
 let () =
   Alcotest.run "Paredit" [
     "navigation", [
@@ -417,5 +431,6 @@ let () =
       Alcotest.test_case "nested" `Quick test_indent_nested;
       Alcotest.test_case "nested call" `Quick test_indent_nested_call;
       Alcotest.test_case "deep nesting" `Quick test_indent_deep_nesting;
+      Alcotest.test_case "binding pairs" `Quick test_indent_binding_pairs;
     ];
   ]

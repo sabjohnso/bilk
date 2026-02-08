@@ -599,6 +599,9 @@ let compute_indent rt text cursor =
       if is_body_form then
         open_col + 2
       else
+        let head_is_call =
+          head_tok.kind = Tokenizer.Symbol || head_tok.kind = Tokenizer.Keyword
+        in
         (* Align with first argument if on same line as head *)
         match rest with
         | second_pos :: _ ->
@@ -606,4 +609,10 @@ let compute_indent rt text cursor =
             col_of_pos text second_pos
           else
             open_col + 2
-        | [] -> open_col + 2
+        | [] ->
+          if head_is_call then
+            (* Call with no visible args — standard indent *)
+            open_col + 2
+          else
+            (* Data list (e.g. binding pairs) — align with first element *)
+            col_of_pos text head_pos
