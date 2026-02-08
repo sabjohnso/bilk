@@ -337,6 +337,26 @@ let test_case_no_match () =
   check_datum "case no match" Datum.Void
     (eval "(case 99 ((1) 'a))")
 
+let test_case_arrow () =
+  check_datum "case =>" (Datum.Fixnum 30)
+    (eval "(case (+ 1 2) ((3) => (lambda (x) (* x 10))))")
+
+let test_case_arrow_builtin () =
+  check_datum "case => builtin" (Datum.Str (Bytes.of_string "b"))
+    (eval "(case 'b ((a) 1) ((b) => symbol->string))")
+
+let test_case_arrow_multi_datum () =
+  check_datum "case => multi-datum" (Datum.Fixnum (-5))
+    (eval "(case 5 ((1 2 5) => -) (else 0))")
+
+let test_case_arrow_no_match () =
+  check_datum "case => no match" (Datum.Symbol "no")
+    (eval "(case 99 ((1) => -) (else 'no))")
+
+let test_case_arrow_non_last () =
+  check_datum "case => non-last" (Datum.Str (Bytes.of_string "a"))
+    (eval "(case 'a ((a) => symbol->string) (else \"no\"))")
+
 (* --- do --- *)
 
 let test_do_simple () =
@@ -2960,6 +2980,11 @@ let () =
        ; Alcotest.test_case "case multi datum" `Quick test_case_multi_datum
        ; Alcotest.test_case "case else" `Quick test_case_else
        ; Alcotest.test_case "case no match" `Quick test_case_no_match
+       ; Alcotest.test_case "case =>" `Quick test_case_arrow
+       ; Alcotest.test_case "case => builtin" `Quick test_case_arrow_builtin
+       ; Alcotest.test_case "case => multi-datum" `Quick test_case_arrow_multi_datum
+       ; Alcotest.test_case "case => no match" `Quick test_case_arrow_no_match
+       ; Alcotest.test_case "case => non-last" `Quick test_case_arrow_non_last
        ])
     ; ("do",
        [ Alcotest.test_case "do simple" `Quick test_do_simple

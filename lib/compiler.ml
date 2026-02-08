@@ -534,6 +534,11 @@ and compile_case_clauses st loc key_name clauses =
       (match parts with
        | { Syntax.datum = Syntax.Symbol "else"; _ } :: body ->
          compile_seq st body ~tail:true
+       | datums_syn :: { Syntax.datum = Syntax.Symbol "=>"; _ } :: [proc_expr] ->
+         let datums = syntax_list_to_list datums_syn in
+         compile_case_datums_arrow st key_name datums proc_expr end_jumps;
+         let void_idx = add_constant st Datum.Void in
+         emit st (Opcode.Const void_idx)
        | datums_syn :: body when body <> [] ->
          let datums = syntax_list_to_list datums_syn in
          compile_case_datums st key_name datums body end_jumps;
@@ -547,6 +552,10 @@ and compile_case_clauses st loc key_name clauses =
          compile_error clause.loc "case: else clause must be last"
        | { Syntax.datum = Syntax.Symbol "else"; _ } :: body ->
          compile_seq st body ~tail:true
+       | datums_syn :: { Syntax.datum = Syntax.Symbol "=>"; _ } :: [proc_expr] ->
+         let datums = syntax_list_to_list datums_syn in
+         compile_case_datums_arrow st key_name datums proc_expr end_jumps;
+         go rest
        | datums_syn :: body when body <> [] ->
          let datums = syntax_list_to_list datums_syn in
          compile_case_datums st key_name datums body end_jumps;
@@ -587,6 +596,47 @@ and compile_case_datums st key_name datums body end_jumps =
   let body_target = current_pc st in
   List.iter (fun pc -> patch_jump st pc body_target) !body_jumps;
   compile_seq st body ~tail:true;
+  let end_pc = current_pc st in
+  end_jumps := end_pc :: !end_jumps;
+  emit st (Opcode.Jump 0);
+  end_jumps := (current_pc st - 1) :: (List.tl !end_jumps);
+  (* Patch skip jump to after body *)
+  let after_body = current_pc st in
+  patch_jump st skip_pc after_body
+
+and compile_case_datums_arrow st key_name datums proc_expr end_jumps =
+  (* Like compile_case_datums but calls proc with key instead of compiling body *)
+  let body_jumps = ref [] in
+  List.iter (fun d ->
+    let key_idx = add_symbol st key_name in
+    emit st (Opcode.Lookup key_idx);
+    emit st Opcode.Push;
+    let v = Syntax.to_datum d in
+    let c_idx = add_constant st v in
+    emit st (Opcode.Const c_idx);
+    emit st Opcode.Push;
+    let eqv_idx = add_symbol st "eqv?" in
+    emit st (Opcode.Lookup eqv_idx);
+    emit st (Opcode.Call 2);
+    let jf_pc = current_pc st in
+    emit st (Opcode.JumpFalse 0);
+    let jump_pc = current_pc st in
+    emit st (Opcode.Jump 0);
+    body_jumps := jump_pc :: !body_jumps;
+    let next_pc = current_pc st in
+    patch_jump st jf_pc next_pc
+  ) datums;
+  (* If none matched, jump to next clause *)
+  let skip_pc = current_pc st in
+  emit st (Opcode.Jump 0);
+  (* Patch body jumps to here: push key (arg), compile proc (acc), tail-call *)
+  let body_target = current_pc st in
+  List.iter (fun pc -> patch_jump st pc body_target) !body_jumps;
+  let key_idx = add_symbol st key_name in
+  emit st (Opcode.Lookup key_idx);
+  emit st Opcode.Push;
+  compile_expr st proc_expr ~tail:false;
+  emit st (Opcode.TailCall 1);
   let end_pc = current_pc st in
   end_jumps := end_pc :: !end_jumps;
   emit st (Opcode.Jump 0);
