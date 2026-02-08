@@ -192,6 +192,8 @@ let repl_load inst path =
   | Reader.Read_error (loc, msg) -> format_loc_error loc msg
   | Compiler.Compile_error (loc, msg) -> format_loc_error loc msg
   | Vm.Runtime_error msg -> format_error msg
+  | Fasl.Fasl_error msg -> format_error msg
+  | Failure msg -> format_error msg
   | Sys_error msg -> format_error msg
 
 let resolve_theme name =
@@ -312,6 +314,8 @@ let run_repl theme_name =
           | Reader.Read_error (loc, msg) -> format_loc_error loc msg
           | Compiler.Compile_error (loc, msg) -> format_loc_error loc msg
           | Vm.Runtime_error msg -> format_error msg
+          | Fasl.Fasl_error msg -> format_error msg
+          | Failure msg -> format_error msg
           end;
           eval_loop ()
       with
