@@ -135,14 +135,20 @@ let test_cursor_on_identifier_bold () =
   Alcotest.(check bool) "cursor bold"
     true (contains_substring result ";1m")
 
-let test_cursor_binding_underline () =
-  (* Cursor on 'x' in body — binding site 'x' in params should be underlined *)
+let test_cursor_binding_bold () =
+  (* Cursor on 'x' in body — binding site 'x' in params should be bold *)
   let text = "(define (foo x) x)" in
   let cursor = 16 in  (* on the 'x' in the body *)
   let result = Highlight.highlight_line theme rt text cursor in
-  (* Binding site x should have underline *)
-  Alcotest.(check bool) "binding underline"
-    true (contains_substring result ";4m")
+  (* Both cursor tok and binding site should have bold (;1m) *)
+  (* Count bold occurrences — at least 2 (cursor + binding site) *)
+  let count = ref 0 in
+  let len = String.length result in
+  for i = 0 to len - 3 do
+    if result.[i] = ';' && result.[i+1] = '1' && result.[i+2] = 'm' then
+      incr count
+  done;
+  Alcotest.(check bool) "binding bold" true (!count >= 2)
 
 let test_semantic_roundtrip () =
   let text = "(define (factorial n) (if (= n 0) 1 (* n (factorial (- n 1)))))" in
@@ -175,7 +181,7 @@ let () =
       Alcotest.test_case "let binding colored" `Quick test_let_binding_colored;
       Alcotest.test_case "lambda params colored" `Quick test_lambda_params_colored;
       Alcotest.test_case "cursor bold" `Quick test_cursor_on_identifier_bold;
-      Alcotest.test_case "cursor binding underline" `Quick test_cursor_binding_underline;
+      Alcotest.test_case "cursor binding bold" `Quick test_cursor_binding_bold;
       Alcotest.test_case "semantic roundtrip" `Quick test_semantic_roundtrip;
     ];
   ]

@@ -294,7 +294,7 @@ let find_cursor_binding (tokens : Tokenizer.token list) text cursor_pos marks =
   if cursor_pos < 0 then None
   else
     let cursor_tok = List.find_opt (fun (t : Tokenizer.token) ->
-      cursor_pos >= t.span.start && cursor_pos < t.span.stop
+      cursor_pos >= t.span.start && cursor_pos <= t.span.stop
       && (t.kind = Tokenizer.Symbol || t.kind = Tokenizer.Keyword)
     ) tokens in
     match cursor_tok with
@@ -393,7 +393,7 @@ let highlight_line theme rt text cursor_pos =
       else if is_cursor_tok_start tok.span.start then
         { base_style with bold = true }
       else if is_binding_highlight tok.span.start tok.span.stop then
-        { base_style with underline = true }
+        { base_style with bold = true }
       else
         base_style
     in
