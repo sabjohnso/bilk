@@ -107,46 +107,49 @@ let light_theme = {
 (* --- Matching paren finder --- *)
 
 let find_matching_paren tokens cursor_pos =
-  (* Check if cursor is adjacent to a paren *)
-  let find_token_at pos =
-    List.find_opt (fun (t : Tokenizer.token) ->
-      t.span.start = pos || t.span.stop = pos
-    ) tokens
-  in
-  let paren_at = find_token_at cursor_pos in
-  match paren_at with
-  | Some t when t.kind = Tokenizer.Paren_open && t.span.start = cursor_pos ->
+  (* Check for open paren starting at cursor (cursor right before it) *)
+  let open_at_cursor = List.find_opt (fun (t : Tokenizer.token) ->
+    t.kind = Tokenizer.Paren_open && t.span.start = cursor_pos
+  ) tokens in
+  (* Check for close paren ending at cursor (cursor right after it) *)
+  let close_before_cursor = List.find_opt (fun (t : Tokenizer.token) ->
+    t.kind = Tokenizer.Paren_close && t.span.stop = cursor_pos
+  ) tokens in
+  (* Prefer open paren at cursor, then close paren before cursor *)
+  match open_at_cursor with
+  | Some t ->
     (* Forward search for matching close *)
     let depth = ref 0 in
     let result = ref None in
     List.iter (fun (tok : Tokenizer.token) ->
-      if !result = None then begin
+      if !result = None && tok.span.start >= t.span.start then begin
         if tok.kind = Tokenizer.Paren_open then incr depth
         else if tok.kind = Tokenizer.Paren_close then begin
           decr depth;
-          if !depth = 0 && tok.span.start >= t.span.start then
+          if !depth = 0 then
             result := Some (t.span.start, tok.span.start)
         end
       end
-    ) (List.filter (fun (tok : Tokenizer.token) ->
-      tok.span.start >= t.span.start) tokens);
+    ) tokens;
     !result
-  | Some t when t.kind = Tokenizer.Paren_close && t.span.stop = cursor_pos ->
-    (* Backward search for matching open *)
-    let depth = ref 0 in
-    let result = ref None in
-    List.iter (fun (tok : Tokenizer.token) ->
-      if tok.span.start <= t.span.start then begin
-        if tok.kind = Tokenizer.Paren_close then incr depth
-        else if tok.kind = Tokenizer.Paren_open then begin
-          decr depth;
-          if !depth = 0 then
-            result := Some (tok.span.start, t.span.start)
+  | None ->
+    match close_before_cursor with
+    | Some t ->
+      (* Backward search for matching open *)
+      let depth = ref 0 in
+      let result = ref None in
+      List.iter (fun (tok : Tokenizer.token) ->
+        if !result = None && tok.span.start <= t.span.start then begin
+          if tok.kind = Tokenizer.Paren_close then incr depth
+          else if tok.kind = Tokenizer.Paren_open then begin
+            decr depth;
+            if !depth = 0 then
+              result := Some (tok.span.start, t.span.start)
+          end
         end
-      end
-    ) (List.rev tokens);
-    !result
-  | _ -> None
+      ) (List.rev tokens);
+      !result
+    | None -> None
 
 (* --- Semantic analysis --- *)
 
