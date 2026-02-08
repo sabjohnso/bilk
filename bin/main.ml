@@ -24,6 +24,7 @@ let handle_errors f =
   | Fasl.Fasl_error msg -> format_error msg; 1
   | Package.Package_error msg -> format_error msg; 1
   | Pkg_manager.Pkg_error msg -> format_error msg; 1
+  | Venv.Venv_error msg -> format_error msg; 1
   | Sys_error msg -> format_error msg; 1
   | Failure msg -> format_error msg; 1
 
@@ -66,7 +67,7 @@ let setup_package inst start_dir =
 
 let run_expr expr =
   let inst = make_instance () in
-  inst.search_paths := [Sys.getcwd ()];
+  inst.search_paths := Search_path.resolve ~base_dirs:[Sys.getcwd ()];
   setup_package inst (Sys.getcwd ());
   handle_errors (fun () ->
     let port = Port.of_string expr in
@@ -79,7 +80,7 @@ let run_expr expr =
 
 let run_file path =
   let inst = make_instance () in
-  inst.search_paths := [dir_for_path path];
+  inst.search_paths := Search_path.resolve ~base_dirs:[dir_for_path path];
   setup_package inst (dir_for_path path);
   handle_errors (fun () ->
     let port = Port.of_file path in
@@ -113,7 +114,8 @@ let generate_executable prog output_path =
      \  try\n\
      \    let inst = Wile.Instance.create () in\n\
      \    inst.Wile.Instance.fasl_cache := true;\n\
-     \    inst.Wile.Instance.search_paths := [Sys.getcwd ()];\n\
+     \    inst.Wile.Instance.search_paths :=\n\
+     \      Wile.Search_path.resolve ~base_dirs:[Sys.getcwd ()];\n\
      \    let prog = Wile.Fasl.read_program_bytes\n\
      \      inst.Wile.Instance.symbols (Bytes.of_string fasl_data) in\n\
      \    ignore (Wile.Instance.run_program inst prog)\n\
@@ -150,7 +152,7 @@ let generate_executable prog output_path =
 
 let compile_file path output exe =
   let inst = make_instance () in
-  inst.search_paths := [dir_for_path path];
+  inst.search_paths := Search_path.resolve ~base_dirs:[dir_for_path path];
   setup_package inst (dir_for_path path);
   handle_errors (fun () ->
     let port = Port.of_file path in
@@ -173,7 +175,7 @@ let compile_file path output exe =
 
 let run_fasl path =
   let inst = make_instance () in
-  inst.search_paths := [dir_for_path path];
+  inst.search_paths := Search_path.resolve ~base_dirs:[dir_for_path path];
   setup_package inst (dir_for_path path);
   handle_errors (fun () ->
     let prog = Fasl.read_program_fasl inst.symbols path in
@@ -291,7 +293,7 @@ let is_complete inst text =
 
 let run_repl theme_name =
   let inst = make_instance () in
-  inst.search_paths := [Sys.getcwd ()];
+  inst.search_paths := Search_path.resolve ~base_dirs:[Sys.getcwd ()];
   setup_package inst (Sys.getcwd ());
   Printf.printf "Wile Scheme %s\nType ,help for REPL commands, Ctrl-D to exit.\n%!" version;
   let initial_theme = match theme_name with
@@ -404,7 +406,15 @@ let make_default_cmd () =
             `S "SUBCOMMANDS";
             `P "Use $(b,wile compile) to ahead-of-time compile Scheme source.";
             `P "Use $(b,wile run) to execute a compiled program FASL.";
-            `P "Use $(b,wile pkg) to manage local packages."]
+            `P "Use $(b,wile pkg) to manage local packages.";
+            `P "Use $(b,wile venv) to create a virtual environment.";
+            `S "ENVIRONMENT";
+            `P "$(b,WILE_VENV) — path to active virtual environment \
+                (its $(b,lib/) directory is searched for libraries).";
+            `P "$(b,WILE_PATH) — colon-separated list of additional \
+                library search directories.";
+            `P "$(b,WILE_HOME) — override for the Wile home directory \
+                (default: $(b,~/.wile/))."]
   in
   Cmd.v info term
 
@@ -584,6 +594,35 @@ let make_pkg_info_cmd () =
   in
   Cmd.v info term
 
+(* --- Venv subcommand --- *)
+
+let make_venv_cmd () =
+  let open Cmdliner in
+  let dir_arg =
+    Arg.(required & pos 0 (some string) None &
+         info [] ~docv:"DIR" ~doc:"Directory for the new virtual environment.")
+  in
+  let cmd dir =
+    exit (handle_errors (fun () ->
+      Venv.create ~wile_version:version dir;
+      let abs_dir =
+        if Filename.is_relative dir then Filename.concat (Sys.getcwd ()) dir
+        else dir
+      in
+      Printf.printf "Created virtual environment in %s\n%!" dir;
+      Printf.printf "Activate with: export WILE_VENV=%s\n%!" abs_dir))
+  in
+  let term = Term.(const cmd $ dir_arg) in
+  let info =
+    Cmd.info "venv" ~version
+      ~doc:"Create a virtual environment"
+      ~man:[`S "DESCRIPTION";
+            `P "Creates a new virtual environment directory with a $(b,lib/) \
+                subdirectory for library files and a $(b,wile-venv.cfg) marker. \
+                Activate by setting $(b,WILE_VENV) to the directory path."]
+  in
+  Cmd.v info term
+
 let make_pkg_cmd () =
   let open Cmdliner in
   let info =
@@ -626,6 +665,12 @@ let () =
         Array.sub Sys.argv 2 (argc - 2)
       ] in
       exit (Cmd.eval ~argv (make_pkg_cmd ()))
+    | "venv" ->
+      let argv = Array.concat [
+        [| Sys.argv.(0) |];
+        Array.sub Sys.argv 2 (argc - 2)
+      ] in
+      exit (Cmd.eval ~argv (make_venv_cmd ()))
     | _ -> exit (Cmd.eval (make_default_cmd ()))
   end else
     exit (Cmd.eval (make_default_cmd ()))

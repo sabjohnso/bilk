@@ -64,28 +64,28 @@ _opam/        # Local opam switch (gitignored)
 
 **Milestone 0 (Foundation)** — complete.
 
-| Module | Purpose |
-|---|---|
-| `Char_type` | Character classification for the readtable (6 variants) |
-| `Datum` | Core Scheme value type (17 variants + code/env/closure/continuation types, structural equality, printer) |
-| `Readtable` | Immutable readtable with functional updates, R7RS default table |
+| Module      | Purpose                                                                                                  |
+|-------------|----------------------------------------------------------------------------------------------------------|
+| `Char_type` | Character classification for the readtable (6 variants)                                                  |
+| `Datum`     | Core Scheme value type (17 variants + code/env/closure/continuation types, structural equality, printer) |
+| `Readtable` | Immutable readtable with functional updates, R7RS default table                                          |
 
 **Milestone 1 (Reader)** — complete.
 
-| Module | Purpose |
-|---|---|
-| `Loc` | Source location type: file, line, column |
+| Module   | Purpose                                                                  |
+|----------|--------------------------------------------------------------------------|
+| `Loc`    | Source location type: file, line, column                                 |
 | `Syntax` | Compile-time syntax tree mirroring `Datum.t`, every node carries `Loc.t` |
-| `Port` | Input port abstraction (string ports), tracks line/column |
-| `Reader` | Readtable-driven recursive-descent parser |
+| `Port`   | Input port abstraction (string ports), tracks line/column                |
+| `Reader` | Readtable-driven recursive-descent parser                                |
 
 **Milestone 2 (Environments & Symbol Table)** — complete.
 
-| Module | Purpose |
-|---|---|
-| `Symbol` | Interned symbols with integer ids for fast equality |
-| `Env` | Lexical environments: chain of mutable frames (type alias for `Datum.env`) |
-| `Instance` | Per-instance state: symbol table, global env, readtable, eval |
+| Module     | Purpose                                                                    |
+|------------|----------------------------------------------------------------------------|
+| `Symbol`   | Interned symbols with integer ids for fast equality                        |
+| `Env`      | Lexical environments: chain of mutable frames (type alias for `Datum.env`) |
+| `Instance` | Per-instance state: symbol table, global env, readtable, eval              |
 
 **Milestone 3 (Bytecode & VM)** — complete.
 
@@ -133,8 +133,8 @@ Changes to existing modules:
 
 **Milestone 7 (Hygienic Macros)** — complete.
 
-| Module     | Purpose                                                        |
-|------------|----------------------------------------------------------------|
+| Module     | Purpose                                                                                                                     |
+|------------|-----------------------------------------------------------------------------------------------------------------------------|
 | `Expander` | Macro expander: syntax-rules, define-syntax, let-syntax, letrec-syntax, quasiquote, guard, define-record-type, syntax-error |
 
 Changes to existing modules:
@@ -223,11 +223,11 @@ Changes to existing modules:
 
 **R1 (Custom Line Editor)** — complete.
 
-| Module        | Purpose                                                        |
-|---------------|----------------------------------------------------------------|
+| Module        | Purpose                                                                         |
+|---------------|---------------------------------------------------------------------------------|
 | `Terminal`    | Raw terminal I/O: enter/leave raw mode, ANSI key parsing, cursor/screen control |
-| `History`     | Line history ring buffer with navigation, dedup, file persistence |
-| `Line_editor` | Editor engine: single-line editing, Emacs keybindings, history integration |
+| `History`     | Line history ring buffer with navigation, dedup, file persistence               |
+| `Line_editor` | Editor engine: single-line editing, Emacs keybindings, history integration      |
 
 Changes to existing modules:
 - `bin/main.ml`: Replaced all `LNoise.*` calls with `Line_editor` API
@@ -236,10 +236,10 @@ Changes to existing modules:
 
 **R3 (Syntax Highlighting)** — complete.
 
-| Module      | Purpose                                                        |
-|-------------|----------------------------------------------------------------|
+| Module      | Purpose                                                               |
+|-------------|-----------------------------------------------------------------------|
 | `Tokenizer` | Fault-tolerant lexer for highlighting (never fails, covers all bytes) |
-| `Highlight` | Theme engine + ANSI rendering with rainbow parens, paren matching |
+| `Highlight` | Theme engine + ANSI rendering with rainbow parens, paren matching     |
 
 Changes to existing modules:
 - `Line_editor`: Added `highlight` callback to config; render uses it for
@@ -265,8 +265,8 @@ Changes to existing modules:
 
 **R4 (Paredit Mode)** — complete.
 
-| Module | Purpose |
-|--------|---------|
+| Module    | Purpose                                                                                                          |
+|-----------|------------------------------------------------------------------------------------------------------------------|
 | `Paredit` | Structural editing: balanced insertion/deletion, sexp navigation, slurp/barf/wrap/splice/raise, auto-indentation |
 
 Changes to existing modules:
@@ -372,8 +372,8 @@ Changes to existing modules:
 
 **Milestone 16 (SRFI Support)** — complete.
 
-| Module | Purpose |
-|--------|---------|
+| Module | Purpose                                                       |
+|--------|---------------------------------------------------------------|
 | `Srfi` | Bundled SRFI library sources with lazy loading infrastructure |
 
 Adds infrastructure for bundled SRFIs + implements 13 SRFIs. Embedded
@@ -394,6 +394,34 @@ Changes to existing modules:
   `detect_features`; registered 20 SRFI 151 bitwise primitives; added
   `let-values`/`let*-values` to `scheme_base_syntax_names`; built-in
   `(srfi 151)` library via `build_library`
+
+**V1 (Virtual Environments & Search Paths)** — complete.
+
+| Module        | Purpose                                                        |
+|---------------|----------------------------------------------------------------|
+| `Venv`        | Virtual environment creation and validation                    |
+| `Search_path` | Library search path resolution with Python-inspired ordering   |
+
+Adds Python-inspired library path management and virtual environment support.
+
+Environment variables:
+- `WILE_VENV` — path to active virtual environment (its `lib/` is searched)
+- `WILE_PATH` — colon-separated additional library search directories
+- `WILE_HOME` — override for Wile home directory (default: `~/.wile/`)
+
+Search path resolution order:
+1. Script directory (or CWD for REPL/expr)
+2. Package dependencies (from `package.scm`)
+3. Virtual environment `lib/` (from `WILE_VENV`)
+4. `WILE_PATH` entries
+5. Site library (`~/.wile/lib/`)
+6. Built-in libraries & bundled SRFIs (fallback in loader)
+
+Changes to existing modules:
+- `bin/main.ml`: All `search_paths` assignments use `Search_path.resolve`;
+  added `wile venv` subcommand; `Venv.Venv_error` in error handler;
+  AOT executable template uses `Search_path.resolve`; updated man page
+  with environment variable documentation
 
 ## Development Workflow
 
@@ -419,36 +447,38 @@ dune build
 
 Tests live in `test/` as per-topic files and are run via `dune test`.
 
-| File | Scope |
-|---|---|
-| `test/test_char_type.ml` | Char_type (4 tests) |
-| `test/test_datum.ml` | Datum (21 tests) |
-| `test/test_readtable.ml` | Readtable (24 tests: 20 unit + 4 QCheck) |
-| `test/test_loc.ml` | Loc (4 tests) |
-| `test/test_syntax.ml` | Syntax (12 tests) |
-| `test/test_port.ml` | Port (31 tests: 30 unit + 1 QCheck) |
-| `test/test_reader.ml` | Reader (31 tests: 30 unit + 1 QCheck) |
-| `test/test_symbol.ml` | Symbol (8 tests: 6 unit + 2 QCheck) |
-| `test/test_env.ml` | Env (14 tests) |
-| `test/test_instance.ml` | Instance (31 tests) |
-| `test/test_opcode.ml`   | Opcode (4 tests) |
-| `test/test_compiler.ml` | Compiler (14 tests) |
-| `test/test_vm.ml`       | VM (401 tests: end-to-end via Instance.eval_string) |
-| `test/test_m6_review.ml` | M6 bugfix regression (7 tests) |
-| `test/test_expander.ml` | Expander (11 tests) |
-| `test/test_library.ml` | Library (25 tests) |
-| `test/test_fasl.ml` | Fasl (40 tests) |
-| `test/test_aot.ml` | AOT compiler (27 tests) |
-| `test/test_terminal.ml` | Terminal key parsing (16 tests) |
-| `test/test_history.ml` | History (20 tests) |
-| `test/test_line_editor.ml` | Line_editor (21 tests) |
-| `test/test_tokenizer.ml` | Tokenizer (26 tests) |
-| `test/test_highlight.ml` | Highlight (18 tests) |
-| `test/test_paredit.ml` | Paredit (73 tests) |
-| `test/test_semver.ml` | Semver (34 tests) |
-| `test/test_package.ml` | Package (16 tests) |
-| `test/test_pkg_manager.ml` | Pkg_manager (25 tests) |
-| `test/test_srfi.ml` | SRFI (84 tests) |
+| File                       | Scope                                               |
+|----------------------------|-----------------------------------------------------|
+| `test/test_char_type.ml`   | Char_type (4 tests)                                 |
+| `test/test_datum.ml`       | Datum (21 tests)                                    |
+| `test/test_readtable.ml`   | Readtable (24 tests: 20 unit + 4 QCheck)            |
+| `test/test_loc.ml`         | Loc (4 tests)                                       |
+| `test/test_syntax.ml`      | Syntax (12 tests)                                   |
+| `test/test_port.ml`        | Port (31 tests: 30 unit + 1 QCheck)                 |
+| `test/test_reader.ml`      | Reader (31 tests: 30 unit + 1 QCheck)               |
+| `test/test_symbol.ml`      | Symbol (8 tests: 6 unit + 2 QCheck)                 |
+| `test/test_env.ml`         | Env (14 tests)                                      |
+| `test/test_instance.ml`    | Instance (31 tests)                                 |
+| `test/test_opcode.ml`      | Opcode (4 tests)                                    |
+| `test/test_compiler.ml`    | Compiler (14 tests)                                 |
+| `test/test_vm.ml`          | VM (401 tests: end-to-end via Instance.eval_string) |
+| `test/test_m6_review.ml`   | M6 bugfix regression (7 tests)                      |
+| `test/test_expander.ml`    | Expander (11 tests)                                 |
+| `test/test_library.ml`     | Library (25 tests)                                  |
+| `test/test_fasl.ml`        | Fasl (40 tests)                                     |
+| `test/test_aot.ml`         | AOT compiler (27 tests)                             |
+| `test/test_terminal.ml`    | Terminal key parsing (16 tests)                     |
+| `test/test_history.ml`     | History (20 tests)                                  |
+| `test/test_line_editor.ml` | Line_editor (21 tests)                              |
+| `test/test_tokenizer.ml`   | Tokenizer (26 tests)                                |
+| `test/test_highlight.ml`   | Highlight (18 tests)                                |
+| `test/test_paredit.ml`     | Paredit (73 tests)                                  |
+| `test/test_semver.ml`      | Semver (34 tests)                                   |
+| `test/test_package.ml`     | Package (16 tests)                                  |
+| `test/test_pkg_manager.ml` | Pkg_manager (25 tests)                              |
+| `test/test_srfi.ml`        | SRFI (84 tests)                                     |
+| `test/test_venv.ml`        | Venv (11 tests)                                     |
+| `test/test_search_path.ml` | Search_path (13 tests)                              |
 
 Test dependencies:
 - **alcotest** — unit test framework with readable output
