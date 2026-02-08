@@ -70,14 +70,7 @@ let strip_ansi text =
 
 let dark_theme = {
   name = "dark";
-  paren = [|
-    fg 196;  (* red *)
-    fg 208;  (* orange *)
-    fg 226;  (* yellow *)
-    fg 46;   (* green *)
-    fg 21;   (* blue *)
-    fg 93;   (* purple *)
-  |];
+  paren = [| default_style |];
   string_style = fg 114;        (* green *)
   number_style = fg 208;        (* orange *)
   keyword_style = fg_bold 69;   (* blue, bold *)
@@ -92,14 +85,7 @@ let dark_theme = {
 
 let light_theme = {
   name = "light";
-  paren = [|
-    fg 160;  (* dark red *)
-    fg 166;  (* dark orange *)
-    fg 28;   (* dark green *)
-    fg 25;   (* dark blue *)
-    fg 91;   (* dark purple *)
-    fg 130;  (* brown *)
-  |];
+  paren = [| default_style |];
   string_style = fg 28;         (* dark green *)
   number_style = fg 166;        (* dark orange *)
   keyword_style = fg_bold 25;   (* dark blue, bold *)

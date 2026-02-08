@@ -39,14 +39,11 @@ let test_strip_ansi_roundtrip () =
   Alcotest.(check string) "roundtrip"
     text (Highlight.strip_ansi highlighted)
 
-let test_rainbow_parens () =
+let test_parens_no_color () =
   let text = "(((x)))" in
   let result = Highlight.highlight_line theme rt text (-1) in
   let stripped = Highlight.strip_ansi result in
-  Alcotest.(check string) "stripped" text stripped;
-  (* Different depths should have different colors *)
-  Alcotest.(check bool) "highlighted longer" true
-    (String.length result > String.length text)
+  Alcotest.(check string) "stripped" text stripped
 
 let test_style_to_ansi_empty () =
   let s = Highlight.style_to_ansi Highlight.default_style in
@@ -99,7 +96,7 @@ let () =
       Alcotest.test_case "plain symbol" `Quick test_plain_symbol;
       Alcotest.test_case "keyword colored" `Quick test_keyword_colored;
       Alcotest.test_case "strip roundtrip" `Quick test_strip_ansi_roundtrip;
-      Alcotest.test_case "rainbow parens" `Quick test_rainbow_parens;
+      Alcotest.test_case "parens no color" `Quick test_parens_no_color;
       Alcotest.test_case "light theme" `Quick test_light_theme;
     ];
     "ansi helpers", [
