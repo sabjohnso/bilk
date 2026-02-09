@@ -518,6 +518,22 @@ Changes to existing modules:
 - `lib/dune`: Added `ext_stubs` to `foreign_stubs`; added `-ldl` to
   `c_library_flags`
 
+**Milestone 20 (Shebang Script Execution)** — complete.
+
+No new modules.  Adds shebang line support in the reader and script
+argument passing in the CLI.
+
+Changes to existing modules:
+- `Reader`: `read_hash` `#!` branch detects shebang at file start
+  (line 1, col 1) by checking if the character after `#!` is
+  non-alphabetic (e.g. `/`, space); alphabetic characters fall through
+  to directive handling (`#!fold-case`, `#!no-fold-case`); shebang
+  lines are skipped as line comments
+- `bin/main.ml`: `run_file` takes `script_args` parameter and sets
+  `inst.command_line := path :: script_args`; main dispatch bypasses
+  Cmdliner for positional file arguments (`wile file.scm arg1 arg2`),
+  collecting remaining argv as script args
+
 ## Development Workflow
 
 **This project uses TDD (Test-Driven Development).** Follow this cycle:
@@ -550,17 +566,17 @@ Tests live in `test/` as per-topic files and are run via `dune test`.
 | `test/test_loc.ml`         | Loc (4 tests)                                       |
 | `test/test_syntax.ml`      | Syntax (12 tests)                                   |
 | `test/test_port.ml`        | Port (31 tests: 30 unit + 1 QCheck)                 |
-| `test/test_reader.ml`      | Reader (31 tests: 30 unit + 1 QCheck)               |
+| `test/test_reader.ml`      | Reader (33 tests: 32 unit + 1 QCheck)               |
 | `test/test_symbol.ml`      | Symbol (8 tests: 6 unit + 2 QCheck)                 |
 | `test/test_env.ml`         | Env (14 tests)                                      |
 | `test/test_instance.ml`    | Instance (31 tests)                                 |
 | `test/test_opcode.ml`      | Opcode (4 tests)                                    |
 | `test/test_compiler.ml`    | Compiler (14 tests)                                 |
-| `test/test_vm.ml`          | VM (401 tests: end-to-end via Instance.eval_string) |
+| `test/test_vm.ml`          | VM (413 tests: end-to-end via Instance.eval_string) |
 | `test/test_m6_review.ml`   | M6 bugfix regression (7 tests)                      |
 | `test/test_expander.ml`    | Expander (11 tests)                                 |
 | `test/test_library.ml`     | Library (25 tests)                                  |
-| `test/test_fasl.ml`        | Fasl (40 tests)                                     |
+| `test/test_fasl.ml`        | Fasl (45 tests)                                     |
 | `test/test_aot.ml`         | AOT compiler (27 tests)                             |
 | `test/test_terminal.ml`    | Terminal key parsing (16 tests)                     |
 | `test/test_history.ml`     | History (20 tests)                                  |
@@ -571,7 +587,7 @@ Tests live in `test/` as per-topic files and are run via `dune test`.
 | `test/test_semver.ml`      | Semver (34 tests)                                   |
 | `test/test_package.ml`     | Package (16 tests)                                  |
 | `test/test_pkg_manager.ml` | Pkg_manager (25 tests)                              |
-| `test/test_srfi.ml`        | SRFI (281 tests)                                    |
+| `test/test_srfi.ml`        | SRFI (374 tests)                                    |
 | `test/test_venv.ml`        | Venv (11 tests)                                     |
 | `test/test_search_path.ml` | Search_path (13 tests)                              |
 | `test/test_regexp_engine.ml` | Regexp_engine (32 tests)                            |
