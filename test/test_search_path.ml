@@ -107,7 +107,8 @@ let test_venv_lib_path_invalid () =
 let test_resolve_base_only () =
   with_tmpdir (fun dir ->
     with_env [("WILE_VENV", None); ("WILE_PATH", None);
-              ("WILE_HOME", Some (Filename.concat dir "home"))] (fun () ->
+              ("WILE_HOME", Some (Filename.concat dir "home"));
+              ("WILE_STDLIB", Some "/nonexistent/stdlib")] (fun () ->
       (* Only base_dirs that exist should appear *)
       let sub = Filename.concat dir "exists" in
       Sys.mkdir sub 0o755;
@@ -128,7 +129,8 @@ let test_resolve_order () =
     Sys.mkdir home_lib 0o755;
     with_env [("WILE_VENV", Some venv_dir);
               ("WILE_PATH", Some wpath);
-              ("WILE_HOME", Some home_dir)] (fun () ->
+              ("WILE_HOME", Some home_dir);
+              ("WILE_STDLIB", Some "/nonexistent/stdlib")] (fun () ->
       let result = Search_path.resolve ~base_dirs:[base] in
       let expected = [
         base;
@@ -142,7 +144,8 @@ let test_resolve_filters_nonexistent () =
   with_tmpdir (fun dir ->
     with_env [("WILE_VENV", None);
               ("WILE_PATH", Some "/nonexistent/wile/path");
-              ("WILE_HOME", Some (Filename.concat dir "home"))] (fun () ->
+              ("WILE_HOME", Some (Filename.concat dir "home"));
+              ("WILE_STDLIB", Some "/nonexistent/stdlib")] (fun () ->
       let result = Search_path.resolve ~base_dirs:["/nonexistent/base"] in
       Alcotest.(check (list string)) "all filtered" [] result))
 

@@ -2532,7 +2532,7 @@ let create ?(readtable = Readtable.default) () =
   let features = detect_features () in
   let inst = { symbols; global_env; readtable; winds = ref []; handlers;
                syn_env; gensym_counter; libraries;
-               search_paths = ref []; features;
+               search_paths = ref (Search_path.stdlib_dirs ()); features;
                loading_libs = ref []; fasl_cache = ref false;
                current_input; current_output; current_error;
                command_line = ref (Array.to_list Sys.argv);
@@ -4843,19 +4843,7 @@ let try_load_library inst name =
     if Sys.file_exists path then Some path else None
   ) !(inst.search_paths) in
   match paths with
-  | [] ->
-    (* No on-disk .sld file found; try bundled SRFI sources *)
-    (match Srfi.lookup name with
-     | None -> ()  (* no file found, will fail later at resolve_import *)
-     | Some src ->
-       with_loading_guard inst name (fun () ->
-         let port = Port.of_string src in
-         let expr = Reader.read_syntax inst.readtable port in
-         match classify_top_level expr with
-         | Define_library (name_syn, decls) ->
-           process_define_library inst name_syn decls
-         | _ ->
-           failwith "embedded SRFI does not contain define-library"))
+  | [] -> ()  (* not found; will fail later at resolve_import *)
   | sld_path :: _ ->
     let fasl_path = Fasl.fasl_path_for sld_path in
     if !(inst.fasl_cache) && Fasl.is_cache_valid ~sld_path ~fasl_path then begin

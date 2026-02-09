@@ -5,3 +5,9 @@
  (foreign_stubs (language c) (names wile_stubs ext_stubs))
  (c_library_flags (-ldl))
  (install_c_headers wile))
+
+(rule
+ (targets wile_config.ml)
+ (deps (env_var PWD))
+ (action
+  (bash "echo 'let stdlib_source_dir = \"'$(cd %{project_root} && pwd)'/stdlib\"' > %{targets}")))

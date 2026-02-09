@@ -8,11 +8,13 @@
       {- Package dependencies (prepended separately by [setup_package_paths])}
       {- Virtual environment [lib/] (from [WILE_VENV])}
       {- [WILE_PATH] entries (colon-separated)}
+      {- Bundled standard library ([stdlib/] from source tree or install prefix)}
       {- Site library ([~/.wile/lib/])}
     }
 
-    Built-in libraries and bundled SRFIs are resolved as a fallback by
-    the library loader and are not part of the filesystem search path. *)
+    Bundled SRFIs are found as [.sld] files in the [stdlib/] directory,
+    discovered via compile-time source path, binary-relative install path,
+    or the [WILE_STDLIB] environment variable. *)
 
 (** {1 Directory queries} *)
 
@@ -35,11 +37,17 @@ val venv_lib_path : unit -> string option
     [wile-venv.cfg]), where [path] is the [lib/] subdirectory.
     Returns [None] otherwise. *)
 
+val stdlib_dirs : unit -> string list
+(** [stdlib_dirs ()] returns the directories containing bundled standard
+    library [.sld] files.  Checks [WILE_STDLIB] env var first, then the
+    compile-time source tree path, then discovers relative to the binary
+    for installed deployments. *)
+
 (** {1 Resolution} *)
 
 val resolve : base_dirs:string list -> string list
 (** [resolve ~base_dirs] assembles the full search path list:
-    [base_dirs ++ venv_lib ++ WILE_PATH ++ site_lib].  Directories
-    that do not exist on the filesystem are filtered out.  Package
-    dependency paths are {b not} included — they are prepended
+    [base_dirs ++ venv_lib ++ WILE_PATH ++ stdlib_dirs ++ site_lib].
+    Directories that do not exist on the filesystem are filtered out.
+    Package dependency paths are {b not} included — they are prepended
     separately by [Instance.setup_package_paths]. *)
