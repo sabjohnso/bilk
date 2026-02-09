@@ -176,6 +176,7 @@ let test_fasl_lib_native_roundtrip () =
     has_syntax_exports = false;
     exports = [Library.Export_id "test-fn"];
     declarations = [decl];
+    syntax_bindings = [];
   } in
   let tmp = Filename.temp_file "wile_test_ext_" ".fasl" in
   Fun.protect ~finally:(fun () -> Sys.remove tmp)
@@ -214,6 +215,7 @@ let test_fasl_lib_native_replay () =
     has_syntax_exports = false;
     exports = [Library.Export_id "replay-fn"];
     declarations = [Fasl.Lib_native "test-replay-ext"];
+    syntax_bindings = [];
   } in
   let tmp = Filename.temp_file "wile_test_replay_" ".fasl" in
   Fun.protect ~finally:(fun () -> Sys.remove tmp)

@@ -9,8 +9,30 @@
 
 (** {1 Syntactic environment} *)
 
-(** An opaque syntactic environment mapping identifiers to bindings. *)
-type syn_env
+(** A syntactic binding: variable, core form, or macro. *)
+type binding =
+  | Var
+  | Core of string
+  | Macro of transformer
+
+(** A syntax-rules transformer. *)
+and transformer = {
+  literals : string list;
+  rules : rule list;
+  def_env : env_frame list;
+}
+
+(** A macro rule: pattern/template pair from [syntax-rules]. *)
+and rule = {
+  pattern : Syntax.t;
+  template : Syntax.t;
+}
+
+(** A frame in the syntactic environment. *)
+and env_frame = (string, binding) Hashtbl.t
+
+(** A syntactic environment: chain of frames, searched inner-to-outer. *)
+type syn_env = env_frame list
 
 val core_env : unit -> syn_env
 (** [core_env ()] returns a fresh syntactic environment pre-populated with
@@ -44,9 +66,6 @@ val expand : syn_env:syn_env -> gensym:(unit -> string) ->
     @raise Compiler.Compile_error on malformed syntax. *)
 
 (** {1 Binding API} *)
-
-(** An opaque syntactic binding.  May be a variable, core form, or macro. *)
-type binding
 
 val lookup_binding : syn_env -> string -> binding option
 (** [lookup_binding env name] searches the syntactic environment for a

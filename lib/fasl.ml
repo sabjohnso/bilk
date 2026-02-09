@@ -1,7 +1,7 @@
 exception Fasl_error of string
 
 let version_major = 1
-let version_minor = 1
+let version_minor = 2
 
 let fasl_error msg = raise (Fasl_error msg)
 
@@ -223,6 +223,40 @@ let rec read_datum symbols data pos =
   | 12 -> Datum.Void
   | _ -> fasl_error (Printf.sprintf "unknown datum tag: %d" tag)
 
+(* --- Binding encoding --- *)
+
+let write_binding buf (b : Expander.binding) =
+  match b with
+  | Var -> write_u8 buf 0
+  | Core name -> write_u8 buf 1; write_str buf name
+  | Macro tf ->
+    write_u8 buf 2;
+    write_u16 buf (List.length tf.literals);
+    List.iter (write_str buf) tf.literals;
+    write_u16 buf (List.length tf.rules);
+    List.iter (fun (r : Expander.rule) ->
+      write_datum buf (Syntax.to_datum r.pattern);
+      write_datum buf (Syntax.to_datum r.template)
+    ) tf.rules
+
+let read_binding symbols data pos =
+  let tag = read_u8 data pos in
+  match tag with
+  | 0 -> Expander.Var
+  | 1 -> Expander.Core (read_str data pos)
+  | 2 ->
+    let lit_count = read_u16 data pos in
+    let literals = List.init lit_count (fun _ -> read_str data pos) in
+    let rule_count = read_u16 data pos in
+    let rules = List.init rule_count (fun _ ->
+      let pat = read_datum symbols data pos in
+      let tmpl = read_datum symbols data pos in
+      Expander.{ pattern = Syntax.from_datum Loc.none pat;
+                 template = Syntax.from_datum Loc.none tmpl }
+    ) in
+    Expander.Macro { literals; rules; def_env = [] }
+  | _ -> fasl_error (Printf.sprintf "unknown binding tag: %d" tag)
+
 (* --- Code object encoding --- *)
 
 let rec write_code_obj buf (code : Datum.code) =
@@ -399,6 +433,7 @@ type lib_fasl = {
   has_syntax_exports : bool;
   exports : Library.export_spec list;
   declarations : lib_declaration list;
+  syntax_bindings : (string * Expander.binding) list;
 }
 
 let write_lib_declaration buf decl =
@@ -433,6 +468,11 @@ let write_lib_fasl path fasl =
   List.iter (write_export_spec buf) fasl.exports;
   write_u16 buf (List.length fasl.declarations);
   List.iter (write_lib_declaration buf) fasl.declarations;
+  write_u16 buf (List.length fasl.syntax_bindings);
+  List.iter (fun (name, binding) ->
+    write_str buf name;
+    write_binding buf binding
+  ) fasl.syntax_bindings;
   write_to_file path (Buffer.to_bytes buf)
 
 let read_lib_fasl symbols path =
@@ -449,7 +489,16 @@ let read_lib_fasl symbols path =
   let decl_count = read_u16 data pos in
   let declarations = List.init decl_count (fun _ ->
     read_lib_declaration symbols data pos) in
-  { lib_name; has_syntax_exports; exports; declarations }
+  let syntax_bindings =
+    if has_syntax_exports then begin
+      let syn_count = read_u16 data pos in
+      List.init syn_count (fun _ ->
+        let name = read_str data pos in
+        let binding = read_binding symbols data pos in
+        (name, binding))
+    end else []
+  in
+  { lib_name; has_syntax_exports; exports; declarations; syntax_bindings }
 
 (* --- Program FASL --- *)
 

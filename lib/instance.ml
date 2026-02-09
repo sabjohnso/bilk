@@ -4740,11 +4740,15 @@ let process_define_library ?sld_path inst name_syn decls =
   (match sld_path with
    | Some path when !(inst.fasl_cache) ->
      let has_syn = Hashtbl.length syntax_exports > 0 in
+     let syn_bindings =
+       Hashtbl.fold (fun name b acc -> (name, b) :: acc) syntax_exports []
+     in
      let fasl : Fasl.lib_fasl = {
        lib_name;
        has_syntax_exports = has_syn;
        exports = List.rev !export_specs;
        declarations = List.rev !fasl_decls;
+       syntax_bindings = syn_bindings;
      } in
      let fasl_path = Fasl.fasl_path_for path in
      (try Fasl.write_lib_fasl fasl_path fasl with Fasl.Fasl_error _ -> ())
@@ -4796,6 +4800,10 @@ let replay_lib_fasl inst (fasl : Fasl.lib_fasl) =
           !load_native_ref inst
             ~search_dirs:!(inst.search_paths) ~sld_dir:None name)
   ) fasl.declarations;
+  let syntax_exports = Hashtbl.create (List.length fasl.syntax_bindings) in
+  List.iter (fun (name, binding) ->
+    Hashtbl.replace syntax_exports name binding
+  ) fasl.syntax_bindings;
   let exports = Hashtbl.create 16 in
   List.iter (fun spec ->
     let (internal_name, external_name) = match spec with
@@ -4806,14 +4814,15 @@ let replay_lib_fasl inst (fasl : Fasl.lib_fasl) =
     match Env.lookup_slot lib_env sym with
     | Some slot -> Hashtbl.replace exports external_name (Symbol.id sym, slot)
     | None ->
-      failwith (Printf.sprintf
-        "FASL replay: exported name not defined: %s" internal_name)
+      if not (Hashtbl.mem syntax_exports external_name) then
+        failwith (Printf.sprintf
+          "FASL replay: exported name not defined: %s" internal_name)
   ) fasl.exports;
   let lib : Library.t = {
     name = fasl.lib_name;
     env = lib_env;
     exports;
-    syntax_exports = Hashtbl.create 0;
+    syntax_exports;
   } in
   Library.register inst.libraries lib
 
@@ -4850,11 +4859,8 @@ let try_load_library inst name =
       (* Try loading from FASL cache *)
       try
         let fasl = Fasl.read_lib_fasl inst.symbols fasl_path in
-        if fasl.has_syntax_exports then
-          load_from_source inst name sld_path
-        else
-          with_loading_guard inst name (fun () ->
-            replay_lib_fasl inst fasl)
+        with_loading_guard inst name (fun () ->
+          replay_lib_fasl inst fasl)
       with Fasl.Fasl_error _ ->
         load_from_source inst name sld_path
     end else

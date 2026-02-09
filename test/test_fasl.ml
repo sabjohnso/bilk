@@ -4,7 +4,7 @@ open Wile
 
 let test_version_constants () =
   Alcotest.(check int) "major" 1 Fasl.version_major;
-  Alcotest.(check int) "minor" 1 Fasl.version_minor
+  Alcotest.(check int) "minor" 2 Fasl.version_minor
 
 let test_fasl_error_catchable () =
   Alcotest.check_raises "fasl error"
@@ -293,6 +293,7 @@ let test_lib_fasl_simple () =
         Fasl.Lib_import (Library.Import_lib ["scheme"; "base"]);
         Fasl.Lib_code child_code;
       ];
+      syntax_bindings = [];
     } in
     Fasl.write_lib_fasl path fasl;
     let tbl = Symbol.create_table () in
@@ -326,6 +327,7 @@ let test_lib_fasl_nested_import () =
       has_syntax_exports = false;
       exports = [];
       declarations = [ Fasl.Lib_import iset ];
+      syntax_bindings = [];
     } in
     Fasl.write_lib_fasl path fasl;
     let tbl = Symbol.create_table () in
@@ -343,6 +345,7 @@ let test_lib_fasl_syntax_flag () =
       has_syntax_exports = true;
       exports = [ Library.Export_id "my-macro" ];
       declarations = [];
+      syntax_bindings = [];
     } in
     Fasl.write_lib_fasl path fasl;
     let tbl = Symbol.create_table () in
@@ -362,6 +365,7 @@ let test_lib_fasl_all_import_variants () =
         Fasl.Lib_import (Library.Import_prefix (Library.Import_lib ["d"], "p:"));
         Fasl.Lib_import (Library.Import_rename (Library.Import_lib ["e"], [("old", "new")]));
       ];
+      syntax_bindings = [];
     } in
     Fasl.write_lib_fasl path fasl;
     let tbl = Symbol.create_table () in
@@ -566,6 +570,140 @@ let test_empty_code_object () =
   Alcotest.(check int) "instrs" 0 (Array.length code'.instructions);
   Alcotest.(check int) "consts" 0 (Array.length code'.constants)
 
+(* --- Step 11: Binding Serialization --- *)
+
+let test_binding_var_roundtrip () =
+  with_temp_file ".fasl" (fun path ->
+    let fasl : Fasl.lib_fasl = {
+      lib_name = ["test"; "syn-var"];
+      has_syntax_exports = true;
+      exports = [ Library.Export_id "x" ];
+      declarations = [];
+      syntax_bindings = [ ("x", Expander.Var) ];
+    } in
+    Fasl.write_lib_fasl path fasl;
+    let tbl = Symbol.create_table () in
+    let fasl' = Fasl.read_lib_fasl tbl path in
+    Alcotest.(check int) "count" 1 (List.length fasl'.syntax_bindings);
+    match fasl'.syntax_bindings with
+    | [("x", Expander.Var)] -> ()
+    | _ -> Alcotest.fail "expected Var binding")
+
+let test_binding_core_roundtrip () =
+  with_temp_file ".fasl" (fun path ->
+    let fasl : Fasl.lib_fasl = {
+      lib_name = ["test"; "syn-core"];
+      has_syntax_exports = true;
+      exports = [];
+      declarations = [];
+      syntax_bindings = [ ("my-if", Expander.Core "if") ];
+    } in
+    Fasl.write_lib_fasl path fasl;
+    let tbl = Symbol.create_table () in
+    let fasl' = Fasl.read_lib_fasl tbl path in
+    match fasl'.syntax_bindings with
+    | [("my-if", Expander.Core "if")] -> ()
+    | _ -> Alcotest.fail "expected Core binding")
+
+let test_binding_macro_roundtrip () =
+  with_temp_file ".fasl" (fun path ->
+    let rule : Expander.rule = {
+      pattern = Syntax.from_datum Loc.none
+        (Datum.Pair { car = Datum.Symbol "_";
+                      cdr = Datum.Pair { car = Datum.Symbol "x";
+                                         cdr = Datum.Nil } });
+      template = Syntax.from_datum Loc.none (Datum.Symbol "x");
+    } in
+    let tf : Expander.transformer = {
+      literals = ["lit1"; "lit2"];
+      rules = [rule];
+      def_env = [];
+    } in
+    let fasl : Fasl.lib_fasl = {
+      lib_name = ["test"; "syn-macro"];
+      has_syntax_exports = true;
+      exports = [];
+      declarations = [];
+      syntax_bindings = [ ("my-macro", Expander.Macro tf) ];
+    } in
+    Fasl.write_lib_fasl path fasl;
+    let tbl = Symbol.create_table () in
+    let fasl' = Fasl.read_lib_fasl tbl path in
+    match fasl'.syntax_bindings with
+    | [("my-macro", Expander.Macro tf')] ->
+      Alcotest.(check (list string)) "literals" ["lit1"; "lit2"] tf'.literals;
+      Alcotest.(check int) "rules" 1 (List.length tf'.rules);
+      let r = List.hd tf'.rules in
+      (* Template should round-trip as equivalent datum *)
+      let tmpl_d = Syntax.to_datum r.template in
+      Alcotest.(check (of_pp Datum.pp)) "template" (Datum.Symbol "x") tmpl_d
+    | _ -> Alcotest.fail "expected Macro binding")
+
+let test_lib_fasl_with_syntax_bindings () =
+  with_temp_file ".fasl" (fun path ->
+    let child_code : Datum.code = {
+      instructions = [| Opcode.Const 0; Opcode.Return |];
+      constants = [| Datum.Fixnum 1 |]; symbols = [||]; children = [||];
+      params = [||]; variadic = false; name = "<lib-body>";
+    } in
+    let rule : Expander.rule = {
+      pattern = Syntax.from_datum Loc.none
+        (Datum.Pair { car = Datum.Symbol "_";
+                      cdr = Datum.Nil });
+      template = Syntax.from_datum Loc.none (Datum.Fixnum 42);
+    } in
+    let fasl : Fasl.lib_fasl = {
+      lib_name = ["test"; "mixed"];
+      has_syntax_exports = true;
+      exports = [ Library.Export_id "val"; Library.Export_id "my-const" ];
+      declarations = [
+        Fasl.Lib_import (Library.Import_lib ["scheme"; "base"]);
+        Fasl.Lib_code child_code;
+      ];
+      syntax_bindings = [
+        ("my-const", Expander.Macro { literals = []; rules = [rule]; def_env = [] });
+        ("val", Expander.Var);
+      ];
+    } in
+    Fasl.write_lib_fasl path fasl;
+    let tbl = Symbol.create_table () in
+    let fasl' = Fasl.read_lib_fasl tbl path in
+    Alcotest.(check bool) "has syntax" true fasl'.has_syntax_exports;
+    Alcotest.(check int) "syn count" 2 (List.length fasl'.syntax_bindings);
+    Alcotest.(check int) "exports" 2 (List.length fasl'.exports);
+    Alcotest.(check int) "decls" 2 (List.length fasl'.declarations))
+
+let test_syntax_export_cache_integration () =
+  with_temp_dir (fun dir ->
+    let sub = Filename.concat dir "macrolib" in
+    Sys.mkdir sub 0o755;
+    let sld = Filename.concat sub "macros.sld" in
+    let oc = open_out sld in
+    output_string oc "(define-library (macrolib macros) \
+      (export my-const) \
+      (import (scheme base)) \
+      (begin \
+        (define-syntax my-const \
+          (syntax-rules () \
+            ((_ x) (+ x 10))))))";
+    close_out oc;
+    (* First load: compiles from source, creates FASL cache *)
+    let inst1 = Instance.create () in
+    inst1.search_paths := [dir];
+    inst1.fasl_cache := true;
+    ignore (Instance.eval_string inst1 "(import (macrolib macros))");
+    let r1 = Instance.eval_string inst1 "(my-const 5)" in
+    Alcotest.(check (of_pp Datum.pp)) "v1" (Datum.Fixnum 15) r1;
+    let fasl_path = Fasl.fasl_path_for sld in
+    Alcotest.(check bool) "fasl created" true (Sys.file_exists fasl_path);
+    (* Second load: from FASL cache (macro should still work) *)
+    let inst2 = Instance.create () in
+    inst2.search_paths := [dir];
+    inst2.fasl_cache := true;
+    ignore (Instance.eval_string inst2 "(import (macrolib macros))");
+    let r2 = Instance.eval_string inst2 "(my-const 7)" in
+    Alcotest.(check (of_pp Datum.pp)) "v2 cached" (Datum.Fixnum 17) r2)
+
 (* --- Runner --- *)
 
 let () =
@@ -629,5 +767,12 @@ let () =
        [ Alcotest.test_case "large constants pool" `Quick test_large_constants_pool
        ; Alcotest.test_case "deeply nested children" `Quick test_deeply_nested_children
        ; Alcotest.test_case "empty code object" `Quick test_empty_code_object
+       ])
+    ; ("syntax-bindings",
+       [ Alcotest.test_case "var roundtrip" `Quick test_binding_var_roundtrip
+       ; Alcotest.test_case "core roundtrip" `Quick test_binding_core_roundtrip
+       ; Alcotest.test_case "macro roundtrip" `Quick test_binding_macro_roundtrip
+       ; Alcotest.test_case "lib_fasl with syntax" `Quick test_lib_fasl_with_syntax_bindings
+       ; Alcotest.test_case "cache integration" `Quick test_syntax_export_cache_integration
        ])
     ]

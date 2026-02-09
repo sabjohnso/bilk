@@ -38,12 +38,14 @@ type lib_fasl = {
   lib_name : Library.library_name;
   (** The library's name. *)
   has_syntax_exports : bool;
-  (** Whether the library has syntax exports.  If [true], the cached FASL
-      should be bypassed and the library recompiled from source. *)
+  (** Whether the library has syntax exports. *)
   exports : Library.export_spec list;
   (** The library's export specifications. *)
   declarations : lib_declaration list;
   (** The library's declarations (imports and code) in order. *)
+  syntax_bindings : (string * Expander.binding) list;
+  (** Serialized syntax export bindings.  Empty when
+      [has_syntax_exports] is [false]. *)
 }
 
 (** {1 Code serialization} *)
