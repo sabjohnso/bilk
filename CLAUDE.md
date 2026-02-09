@@ -602,7 +602,7 @@ Tests live in `test/` as per-topic files and are run via `dune test`.
 | `test/test_instance.ml`    | Instance (31 tests)                                 |
 | `test/test_opcode.ml`      | Opcode (4 tests)                                    |
 | `test/test_compiler.ml`    | Compiler (20 tests)                                 |
-| `test/test_vm.ml`          | VM (420 tests: end-to-end via Instance.eval_string) |
+| `test/test_vm.ml`          | VM (423 tests: end-to-end via Instance.eval_string) |
 | `test/test_m6_review.ml`   | M6 bugfix regression (7 tests)                      |
 | `test/test_expander.ml`    | Expander (11 tests)                                 |
 | `test/test_library.ml`     | Library (25 tests)                                  |

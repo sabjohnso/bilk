@@ -170,10 +170,17 @@ let rec execute ?(winds : Datum.wind list ref option)
     })
   in
 
+  let fire_on_call proc args =
+    match on_call with
+    | Some f -> f (!cur_code).source_map.(max 0 (!pc - 1)) proc args
+    | None -> ()
+  in
+
   (* Enter a thunk (0-arg procedure). Returns true if the call was to a
      closure (deferred — will eventually Return), or false if it was a
      primitive (immediate — result is already in acc). *)
   let enter_thunk thunk =
+    fire_on_call thunk [];
     match thunk with
     | Datum.Closure clos ->
       let new_env = bind_params clos.clos_code [] clos.clos_env in
@@ -188,6 +195,7 @@ let rec execute ?(winds : Datum.wind list ref option)
   in
 
   let perform_call proc args ~is_tail =
+    fire_on_call proc args;
     match proc with
     | Datum.Primitive prim when prim.prim_intrinsic = None ->
       acc := prim.prim_fn args
@@ -254,6 +262,7 @@ let rec execute ?(winds : Datum.wind list ref option)
            let cont = capture_continuation () in
            let frame = make_call_frame () in
            frames := Standard frame :: !frames;
+           fire_on_call proc [cont];
            (match proc with
             | Datum.Closure clos ->
               let new_env = bind_params clos.clos_code [cont] clos.clos_env in
@@ -384,13 +393,12 @@ let rec execute ?(winds : Datum.wind list ref option)
     | Opcode.Call n ->
       let args = pop_n n in
       let proc = !acc in
-      (match on_call with
-       | Some f -> f (!cur_code).source_map.(!pc - 1) proc args
-       | None -> ());
       (match proc with
        | Datum.Primitive prim when prim.prim_intrinsic <> None ->
+         fire_on_call proc args;
          handle_intrinsic prim args ~is_tail:false
        | Datum.Continuation cont ->
+         fire_on_call proc args;
          let value = match args with
            | [v] -> v
            | _ -> runtime_error (Printf.sprintf
@@ -398,18 +406,18 @@ let rec execute ?(winds : Datum.wind list ref option)
          in
          restore_continuation cont value
        | _ ->
+         (* on_call fires inside perform_call *)
          perform_call proc args ~is_tail:false)
 
     | Opcode.TailCall n ->
       let args = pop_n n in
       let proc = !acc in
-      (match on_call with
-       | Some f -> f (!cur_code).source_map.(!pc - 1) proc args
-       | None -> ());
       (match proc with
        | Datum.Primitive prim when prim.prim_intrinsic <> None ->
+         fire_on_call proc args;
          handle_intrinsic prim args ~is_tail:true
        | Datum.Continuation cont ->
+         fire_on_call proc args;
          let value = match args with
            | [v] -> v
            | _ -> runtime_error (Printf.sprintf
@@ -417,6 +425,7 @@ let rec execute ?(winds : Datum.wind list ref option)
          in
          restore_continuation cont value
        | _ ->
+         (* on_call fires inside perform_call *)
          perform_call proc args ~is_tail:true)
 
     | Opcode.Return ->

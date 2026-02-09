@@ -2988,6 +2988,53 @@ let test_on_return_callee_location () =
     loc.line = 0) !return_locs in
   Alcotest.(check bool) "not all Loc.none" false all_none
 
+let test_on_call_apply_inner () =
+  (* on_call must fire for the inner procedure call made by apply *)
+  let inst = Instance.create () in
+  let procs = ref [] in
+  inst.on_call := Some (fun _loc proc _args ->
+    procs := Datum.to_string proc :: !procs);
+  ignore (Instance.eval_string inst
+    "(begin (define (f x y) (+ x y)) (apply f '(1 2)))");
+  (* Should see both the apply intrinsic AND f *)
+  let has_f = List.exists (fun s ->
+    String.length s > 10 && String.sub s 0 11 = "#<closure f") !procs in
+  Alcotest.(check bool) "on_call fires for apply's inner call" true has_f
+
+let test_on_call_cwv_inner () =
+  (* on_call must fire for the consumer call made by call-with-values *)
+  let inst = Instance.create () in
+  let procs = ref [] in
+  inst.on_call := Some (fun _loc proc _args ->
+    procs := Datum.to_string proc :: !procs);
+  ignore (Instance.eval_string inst
+    "(begin (define (consumer x) x) (call-with-values (lambda () 42) consumer))");
+  let has_consumer = List.exists (fun s ->
+    String.length s > 17 && String.sub s 0 18 = "#<closure consumer") !procs in
+  Alcotest.(check bool) "on_call fires for cwv consumer" true has_consumer
+
+let test_on_call_dw_inner () =
+  (* on_call must fire for the thunks called by dynamic-wind *)
+  let inst = Instance.create () in
+  let procs = ref [] in
+  inst.on_call := Some (fun _loc proc _args ->
+    procs := Datum.to_string proc :: !procs);
+  ignore (Instance.eval_string inst
+    "(begin \
+       (define (before) #f) \
+       (define (thunk) 42) \
+       (define (after) #f) \
+       (dynamic-wind before thunk after))");
+  let has_before = List.exists (fun s ->
+    String.length s > 15 && String.sub s 0 16 = "#<closure before") !procs in
+  let has_thunk = List.exists (fun s ->
+    String.length s > 14 && String.sub s 0 15 = "#<closure thunk") !procs in
+  let has_after = List.exists (fun s ->
+    String.length s > 14 && String.sub s 0 15 = "#<closure after") !procs in
+  Alcotest.(check bool) "on_call fires for dw before" true has_before;
+  Alcotest.(check bool) "on_call fires for dw thunk" true has_thunk;
+  Alcotest.(check bool) "on_call fires for dw after" true has_after
+
 let () =
   Alcotest.run "VM"
     [ ("self-evaluating",
@@ -3539,5 +3586,8 @@ let () =
        ; Alcotest.test_case "nested calls" `Quick test_nested_calls_hook
        ; Alcotest.test_case "tail calls" `Quick test_tail_call_hook
        ; Alcotest.test_case "on_return callee location" `Quick test_on_return_callee_location
+       ; Alcotest.test_case "on_call apply inner" `Quick test_on_call_apply_inner
+       ; Alcotest.test_case "on_call cwv inner" `Quick test_on_call_cwv_inner
+       ; Alcotest.test_case "on_call dw inner" `Quick test_on_call_dw_inner
        ])
     ]
