@@ -704,6 +704,243 @@ A `pkg-config` file is generated for easy integration.
 
 ---
 
+### Milestone 20 — Shebang Script Execution
+
+Allow Scheme files to be used as Unix scripts with `#!/usr/bin/env wile`.
+
+**Changes to existing modules:**
+
+- `Reader`: Skip `#!` line at start of file (line 1, column 0 only). When
+  the first two characters are `#!`, consume the entire line as a comment.
+  This is position-sensitive — `#!` anywhere else is handled normally
+  (e.g., `#!fold-case`).
+- `bin/main.ml`: In file execution mode (`wile file.scm`), pass remaining
+  arguments after the script file to `inst.command_line` so the script
+  can access them via `(command-line)`. Currently `command_line` is
+  initialized from `Sys.argv` which includes `wile` itself and any wile
+  flags — the script should see `(script-path arg1 arg2 ...)`.
+
+**Example:**
+
+```scheme
+#!/usr/bin/env wile
+(import (scheme base) (scheme write))
+(for-each (lambda (arg) (display arg) (newline))
+          (cdr (command-line)))
+```
+
+```
+$ chmod +x hello.scm
+$ ./hello.scm world
+world
+```
+
+**Tests:** ~8 (shebang line skipped, non-shebang `#!` unaffected, arguments
+passed correctly, `command-line` contents, edge cases)
+
+**Depends on:** M10 (CLI)
+
+---
+
+### Milestone 21 — Source Maps & VM Instrumentation
+
+Add source location tracking through compilation to bytecode, and provide
+callback hooks in the VM for tooling integration.
+
+**Source maps:**
+
+- `Datum.code` gains `source_map : Loc.t array` — one location per
+  instruction in the bytecode array. The compiler emits locations alongside
+  bytecode by threading the current `Syntax.t` location through each
+  emission call.
+- `Fasl`: Serialize/deserialize `source_map` arrays. Add a `Loc` encoding
+  (file string + line u32 + col u32). Bump `version_minor`.
+- Source maps enable mapping a `(file, line)` breakpoint to a `(code, pc)`
+  pair, and mapping a runtime PC back to a source location for stack traces.
+
+**VM hooks:**
+
+- `Instance.t` gains optional callback fields:
+  - `on_call : (Loc.t -> Datum.t -> Datum.t list -> unit) option ref` —
+    fired before every procedure call (location, procedure, arguments)
+  - `on_return : (Loc.t -> Datum.t -> unit) option ref` — fired after
+    every return (location, return value)
+- Hooks are `None` by default. When `None`, the VM pays zero cost (a single
+  `Option.is_some` check per call/return). When `Some`, the VM invokes the
+  callback.
+- Hooks are intentionally simple — they don't pause execution. Pausing
+  (for debugging) is built on top by the debug server.
+
+**Changes to existing modules:**
+
+- `Datum`: Add `source_map` field to `code` record
+- `Compiler`: Thread current `Loc.t` through emission; populate source map
+- `Fasl`: Serialize `Loc.t array` in code sections; bump `version_minor`
+- `Vm`: Check and invoke `on_call`/`on_return` hooks at call/return points
+- `Instance`: Add `on_call`, `on_return` fields
+
+**Tests:** ~20 (source map round-trip through FASL, compiler emits locations,
+hooks fire correctly, hooks disabled by default have no overhead, source map
+lookup by file+line)
+
+**Depends on:** M12 (FASL + AOT)
+
+---
+
+### Milestone 22 — Debug Server (DAP)
+
+Implement a Debug Adapter Protocol server for interactive debugging of
+Scheme programs.
+
+**Modules:**
+
+| Module         | Responsibility                                              |
+|----------------|-------------------------------------------------------------|
+| `Dap`          | DAP message types, JSON serialization/deserialization       |
+| `Debug_server` | Server loop: breakpoints, stepping, variable inspection     |
+
+**Features:**
+
+- **Breakpoints:** Set by source location (file + line). The debug server
+  uses M21 source maps to find the corresponding `(code, pc)` pair. The
+  VM `on_call` hook checks whether the current PC matches a breakpoint and
+  pauses execution if so.
+- **Stepping:** Step-in (stop at next call), step-over (stop at next call
+  at same or lower depth), step-out (stop when current frame returns).
+  Implemented by dynamically adjusting hook behavior based on call depth.
+- **Variable inspection:** When paused, traverse the current `Env.t` frame
+  chain to enumerate bindings. Display values using `Datum.pp`.
+- **Call stack:** When paused, display the VM call stack with source
+  locations from source maps.
+- **Expression evaluation:** When paused, compile and evaluate an
+  expression in the current environment using `Instance.eval_string` (or
+  a variant that uses the paused frame's env).
+- **Communication:** DAP over stdin/stdout (standard for VS Code and other
+  editors). JSON messages with Content-Length headers.
+
+**CLI:**
+
+```
+wile debug file.scm
+```
+
+**Changes to existing modules:**
+
+- `bin/main.ml`: Add `debug` subcommand
+
+**Tests:** ~25 (DAP message parsing, breakpoint hit detection, step-in/over/out
+logic, variable enumeration, expression evaluation in paused context)
+
+**Depends on:** M21 (source maps + VM hooks)
+
+---
+
+### Milestone 23 — Language Server (LSP)
+
+Implement a Language Server Protocol server for IDE integration.
+
+**Modules:**
+
+| Module            | Responsibility                                         |
+|-------------------|--------------------------------------------------------|
+| `Lsp`             | LSP message types, JSON-RPC serialization              |
+| `Language_server`  | Server loop: diagnostics, hover, completion, symbols  |
+
+**Features:**
+
+- **Diagnostics:** On file save/change, run the pipeline
+  (Reader → Expander → Compiler) and report errors with source locations.
+  Errors at each stage produce LSP `Diagnostic` messages with severity,
+  range (from `Loc.t`), and message text.
+- **Hover:** Look up the identifier at cursor position in `syn_env`.
+  Display binding kind (variable, syntax, macro) and, for primitives, a
+  brief signature. Uses the Tokenizer to find the identifier span.
+- **Go to definition:** For variables, look up the binding in `syn_env`
+  and report its definition location. For compiled procedures, use M21
+  source maps to find the definition site.
+- **Completion:** At cursor position, enumerate `syn_env` bindings and
+  library exports that match the prefix. Include core forms, macros,
+  and imported procedures.
+- **Document symbols:** Walk top-level forms to find `define`,
+  `define-syntax`, `define-record-type`, `define-library` and report
+  them as LSP `DocumentSymbol` entries with location ranges.
+- **Semantic tokens:** Reuse `Tokenizer` and `Highlight.analyze_semantics`
+  to provide semantic token data (keywords, strings, comments, defined
+  names, parameters).
+- **Communication:** JSON-RPC over stdin/stdout (standard LSP transport).
+
+**CLI:**
+
+```
+wile lsp
+```
+
+**Changes to existing modules:**
+
+- `bin/main.ml`: Add `lsp` subcommand
+
+**Tests:** ~30 (LSP message parsing, diagnostic generation from read/expand/
+compile errors, hover lookup, completion filtering, document symbol
+extraction, semantic token mapping)
+
+**Depends on:** M21 (source maps for go-to-definition)
+
+---
+
+### Milestone 24 — Profiler
+
+Collect runtime performance data and produce analysis reports.
+
+**Modules:**
+
+| Module           | Responsibility                                         |
+|------------------|--------------------------------------------------------|
+| `Profiler`       | Data collection via M21 hooks: call counts, timing     |
+| `Profile_report` | Report generation: text summary, flame graph, trace    |
+
+**Data collection:**
+
+- Uses M21 `on_call`/`on_return` hooks to record:
+  - Per-procedure call count
+  - Per-procedure wall-clock time (total and self)
+  - Call stack snapshots for flame graph construction
+- Identified by procedure name (from `Datum.pp` of the procedure value)
+  and source location (from source maps).
+- Collection overhead is proportional to call frequency. The profiler
+  is off by default and enabled only via the CLI subcommand.
+
+**Report formats:**
+
+- **Text summary:** Per-procedure table sorted by self time, showing
+  call count, total time, self time, and source location. Similar to
+  `gprof` flat profile.
+- **Flame graph SVG:** Collapsed stack format → SVG rendering. Compatible
+  with Brendan Gregg's FlameGraph tools. Self-contained SVG with
+  interactive zoom.
+- **Chrome Trace Event JSON:** Produces a JSON file in Trace Event Format
+  (B/E events with timestamps and thread/process IDs). Viewable in
+  Perfetto or `chrome://tracing`.
+
+**CLI:**
+
+```
+wile profile file.scm                      # text summary to stderr
+wile profile --format=flamegraph file.scm   # SVG to stdout
+wile profile --format=trace file.scm        # Chrome trace JSON to stdout
+```
+
+**Changes to existing modules:**
+
+- `bin/main.ml`: Add `profile` subcommand
+
+**Tests:** ~20 (call count accuracy, timing consistency, flame graph SVG
+validity, trace JSON format correctness, text report formatting, nested
+call attribution)
+
+**Depends on:** M21 (VM hooks)
+
+---
+
 ## Cross-cutting concerns
 
 ### Error reporting
@@ -787,6 +1024,13 @@ M6 (stdlib)     M7 (macros)
   M16 (SRFIs)
        │
   M17 (C embedding)
+
+  M10 ──► M20 (shebang scripts)
+
+  M12 ──► M21 (source maps & hooks)
+            ├──► M22 (debug server / DAP)
+            ├──► M23 (language server / LSP)
+            └──► M24 (profiler)
 ```
 
 Each milestone is usable and testable on its own. The first meaningful
