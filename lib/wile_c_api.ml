@@ -400,12 +400,35 @@ let release ih vh =
   | Some entry -> Hashtbl.remove entry.values vh
   | None -> ()
 
+(* ---- Temporary handle for C extensions ---- *)
+
+let temporary_handle inst =
+  let ih = !next_inst in
+  next_inst := ih + 1;
+  let entry = {
+    inst;
+    values = Hashtbl.create 256;
+    next_val = 1;
+    last_error = None;
+  } in
+  Hashtbl.replace instances ih entry;
+  ih
+
+let release_handle ih =
+  Hashtbl.remove instances ih
+
 (* ---- Handle resolution (for testing) ---- *)
 
 let resolve ih vh =
   match Hashtbl.find_opt instances ih with
   | None -> None
   | Some entry -> resolve_value entry vh
+
+(* ---- Extension bridge ---- *)
+
+let () =
+  Extension.c_temporary_handle_ref := temporary_handle;
+  Extension.c_release_handle_ref := release_handle
 
 (* ---- Callback registration ---- *)
 

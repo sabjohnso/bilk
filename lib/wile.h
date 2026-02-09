@@ -23,6 +23,19 @@
 
 #include <stdint.h>
 
+/* ---- Extension API ---- */
+
+/** Extension API version for compatibility checks. */
+#define WILE_EXT_API_VERSION 1
+
+/** Name of the entry point symbol in C extensions. */
+#define WILE_EXT_ENTRY "wile_ext_init"
+
+/** Declare the extension entry point function.
+    Usage: WILE_EXT_INIT { wile_define_primitive(inst, ...); } */
+#define WILE_EXT_INIT \
+    void wile_ext_init(wile_inst_t inst)
+
 #ifdef __cplusplus
 extern "C" {
 #endif

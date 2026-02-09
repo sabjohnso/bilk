@@ -30,6 +30,8 @@ type lib_declaration =
       (** An import declaration to be replayed. *)
   | Lib_code of Datum.code
       (** A compiled code object to be executed. *)
+  | Lib_native of string
+      (** A native extension to be loaded via [include-shared]. *)
 
 (** A serialized library. *)
 type lib_fasl = {

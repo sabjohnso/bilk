@@ -1,7 +1,7 @@
 exception Fasl_error of string
 
 let version_major = 1
-let version_minor = 0
+let version_minor = 1
 
 let fasl_error msg = raise (Fasl_error msg)
 
@@ -392,6 +392,7 @@ let read_export_spec data pos =
 type lib_declaration =
   | Lib_import of Library.import_set
   | Lib_code of Datum.code
+  | Lib_native of string
 
 type lib_fasl = {
   lib_name : Library.library_name;
@@ -408,12 +409,16 @@ let write_lib_declaration buf decl =
   | Lib_code code ->
     write_u8 buf 1;
     write_code_obj buf code
+  | Lib_native name ->
+    write_u8 buf 2;
+    write_str buf name
 
 let read_lib_declaration symbols data pos =
   let tag = read_u8 data pos in
   match tag with
   | 0 -> Lib_import (read_import_set data pos)
   | 1 -> Lib_code (read_code_obj symbols data pos)
+  | 2 -> Lib_native (read_str data pos)
   | _ -> fasl_error (Printf.sprintf "unknown declaration tag: %d" tag)
 
 (* --- Library FASL public API --- *)

@@ -25,6 +25,7 @@ let handle_errors f =
   | Package.Package_error msg -> format_error msg; 1
   | Pkg_manager.Pkg_error msg -> format_error msg; 1
   | Venv.Venv_error msg -> format_error msg; 1
+  | Extension.Extension_error msg -> format_error msg; 1
   | Sys_error msg -> format_error msg; 1
   | Failure msg -> format_error msg; 1
 
@@ -218,6 +219,7 @@ let repl_load inst path =
   | Fasl.Fasl_error msg -> format_error msg
   | Package.Package_error msg -> format_error msg
   | Pkg_manager.Pkg_error msg -> format_error msg
+  | Extension.Extension_error msg -> format_error msg
   | Failure msg -> format_error msg
   | Sys_error msg -> format_error msg
 
@@ -343,6 +345,7 @@ let run_repl theme_name =
           | Fasl.Fasl_error msg -> format_error msg
           | Package.Package_error msg -> format_error msg
           | Pkg_manager.Pkg_error msg -> format_error msg
+          | Extension.Extension_error msg -> format_error msg
           | Failure msg -> format_error msg
           end;
           eval_loop ()
@@ -408,6 +411,7 @@ let make_default_cmd () =
             `P "Use $(b,wile run) to execute a compiled program FASL.";
             `P "Use $(b,wile pkg) to manage local packages.";
             `P "Use $(b,wile venv) to create a virtual environment.";
+            `P "Use $(b,wile ext) to manage native extensions.";
             `S "ENVIRONMENT";
             `P "$(b,WILE_VENV) — path to active virtual environment \
                 (its $(b,lib/) directory is searched for libraries).";
@@ -640,6 +644,161 @@ let make_pkg_cmd () =
     make_pkg_info_cmd ();
   ]
 
+(* --- Extension scaffolding --- *)
+
+let ensure_dir path =
+  if not (Sys.file_exists path) then Sys.mkdir path 0o755
+
+let ext_init_ocaml name dir =
+  handle_errors (fun () ->
+    let project_dir = Filename.concat dir ("wile-" ^ name) in
+    ensure_dir project_dir;
+    ensure_dir (Filename.concat project_dir "lib");
+    ensure_dir (Filename.concat project_dir "scheme");
+    ensure_dir (Filename.concat project_dir (Filename.concat "scheme" name));
+    (* dune-project *)
+    let oc = open_out (Filename.concat project_dir "dune-project") in
+    Printf.fprintf oc "(lang dune 3.0)\n(name wile_%s)\n" name;
+    close_out oc;
+    (* lib/dune *)
+    let oc = open_out (Filename.concat project_dir "lib/dune") in
+    Printf.fprintf oc
+      "(library\n (name wile_%s)\n (public_name wile_%s)\n (libraries wile))\n"
+      name name;
+    close_out oc;
+    (* lib/wile_<name>.ml *)
+    let oc = open_out (Filename.concat project_dir
+      (Printf.sprintf "lib/wile_%s.ml" name)) in
+    Printf.fprintf oc
+      "let init inst =\n\
+      \  Wile.Instance.define_primitive inst \"%s-hello\" (fun _args ->\n\
+      \    Wile.Datum.Str (Bytes.of_string \"hello from %s!\"))\n\
+       \n\
+       let () = Wile.Extension.register_static \"%s\" init\n"
+      name name name;
+    close_out oc;
+    (* lib/wile_<name>.mli *)
+    let oc = open_out (Filename.concat project_dir
+      (Printf.sprintf "lib/wile_%s.mli" name)) in
+    Printf.fprintf oc
+      "(** %s extension for Wile. *)\n\
+       \n\
+       val init : Wile.Instance.t -> unit\n\
+       (** [init inst] registers the extension's primitives. *)\n"
+      name;
+    close_out oc;
+    (* scheme/<name>/core.sld *)
+    let oc = open_out (Filename.concat project_dir
+      (Printf.sprintf "scheme/%s/core.sld" name)) in
+    Printf.fprintf oc
+      "(define-library (%s core)\n\
+      \  (export %s-hello)\n\
+      \  (include-shared \"%s\"))\n"
+      name name name;
+    close_out oc;
+    Printf.printf "Created OCaml extension project: %s\n%!"
+      project_dir)
+
+let ext_init_c name dir =
+  handle_errors (fun () ->
+    let project_dir = Filename.concat dir ("wile-" ^ name) in
+    ensure_dir project_dir;
+    ensure_dir (Filename.concat project_dir "src");
+    ensure_dir (Filename.concat project_dir "scheme");
+    ensure_dir (Filename.concat project_dir (Filename.concat "scheme" name));
+    (* Makefile *)
+    let oc = open_out (Filename.concat project_dir "Makefile") in
+    Printf.fprintf oc
+      "CC ?= cc\n\
+       CFLAGS ?= -fPIC -Wall -Wextra\n\
+       \n\
+       .PHONY: all clean\n\
+       \n\
+       all: wile_%s.so\n\
+       \n\
+       wile_%s.so: src/wile_%s.c\n\
+       \t$(CC) -shared $(CFLAGS) -o $@ $<\n\
+       \n\
+       clean:\n\
+       \trm -f wile_%s.so\n"
+      name name name name;
+    close_out oc;
+    (* src/wile_<name>.c *)
+    let oc = open_out (Filename.concat project_dir
+      (Printf.sprintf "src/wile_%s.c" name)) in
+    Printf.fprintf oc
+      "#include \"wile.h\"\n\
+       \n\
+       static wile_val_t my_hello(wile_inst_t inst, int argc,\n\
+       \                            const wile_val_t *argv, void *data) {\n\
+       \    (void)argc; (void)argv; (void)data;\n\
+       \    return wile_string(inst, \"hello from %s!\");\n\
+       }\n\
+       \n\
+       WILE_EXT_INIT {\n\
+       \    wile_define_primitive(inst, \"%s-hello\", my_hello, NULL);\n\
+       }\n"
+      name name;
+    close_out oc;
+    (* scheme/<name>/core.sld *)
+    let oc = open_out (Filename.concat project_dir
+      (Printf.sprintf "scheme/%s/core.sld" name)) in
+    Printf.fprintf oc
+      "(define-library (%s core)\n\
+      \  (export %s-hello)\n\
+      \  (include-shared \"%s\"))\n"
+      name name name;
+    close_out oc;
+    Printf.printf "Created C extension project: %s\n%!"
+      project_dir)
+
+let make_ext_init_cmd () =
+  let open Cmdliner in
+  let name_arg =
+    Arg.(required & pos 0 (some string) None &
+         info [] ~docv:"NAME" ~doc:"Extension name.")
+  in
+  let lang_opt =
+    Arg.(value & opt string "ocaml" &
+         info ["lang"] ~docv:"LANG"
+           ~doc:"Language: $(b,ocaml) (default) or $(b,c).")
+  in
+  let dir_opt =
+    Arg.(value & opt string "." &
+         info ["dir"] ~docv:"DIR"
+           ~doc:"Parent directory for the project (default: current directory).")
+  in
+  let cmd name lang dir =
+    match lang with
+    | "ocaml" -> exit (ext_init_ocaml name dir)
+    | "c" -> exit (ext_init_c name dir)
+    | _ ->
+      Printf.eprintf "Unknown language: %s (use ocaml or c)\n%!" lang;
+      exit 1
+  in
+  let term = Term.(const cmd $ name_arg $ lang_opt $ dir_opt) in
+  let info =
+    Cmd.info "init" ~version
+      ~doc:"Initialize a new extension project"
+      ~man:[`S "DESCRIPTION";
+            `P "Creates a new extension project directory with boilerplate \
+                for an OCaml or C extension."]
+  in
+  Cmd.v info term
+
+let make_ext_cmd () =
+  let open Cmdliner in
+  let info =
+    Cmd.info "ext" ~version
+      ~doc:"Extension management commands"
+      ~man:[`S "DESCRIPTION";
+            `P "Manage native extensions. Use $(b,wile ext init) to \
+                create a new extension project."]
+  in
+  Cmd.group info [
+    make_ext_init_cmd ();
+  ]
+
 (* Manual subcommand dispatch to avoid Cmd.group intercepting positional
    file arguments (e.g. "wile file.scm") as unknown subcommand names. *)
 let () =
@@ -671,6 +830,12 @@ let () =
         Array.sub Sys.argv 2 (argc - 2)
       ] in
       exit (Cmd.eval ~argv (make_venv_cmd ()))
+    | "ext" ->
+      let argv = Array.concat [
+        [| Sys.argv.(0) |];
+        Array.sub Sys.argv 2 (argc - 2)
+      ] in
+      exit (Cmd.eval ~argv (make_ext_cmd ()))
     | _ -> exit (Cmd.eval (make_default_cmd ()))
   end else
     exit (Cmd.eval (make_default_cmd ()))

@@ -178,6 +178,19 @@ val release : int -> int -> unit
 (** [release ih vh] releases the value handle [vh] from instance [ih].
     The handle becomes invalid after this call. *)
 
+(** {1 Temporary handles for C extensions} *)
+
+val temporary_handle : Instance.t -> int
+(** [temporary_handle inst] registers an existing {!Instance.t} in the
+    handle table and returns a fresh handle.  Used to give C extension
+    init functions a valid [wile_inst_t] handle.  The handle should be
+    released with {!release_handle} when no longer needed. *)
+
+val release_handle : int -> unit
+(** [release_handle ih] removes the handle [ih] from the instance table
+    without destroying the underlying instance.  Used after C extension
+    init completes. *)
+
 (** {1 Handle resolution (for testing)} *)
 
 val resolve : int -> int -> Datum.t option

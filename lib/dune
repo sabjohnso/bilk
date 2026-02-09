@@ -1,6 +1,7 @@
 (library
  (name wile)
  (public_name wile)
- (libraries unix)
- (foreign_stubs (language c) (names wile_stubs))
+ (libraries unix dynlink)
+ (foreign_stubs (language c) (names wile_stubs ext_stubs))
+ (c_library_flags (-ldl))
  (install_c_headers wile))

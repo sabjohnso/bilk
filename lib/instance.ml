@@ -17,6 +17,7 @@ type t = {
   command_line : string list ref;
   eval_envs : (int, Datum.env * Expander.syn_env) Hashtbl.t;
   eval_env_counter : int ref;
+  extension_lib_env : (Env.t * Expander.syn_env) option ref;
 }
 
 (* --- Primitive helpers --- *)
@@ -2245,6 +2246,8 @@ let scheme_char_names = [
   "char-upper-case?"; "char-lower-case?";
   "char-upcase"; "char-downcase"; "char-foldcase";
   "digit-value";
+  "string-ci=?"; "string-ci<?"; "string-ci>?"; "string-ci<=?"; "string-ci>=?";
+  "string-upcase"; "string-downcase"; "string-foldcase";
 ]
 
 let scheme_write_names = [
@@ -2458,6 +2461,14 @@ let register_builtin_libraries inst =
 let lib_lookup_ref : (t -> string list -> Library.t option) ref =
   ref (fun inst name -> Library.lookup inst.libraries name)
 
+(* Forward reference for native extension loading.
+   Filled in by Extension module at init time to break the dependency cycle. *)
+let load_native_ref :
+    (t -> search_dirs:string list -> sld_dir:string option -> string -> unit) ref =
+  ref (fun _inst ~search_dirs:_ ~sld_dir:_ name ->
+    failwith (Printf.sprintf
+      "extension loading not available: cannot load %s" name))
+
 let make_expander_callbacks inst =
   let features = inst.features in
   let has_library name = !lib_lookup_ref inst name <> None in
@@ -2526,7 +2537,8 @@ let create ?(readtable = Readtable.default) () =
                current_input; current_output; current_error;
                command_line = ref (Array.to_list Sys.argv);
                eval_envs = Hashtbl.create 4;
-               eval_env_counter = ref 0 } in
+               eval_env_counter = ref 0;
+               extension_lib_env = ref None } in
   List.iter (eval_boot inst) boot_definitions;
   (* Register higher-order port procedures that need the instance *)
   let register_late name fn =
@@ -4671,6 +4683,18 @@ let process_define_library ?sld_path inst name_syn decls =
             "include-ci: expected string filename"))
       ) filenames in
       eval_forms_in_lib forms
+    | { datum = Syntax.Symbol "include-shared"; _ } :: args ->
+      (match args with
+       | [{ datum = Syntax.Str name; _ }] ->
+         if tracking then fasl_decls := Fasl.Lib_native name :: !fasl_decls;
+         let sld_dir = Option.map Filename.dirname sld_path in
+         inst.extension_lib_env := Some (lib_env, lib_syn_env);
+         Fun.protect ~finally:(fun () -> inst.extension_lib_env := None)
+           (fun () ->
+             !load_native_ref inst
+               ~search_dirs:!(inst.search_paths) ~sld_dir name)
+       | _ -> raise (Compiler.Compile_error (loc,
+           "include-shared: expected a single string argument")))
     | { datum = Syntax.Symbol "cond-expand"; _ } :: _ ->
       (* Expand cond-expand, then process each resulting declaration *)
       let expanded = expand_in_lib decl in
@@ -4764,6 +4788,13 @@ let replay_lib_fasl inst (fasl : Fasl.lib_fasl) =
       ) rt_bindings
     | Fasl.Lib_code code ->
       ignore (Vm.execute ~winds:inst.winds lib_env code)
+    | Fasl.Lib_native name ->
+      let lib_syn_env = Expander.core_env () in
+      inst.extension_lib_env := Some (lib_env, lib_syn_env);
+      Fun.protect ~finally:(fun () -> inst.extension_lib_env := None)
+        (fun () ->
+          !load_native_ref inst
+            ~search_dirs:!(inst.search_paths) ~sld_dir:None name)
   ) fasl.declarations;
   let exports = Hashtbl.create 16 in
   List.iter (fun spec ->
@@ -4877,7 +4908,12 @@ let define_primitive inst name fn =
   let sym = Symbol.intern inst.symbols name in
   let prim = Datum.Primitive { prim_name = name; prim_fn = fn; prim_intrinsic = None } in
   Env.define inst.global_env sym prim;
-  Expander.define_binding inst.syn_env name (Expander.var_binding)
+  Expander.define_binding inst.syn_env name (Expander.var_binding);
+  match !(inst.extension_lib_env) with
+  | None -> ()
+  | Some (lib_env, lib_syn_env) ->
+    Env.define lib_env sym prim;
+    Expander.define_binding lib_syn_env name (Expander.var_binding)
 
 let eval_syntax inst expr =
   match classify_top_level expr with
@@ -4953,6 +4989,9 @@ let run_program inst prog =
       process_import_set inst iset
     | Fasl.Lib_code code ->
       last := Vm.execute ~winds:inst.winds inst.global_env code
+    | Fasl.Lib_native name ->
+      !load_native_ref inst
+        ~search_dirs:!(inst.search_paths) ~sld_dir:None name
   ) prog.Fasl.declarations;
   !last
 

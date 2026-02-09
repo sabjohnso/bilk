@@ -4,7 +4,7 @@ open Wile
 
 let test_version_constants () =
   Alcotest.(check int) "major" 1 Fasl.version_major;
-  Alcotest.(check int) "minor" 0 Fasl.version_minor
+  Alcotest.(check int) "minor" 1 Fasl.version_minor
 
 let test_fasl_error_catchable () =
   Alcotest.check_raises "fasl error"

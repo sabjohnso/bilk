@@ -52,6 +52,9 @@ type t = {
       Used by [(scheme eval)] to pass environments to [eval]. *)
   eval_env_counter : int ref;
   (** Counter for generating fresh environment specifier IDs. *)
+  extension_lib_env : (Env.t * Expander.syn_env) option ref;
+  (** When set, {!define_primitive} also registers into these envs.
+      Used during [include-shared] processing.  Default: [ref None]. *)
 }
 
 (** {1 Constructors} *)
@@ -153,6 +156,12 @@ val run_program : t -> Fasl.program_fasl -> Datum.t
     @raise Vm.Runtime_error on runtime errors. *)
 
 (** {1 Package integration} *)
+
+val load_native_ref :
+  (t -> search_dirs:string list -> sld_dir:string option -> string -> unit) ref
+(** Forward reference for native extension loading.  Filled in by
+    {!Extension} at module-init time to break the dependency cycle
+    [Instance -> Extension -> Instance]. *)
 
 val setup_package_paths : t -> registry_root:string -> Package.t -> unit
 (** [setup_package_paths inst ~registry_root pkg] resolves the package's

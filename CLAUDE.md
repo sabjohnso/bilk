@@ -473,6 +473,51 @@ Changes to existing modules:
 - `lib/dune`: Added `(foreign_stubs (language c) (names wile_stubs))` and
   `(install_c_headers wile)`
 
+**Milestone 18 (OCaml Extensions)** — complete.
+
+| Module      | Purpose                                                        |
+|-------------|----------------------------------------------------------------|
+| `Extension` | Static registry, Dynlink loading, search path resolution       |
+
+Adds native extension support via `(include-shared "name")` in
+`define-library`.  Extensions register Scheme primitives and integrate
+with the R7RS library system.  Supports static linking (compile-time
+`register_static`) and dynamic loading (`.cmxs` via `Dynlink`).
+
+Changes to existing modules:
+- `Instance`: Added `extension_lib_env` field (used during `include-shared`
+  to redirect `define_primitive` into the library's env); added
+  `load_native_ref` forward reference (filled by `Extension` module);
+  `define_primitive` checks `extension_lib_env` and also registers in
+  lib env when set; `process_define_library` handles `include-shared`;
+  `replay_lib_fasl` handles `Lib_native`; `run_program` handles `Lib_native`
+- `Fasl`: Added `Lib_native of string` to `lib_declaration`; tag 2
+  serialization; bumped `version_minor` to 1
+- `Wile_c_api`: Added `temporary_handle`/`release_handle` for C extension
+  handles; fills in `Extension.c_temporary_handle_ref`/`c_release_handle_ref`
+- `lib/dune`: Added `dynlink` to libraries
+- `bin/main.ml`: Added `wile ext init` subcommand with `--lang ocaml`/`c`
+  scaffolding; added `Extension.Extension_error` to error handlers
+
+**Milestone 19 (C Extensions)** — complete.
+
+No new modules.  Adds C extension loading via `dlopen`/`dlsym` to the
+existing `Extension` module.
+
+Files:
+- `lib/ext_stubs.c` — C stubs wrapping POSIX `dlopen`/`dlsym`/`dlclose`
+  and `wile_ext_call_init` for calling C extension entry points
+
+Changes to existing modules:
+- `Extension`: Added `ext_dlopen`/`ext_dlsym`/`ext_dlclose`/`ext_call_init`
+  externals; `load_c` function; `load_native` searches `.so` after `.cmxs`;
+  `c_temporary_handle_ref`/`c_release_handle_ref` forward refs for cycle
+  breaking
+- `lib/wile.h`: Added `WILE_EXT_API_VERSION`, `WILE_EXT_ENTRY`,
+  `WILE_EXT_INIT` macros for C extension entry points
+- `lib/dune`: Added `ext_stubs` to `foreign_stubs`; added `-ldl` to
+  `c_library_flags`
+
 ## Development Workflow
 
 **This project uses TDD (Test-Driven Development).** Follow this cycle:
@@ -532,6 +577,7 @@ Tests live in `test/` as per-topic files and are run via `dune test`.
 | `test/test_regexp_engine.ml` | Regexp_engine (32 tests)                            |
 | `test/test_c_api.ml`        | Wile_c_api (49 tests)                               |
 | `test/test_c_embed.ml`      | C integration tests (50 tests via test_c_embed_impl.c) |
+| `test/test_extension.ml`    | Extension (23 tests: static registry, include-shared, FASL, C ext, scaffolding) |
 
 Test dependencies:
 - **alcotest** — unit test framework with readable output
