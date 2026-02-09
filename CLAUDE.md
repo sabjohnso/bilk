@@ -381,11 +381,18 @@ Adds infrastructure for bundled SRFIs + implements 20 SRFIs. Embedded
 | `Srfi`          | Bundled SRFI library sources with lazy loading infrastructure |
 | `Regexp_engine` | Backtracking NFA regex engine for SRFI 115                    |
 
-Bundled SRFIs:
+Bundled SRFIs (36 total):
 - **Pure Scheme:** SRFI 1 (lists), 2 (and-let*), 8 (receive), 11 (let-values),
   16 (case-lambda), 26 (cut/cute), 28 (format), 31 (rec), 41 (streams),
-  111 (boxes), 113 (sets/bags), 125 (intermediate hash tables),
-  128 (comparators), 132 (sort), 133 (vectors)
+  48 (intermediate format strings), 111 (boxes), 113 (sets/bags),
+  117 (queues), 125 (intermediate hash tables), 128 (comparators),
+  132 (sort), 133 (vectors), 145 (assumptions), 156 (syntactic combiners),
+  158 (generators/accumulators), 162 (comparators sublibrary),
+  175 (ASCII character library), 189 (Maybe and Either),
+  195 (multiple-value boxes), 210 (multiple values procedures),
+  214 (flexvectors), 219 (define higher-order lambda),
+  223 (generalized binary search), 228 (composing comparators),
+  234 (topological sorting), 235 (combinators)
 - **OCaml primitives:** SRFI 14 (char-sets, ~37 primitives),
   SRFI 69 (basic hash tables, 26 primitives),
   SRFI 115 (regex, ~15 primitives + Regexp_engine module),
@@ -439,6 +446,32 @@ Changes to existing modules:
   added `wile venv` subcommand; `Venv.Venv_error` in error handler;
   AOT executable template uses `Search_path.resolve`; updated man page
   with environment variable documentation
+
+**Milestone 17 (C Embedding API)** — complete.
+
+| Module        | Purpose                                                        |
+|---------------|----------------------------------------------------------------|
+| `Wile_c_api`  | OCaml handle tables, error wrapping, callback registration     |
+
+Exposes the existing OCaml embedding API to C programs via integer handles
+and OCaml's C FFI (`Callback.register` + `caml_callback`).
+
+Files:
+- `lib/wile_c_api.ml` / `.mli` — Handle-based bridge: instance and value
+  handle tables, error catching, all API functions, `Callback.register`
+- `lib/wile_stubs.c` — C stubs: `caml_callback` wrappers + primitive dispatch
+- `lib/wile.h` — Public C header with full API
+
+Design:
+- `wile_val_t` / `wile_inst_t` = `int32_t` handles into OCaml-side `Hashtbl`
+- Handle 0 = `WILE_NULL` (error/not-found sentinel)
+- Per-instance `last_error : string option` catches all Wile exceptions
+- C functions registered as Scheme primitives via dispatch table (max 1024)
+- Lazy callback caching (`ensure_cached()`) for all 40 registered callbacks
+
+Changes to existing modules:
+- `lib/dune`: Added `(foreign_stubs (language c) (names wile_stubs))` and
+  `(install_c_headers wile)`
 
 ## Development Workflow
 
@@ -497,6 +530,8 @@ Tests live in `test/` as per-topic files and are run via `dune test`.
 | `test/test_venv.ml`        | Venv (11 tests)                                     |
 | `test/test_search_path.ml` | Search_path (13 tests)                              |
 | `test/test_regexp_engine.ml` | Regexp_engine (32 tests)                            |
+| `test/test_c_api.ml`        | Wile_c_api (49 tests)                               |
+| `test/test_c_embed.ml`      | C integration tests (50 tests via test_c_embed_impl.c) |
 
 Test dependencies:
 - **alcotest** — unit test framework with readable output

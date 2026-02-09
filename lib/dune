@@ -1,4 +1,6 @@
 (library
  (name wile)
  (public_name wile)
- (libraries unix))
+ (libraries unix)
+ (foreign_stubs (language c) (names wile_stubs))
+ (install_c_headers wile))
