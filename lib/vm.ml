@@ -10,7 +10,10 @@ type vm_frame =
   | DW_thunk of Datum.call_frame * Datum.t * Datum.t   (* before, after *)
   | DW_after of Datum.call_frame * Datum.t         (* saved result *)
 
-let rec execute ?(winds : Datum.wind list ref option) (env : Datum.env) (code : Datum.code) : Datum.t =
+let rec execute ?(winds : Datum.wind list ref option)
+    ?(on_call : (Loc.t -> Datum.t -> Datum.t list -> unit) option)
+    ?(on_return : (Loc.t -> Datum.t -> unit) option)
+    (env : Datum.env) (code : Datum.code) : Datum.t =
   let stack_size = 1024 in
   let stack = Array.make stack_size Datum.Void in
   let acc = ref Datum.Void in
@@ -109,6 +112,7 @@ let rec execute ?(winds : Datum.wind list ref option) (env : Datum.env) (code : 
   let call_thunk_nested thunk =
     let wrapper_code : Datum.code = {
       instructions = [| Opcode.Const 0; Opcode.Call 0; Opcode.Halt |];
+      source_map = Array.make 3 Loc.none;
       constants = [| thunk |];
       symbols = [||];
       children = [||];
@@ -380,6 +384,9 @@ let rec execute ?(winds : Datum.wind list ref option) (env : Datum.env) (code : 
     | Opcode.Call n ->
       let args = pop_n n in
       let proc = !acc in
+      (match on_call with
+       | Some f -> f (!cur_code).source_map.(!pc - 1) proc args
+       | None -> ());
       (match proc with
        | Datum.Primitive prim when prim.prim_intrinsic <> None ->
          handle_intrinsic prim args ~is_tail:false
@@ -396,6 +403,9 @@ let rec execute ?(winds : Datum.wind list ref option) (env : Datum.env) (code : 
     | Opcode.TailCall n ->
       let args = pop_n n in
       let proc = !acc in
+      (match on_call with
+       | Some f -> f (!cur_code).source_map.(!pc - 1) proc args
+       | None -> ());
       (match proc with
        | Datum.Primitive prim when prim.prim_intrinsic <> None ->
          handle_intrinsic prim args ~is_tail:true
@@ -412,8 +422,12 @@ let rec execute ?(winds : Datum.wind list ref option) (env : Datum.env) (code : 
     | Opcode.Return ->
       (match !frames with
        | Standard frame :: rest ->
+         let return_loc = (!cur_code).source_map.(max 0 (!pc - 1)) in
          frames := rest;
-         restore_frame frame
+         restore_frame frame;
+         (match on_return with
+          | Some f -> f return_loc !acc
+          | None -> ())
        | (CWV_pending _ | DW_before _ | DW_thunk _ | DW_after _) :: _ ->
          ignore (process_intrinsic_return ())
        | [] ->

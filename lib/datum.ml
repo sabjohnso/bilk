@@ -72,6 +72,7 @@ and closure = {
 
 and code = {
   instructions : Opcode.t array;
+  source_map : Loc.t array;
   constants : t array;
   symbols : Symbol.t array;
   children : code array;

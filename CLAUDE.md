@@ -534,6 +534,36 @@ Changes to existing modules:
   Cmdliner for positional file arguments (`wile file.scm arg1 arg2`),
   collecting remaining argv as script args
 
+**Milestone 21 (Source Maps & VM Instrumentation)** — complete.
+
+No new modules.  Adds source location tracking through compilation to
+bytecode, binary serialization of source maps in FASL, and callback hooks
+in the VM for tooling integration (debuggers, profilers, tracers).
+
+Changes to existing modules:
+- `Datum`: Added `source_map : Loc.t array` field to `code` record type,
+  parallel to `instructions` (same length, maps each bytecode instruction
+  to its source `Loc.t`)
+- `Compiler`: Added `source_locs` (reversed list) and `current_loc`
+  (mutable) fields to compiler state; `emit` appends `current_loc` to
+  `source_locs` alongside each instruction; each `compile_*` function sets
+  `current_loc <- s.loc` at entry; `compile_call` and `compile_define`
+  restore location before emitting Call/TailCall/Define instructions;
+  `package_code` converts `source_locs` to `source_map` array
+- `Fasl`: Bumped `version_minor` from 2 to 3; `write_code_obj` serializes
+  source map as `(string file, u32 line, u32 col)` per instruction after
+  the instruction array; `read_code_obj` deserializes and reconstructs
+  `Loc.t` values
+- `Vm`: Extended `execute` signature with `?on_call` and `?on_return`
+  optional callback parameters; `on_call` fires at Call and TailCall
+  instructions with source location, procedure, and argument list;
+  `on_return` fires at Return (Standard frames only) with source location
+  and return value; hooks are NOT passed to internal `call_thunk_nested`
+  (wind thunks)
+- `Instance`: Added `on_call` and `on_return` fields (`(Loc.t -> ...)
+  option ref`, default `None`); all `Vm.execute` call sites pass hooks
+  from instance fields
+
 ## Development Workflow
 
 **This project uses TDD (Test-Driven Development).** Follow this cycle:
@@ -571,12 +601,12 @@ Tests live in `test/` as per-topic files and are run via `dune test`.
 | `test/test_env.ml`         | Env (14 tests)                                      |
 | `test/test_instance.ml`    | Instance (31 tests)                                 |
 | `test/test_opcode.ml`      | Opcode (4 tests)                                    |
-| `test/test_compiler.ml`    | Compiler (14 tests)                                 |
-| `test/test_vm.ml`          | VM (413 tests: end-to-end via Instance.eval_string) |
+| `test/test_compiler.ml`    | Compiler (20 tests)                                 |
+| `test/test_vm.ml`          | VM (420 tests: end-to-end via Instance.eval_string) |
 | `test/test_m6_review.ml`   | M6 bugfix regression (7 tests)                      |
 | `test/test_expander.ml`    | Expander (11 tests)                                 |
 | `test/test_library.ml`     | Library (25 tests)                                  |
-| `test/test_fasl.ml`        | Fasl (45 tests)                                     |
+| `test/test_fasl.ml`        | Fasl (49 tests)                                     |
 | `test/test_aot.ml`         | AOT compiler (27 tests)                             |
 | `test/test_terminal.ml`    | Terminal key parsing (16 tests)                     |
 | `test/test_history.ml`     | History (20 tests)                                  |

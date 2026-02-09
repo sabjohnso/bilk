@@ -130,6 +130,61 @@ let test_compile_error () =
     (Compiler.Compile_error (Loc.make "<string>" 1 1, "empty application ()"))
     (fun () -> ignore (compile_string "()"))
 
+(* --- Source map tests --- *)
+
+let loc_testable = Alcotest.testable Loc.pp Loc.equal
+
+let test_source_map_length () =
+  let code = compile_string "42" in
+  Alcotest.(check int) "source_map length = instruction count"
+    (Array.length code.instructions) (Array.length code.source_map)
+
+let test_source_map_literal_loc () =
+  let code = compile_string "42" in
+  (* Literal at line 1, col 1 in "<string>" *)
+  let loc = code.source_map.(0) in
+  Alcotest.(check (loc_testable)) "literal loc"
+    (Loc.make "<string>" 1 1) loc
+
+let test_source_map_lambda_child () =
+  let code = compile_string "(lambda (x) x)" in
+  Alcotest.(check int) "1 child" 1 (Array.length code.children);
+  let child = code.children.(0) in
+  Alcotest.(check int) "child source_map length = child instruction count"
+    (Array.length child.instructions) (Array.length child.source_map)
+
+let test_source_map_call_loc () =
+  let code = compile_string "(+ 1 2)" in
+  (* Find the Call instruction *)
+  let call_idx = ref (-1) in
+  Array.iteri (fun i op ->
+    match op with Opcode.Call _ -> call_idx := i | _ -> ()
+  ) code.instructions;
+  Alcotest.(check bool) "found Call" true (!call_idx >= 0);
+  let loc = code.source_map.(!call_idx) in
+  Alcotest.(check loc_testable) "call loc"
+    (Loc.make "<string>" 1 1) loc
+
+let test_source_map_define_loc () =
+  let code = compile_string "(define x 42)" in
+  (* Find the Define instruction *)
+  let def_idx = ref (-1) in
+  Array.iteri (fun i op ->
+    match op with Opcode.Define _ -> def_idx := i | _ -> ()
+  ) code.instructions;
+  Alcotest.(check bool) "found Define" true (!def_idx >= 0);
+  let loc = code.source_map.(!def_idx) in
+  Alcotest.(check loc_testable) "define loc"
+    (Loc.make "<string>" 1 1) loc
+
+let test_source_map_nested_locs () =
+  (* Two expressions on different columns *)
+  let code = compile_string "(if #t 1 2)" in
+  (* All instructions should have the file "<string>" *)
+  Array.iter (fun (loc : Loc.t) ->
+    Alcotest.(check string) "file" "<string>" loc.file
+  ) code.source_map
+
 let () =
   Alcotest.run "Compiler"
     [ ("Compiler",
@@ -147,5 +202,13 @@ let () =
        ; Alcotest.test_case "compile cond" `Quick test_compile_cond
        ; Alcotest.test_case "compile error let" `Quick test_compile_error_let
        ; Alcotest.test_case "compile error cond" `Quick test_compile_error_cond
+       ])
+    ; ("source-map",
+       [ Alcotest.test_case "length matches instructions" `Quick test_source_map_length
+       ; Alcotest.test_case "literal location" `Quick test_source_map_literal_loc
+       ; Alcotest.test_case "lambda child has source map" `Quick test_source_map_lambda_child
+       ; Alcotest.test_case "call instruction location" `Quick test_source_map_call_loc
+       ; Alcotest.test_case "define instruction location" `Quick test_source_map_define_loc
+       ; Alcotest.test_case "nested expressions have locations" `Quick test_source_map_nested_locs
        ])
     ]

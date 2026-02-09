@@ -55,6 +55,14 @@ type t = {
   extension_lib_env : (Env.t * Expander.syn_env) option ref;
   (** When set, {!define_primitive} also registers into these envs.
       Used during [include-shared] processing.  Default: [ref None]. *)
+  on_call : (Loc.t -> Datum.t -> Datum.t list -> unit) option ref;
+  (** Optional callback fired before each procedure call in the VM.
+      Receives the source location of the call site, the procedure
+      being called, and the argument list.  Default: [ref None]. *)
+  on_return : (Loc.t -> Datum.t -> unit) option ref;
+  (** Optional callback fired after each procedure return in the VM.
+      Receives the source location and the return value.
+      Default: [ref None]. *)
 }
 
 (** {1 Constructors} *)

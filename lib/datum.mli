@@ -96,6 +96,7 @@ and closure = {
 (** A compiled code object. *)
 and code = {
   instructions : Opcode.t array;  (** Bytecode instructions *)
+  source_map : Loc.t array;       (** Source locations parallel to instructions *)
   constants : t array;            (** Literal values referenced by {!Opcode.Const} *)
   symbols : Symbol.t array;       (** Interned symbols referenced by lookup/define/set! *)
   children : code array;          (** Sub-code objects for nested lambdas *)

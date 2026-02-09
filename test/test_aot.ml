@@ -9,6 +9,7 @@ let make_instance () =
 
 let make_code instrs consts =
   { Datum.instructions = instrs;
+    source_map = Array.make (Array.length instrs) Loc.none;
     constants = consts; symbols = [||]; children = [||];
     params = [||]; variadic = false; name = "<test>" }
 

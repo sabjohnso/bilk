@@ -4,7 +4,7 @@ open Wile
 
 let test_version_constants () =
   Alcotest.(check int) "major" 1 Fasl.version_major;
-  Alcotest.(check int) "minor" 2 Fasl.version_minor
+  Alcotest.(check int) "minor" 3 Fasl.version_minor
 
 let test_fasl_error_catchable () =
   Alcotest.check_raises "fasl error"
@@ -20,6 +20,7 @@ let roundtrip_code code =
 
 let make_code instrs =
   { Datum.instructions = instrs;
+    source_map = Array.make (Array.length instrs) Loc.none;
     constants = [||]; symbols = [||]; children = [||];
     params = [||]; variadic = false; name = "<test>" }
 
@@ -64,6 +65,7 @@ let datum_testable = Alcotest.testable Datum.pp Datum.equal
 let roundtrip_datum d =
   let tbl = Symbol.create_table () in
   let code = { Datum.instructions = [| Opcode.Const 0; Opcode.Halt |];
+               source_map = Array.make 2 Loc.none;
                constants = [| d |]; symbols = [||]; children = [||];
                params = [||]; variadic = false; name = "<test>" } in
   let data = Fasl.write_code code in
@@ -129,6 +131,7 @@ let test_datum_bytevector () =
 let test_datum_unserializable () =
   let prim = Datum.Primitive { prim_name = "test"; prim_fn = (fun _ -> Datum.Void); prim_intrinsic = None } in
   let code = { Datum.instructions = [| Opcode.Const 0; Opcode.Halt |];
+               source_map = Array.make 2 Loc.none;
                constants = [| prim |]; symbols = [||]; children = [||];
                params = [||]; variadic = false; name = "<test>" } in
   Alcotest.check_raises "primitive"
@@ -142,6 +145,7 @@ let test_code_simple () =
   let sym_x = Symbol.intern tbl "x" in
   let code : Datum.code = {
     instructions = [| Opcode.Const 0; Opcode.Define 0; Opcode.Halt |];
+    source_map = Array.make 3 Loc.none;
     constants = [| Datum.Fixnum 42 |];
     symbols = [| sym_x |];
     children = [||];
@@ -164,11 +168,13 @@ let test_code_simple () =
 let test_code_nested_children () =
   let child : Datum.code = {
     instructions = [| Opcode.Lookup 0; Opcode.Return |];
+    source_map = Array.make 2 Loc.none;
     constants = [||]; symbols = [||]; children = [||];
     params = [||]; variadic = false; name = "<child>";
   } in
   let parent : Datum.code = {
     instructions = [| Opcode.MakeClosure 0; Opcode.Halt |];
+    source_map = Array.make 2 Loc.none;
     constants = [||]; symbols = [||]; children = [| child |];
     params = [||]; variadic = false; name = "<parent>";
   } in
@@ -183,6 +189,7 @@ let test_code_symbol_reintern () =
   let sym_b = Symbol.intern tbl1 "b" in
   let code : Datum.code = {
     instructions = [| Opcode.Halt |];
+    source_map = [| Loc.none |];
     constants = [||]; symbols = [| sym_a; sym_b |]; children = [||];
     params = [| sym_a |]; variadic = false; name = "<test>";
   } in
@@ -206,6 +213,7 @@ let test_code_variadic () =
   let sym_rest = Symbol.intern tbl "rest" in
   let code : Datum.code = {
     instructions = [| Opcode.Halt |];
+    source_map = [| Loc.none |];
     constants = [||]; symbols = [||]; children = [||];
     params = [| sym_x; sym_rest |]; variadic = true; name = "<variadic>";
   } in
@@ -282,6 +290,7 @@ let test_lib_fasl_simple () =
   with_temp_file ".fasl" (fun path ->
     let child_code : Datum.code = {
       instructions = [| Opcode.Const 0; Opcode.Return |];
+      source_map = Array.make 2 Loc.none;
       constants = [| Datum.Fixnum 1 |]; symbols = [||]; children = [||];
       params = [||]; variadic = false; name = "<lib-body>";
     } in
@@ -533,8 +542,9 @@ let test_large_constants_pool () =
   let constants = Array.init n (fun i -> Datum.Fixnum i) in
   let instrs = Array.init n (fun i -> Opcode.Const i) in
   let instrs = Array.append instrs [| Opcode.Halt |] in
-  let code = { Datum.instructions = instrs; constants; symbols = [||];
-               children = [||]; params = [||]; variadic = false; name = "<large>" } in
+  let code = { Datum.instructions = instrs; source_map = Array.make (Array.length instrs) Loc.none;
+               constants; symbols = [||]; children = [||];
+               params = [||]; variadic = false; name = "<large>" } in
   let code' = roundtrip_code code in
   Alcotest.(check int) "consts" n (Array.length code'.constants);
   Alcotest.(check datum_testable) "last const"
@@ -542,16 +552,19 @@ let test_large_constants_pool () =
 
 let test_deeply_nested_children () =
   let leaf : Datum.code = {
-    instructions = [| Opcode.Return |]; constants = [||]; symbols = [||];
+    instructions = [| Opcode.Return |]; source_map = [| Loc.none |];
+    constants = [||]; symbols = [||];
     children = [||]; params = [||]; variadic = false; name = "<leaf>";
   } in
   let mid : Datum.code = {
     instructions = [| Opcode.MakeClosure 0; Opcode.Return |];
+    source_map = Array.make 2 Loc.none;
     constants = [||]; symbols = [||]; children = [| leaf |];
     params = [||]; variadic = false; name = "<mid>";
   } in
   let top : Datum.code = {
     instructions = [| Opcode.MakeClosure 0; Opcode.Halt |];
+    source_map = Array.make 2 Loc.none;
     constants = [||]; symbols = [||]; children = [| mid |];
     params = [||]; variadic = false; name = "<top>";
   } in
@@ -562,7 +575,7 @@ let test_deeply_nested_children () =
 
 let test_empty_code_object () =
   let code : Datum.code = {
-    instructions = [||]; constants = [||]; symbols = [||];
+    instructions = [||]; source_map = [||]; constants = [||]; symbols = [||];
     children = [||]; params = [||]; variadic = false; name = "";
   } in
   let code' = roundtrip_code code in
@@ -643,6 +656,7 @@ let test_lib_fasl_with_syntax_bindings () =
   with_temp_file ".fasl" (fun path ->
     let child_code : Datum.code = {
       instructions = [| Opcode.Const 0; Opcode.Return |];
+      source_map = Array.make 2 Loc.none;
       constants = [| Datum.Fixnum 1 |]; symbols = [||]; children = [||];
       params = [||]; variadic = false; name = "<lib-body>";
     } in
@@ -703,6 +717,64 @@ let test_syntax_export_cache_integration () =
     ignore (Instance.eval_string inst2 "(import (macrolib macros))");
     let r2 = Instance.eval_string inst2 "(my-const 7)" in
     Alcotest.(check (of_pp Datum.pp)) "v2 cached" (Datum.Fixnum 17) r2)
+
+(* --- Step 12: Source Map Round-Trip --- *)
+
+let loc_testable = Alcotest.testable Loc.pp Loc.equal
+
+let test_source_map_none_roundtrip () =
+  let code = make_code [| Opcode.Const 0; Opcode.Halt |] in
+  let code' = roundtrip_code code in
+  Alcotest.(check int) "source_map len" 2 (Array.length code'.source_map);
+  Alcotest.(check loc_testable) "loc 0" Loc.none code'.source_map.(0);
+  Alcotest.(check loc_testable) "loc 1" Loc.none code'.source_map.(1)
+
+let test_source_map_real_locs_roundtrip () =
+  let loc1 = Loc.make "foo.scm" 3 7 in
+  let loc2 = Loc.make "foo.scm" 10 1 in
+  let code : Datum.code = {
+    instructions = [| Opcode.Const 0; Opcode.Halt |];
+    source_map = [| loc1; loc2 |];
+    constants = [||]; symbols = [||]; children = [||];
+    params = [||]; variadic = false; name = "<test>";
+  } in
+  let code' = roundtrip_code code in
+  Alcotest.(check loc_testable) "loc 0" loc1 code'.source_map.(0);
+  Alcotest.(check loc_testable) "loc 1" loc2 code'.source_map.(1)
+
+let test_source_map_nested_roundtrip () =
+  let child_loc = Loc.make "inner.scm" 5 3 in
+  let child : Datum.code = {
+    instructions = [| Opcode.Return |];
+    source_map = [| child_loc |];
+    constants = [||]; symbols = [||]; children = [||];
+    params = [||]; variadic = false; name = "<child>";
+  } in
+  let parent_loc = Loc.make "outer.scm" 1 1 in
+  let parent : Datum.code = {
+    instructions = [| Opcode.MakeClosure 0; Opcode.Halt |];
+    source_map = [| parent_loc; Loc.none |];
+    constants = [||]; symbols = [||]; children = [| child |];
+    params = [||]; variadic = false; name = "<parent>";
+  } in
+  let code' = roundtrip_code parent in
+  Alcotest.(check loc_testable) "parent loc" parent_loc code'.source_map.(0);
+  Alcotest.(check loc_testable) "child loc" child_loc code'.children.(0).source_map.(0)
+
+let test_source_map_multiple_files_roundtrip () =
+  let loc1 = Loc.make "alpha.scm" 1 1 in
+  let loc2 = Loc.make "beta.scm" 2 3 in
+  let loc3 = Loc.make "gamma.scm" 99 42 in
+  let code : Datum.code = {
+    instructions = [| Opcode.Const 0; Opcode.Push; Opcode.Halt |];
+    source_map = [| loc1; loc2; loc3 |];
+    constants = [||]; symbols = [||]; children = [||];
+    params = [||]; variadic = false; name = "<multi-file>";
+  } in
+  let code' = roundtrip_code code in
+  Alcotest.(check loc_testable) "loc 0" loc1 code'.source_map.(0);
+  Alcotest.(check loc_testable) "loc 1" loc2 code'.source_map.(1);
+  Alcotest.(check loc_testable) "loc 2" loc3 code'.source_map.(2)
 
 (* --- Runner --- *)
 
@@ -774,5 +846,11 @@ let () =
        ; Alcotest.test_case "macro roundtrip" `Quick test_binding_macro_roundtrip
        ; Alcotest.test_case "lib_fasl with syntax" `Quick test_lib_fasl_with_syntax_bindings
        ; Alcotest.test_case "cache integration" `Quick test_syntax_export_cache_integration
+       ])
+    ; ("source-map",
+       [ Alcotest.test_case "Loc.none roundtrip" `Quick test_source_map_none_roundtrip
+       ; Alcotest.test_case "real locations roundtrip" `Quick test_source_map_real_locs_roundtrip
+       ; Alcotest.test_case "nested children roundtrip" `Quick test_source_map_nested_roundtrip
+       ; Alcotest.test_case "multiple files roundtrip" `Quick test_source_map_multiple_files_roundtrip
        ])
     ]

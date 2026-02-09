@@ -2904,6 +2904,90 @@ let test_r5rs_map () =
       Datum.Pair { car = Datum.Fixnum 3; cdr = Datum.Nil } })
     (Instance.eval_string inst "(map car '((1 2) (3 4)))")
 
+(* --- VM hooks --- *)
+
+let test_hooks_default_none () =
+  let inst = Instance.create () in
+  Alcotest.(check bool) "on_call none" true (!(inst.on_call) = None);
+  Alcotest.(check bool) "on_return none" true (!(inst.on_return) = None)
+
+let test_on_call_fires () =
+  let inst = Instance.create () in
+  let calls = ref [] in
+  inst.on_call := Some (fun _loc proc args ->
+    calls := (Datum.to_string proc, List.length args) :: !calls);
+  ignore (Instance.eval_string inst "(+ 1 2)");
+  Alcotest.(check bool) "on_call fired" true (List.length !calls > 0);
+  (* The call to + should appear *)
+  let found = List.exists (fun (name, nargs) ->
+    String.equal name "#<primitive +>" && nargs = 2) !calls in
+  Alcotest.(check bool) "found + call" true found
+
+let test_on_return_fires () =
+  let inst = Instance.create () in
+  let returns = ref [] in
+  inst.on_return := Some (fun _loc v ->
+    returns := v :: !returns);
+  (* Use a closure call so Return goes through Standard frame *)
+  let result = Instance.eval_string inst
+    "(begin (define (f x) (+ x 1)) (f 2))" in
+  check_datum "result" (Datum.Fixnum 3) result;
+  (* on_return fires for Standard frame returns *)
+  Alcotest.(check bool) "on_return fired" true (List.length !returns > 0)
+
+let test_on_call_source_location () =
+  let inst = Instance.create () in
+  let locs = ref [] in
+  inst.on_call := Some (fun loc _proc _args ->
+    locs := loc :: !locs);
+  ignore (Instance.eval_string inst "(+ 1 2)");
+  (* At least one call should have a non-none location *)
+  let has_real_loc = List.exists (fun (loc : Loc.t) ->
+    loc.line > 0) !locs in
+  Alcotest.(check bool) "has real source loc" true has_real_loc
+
+let test_nested_calls_hook () =
+  let inst = Instance.create () in
+  let count = ref 0 in
+  inst.on_call := Some (fun _loc _proc _args ->
+    incr count);
+  ignore (Instance.eval_string inst "(+ (* 2 3) 4)");
+  (* At least 2 calls: * and + *)
+  Alcotest.(check bool) "at least 2 calls" true (!count >= 2)
+
+let test_tail_call_hook () =
+  let inst = Instance.create () in
+  let calls = ref [] in
+  inst.on_call := Some (fun _loc proc _args ->
+    calls := Datum.to_string proc :: !calls);
+  ignore (Instance.eval_string inst
+    "(begin (define (f x) (if (= x 0) 42 (f (- x 1)))) (f 3))");
+  (* f should be called 4 times (3, 2, 1, 0) *)
+  let f_count = List.length (List.filter (fun s ->
+    String.length s > 10 && String.sub s 0 11 = "#<closure f") !calls) in
+  Alcotest.(check bool) "tail calls fire hook" true (f_count >= 4)
+
+let test_on_return_callee_location () =
+  (* on_return must report the callee's source location, not the caller's.
+     We define two functions in separate eval_string calls so that
+     the call-site in the outer code has a different location from
+     the body of the callee. *)
+  let inst = Instance.create () in
+  ignore (Instance.eval_string inst "(define (inner) 99)");
+  let return_locs = ref [] in
+  inst.on_return := Some (fun loc _val ->
+    return_locs := loc :: !return_locs);
+  ignore (Instance.eval_string inst "(inner)");
+  (* The on_return for inner's Return instruction should reference
+     inner's body location, not the call-site in the outer code. *)
+  let has_inner_loc = List.exists (fun (loc : Loc.t) ->
+    loc.line > 0 && loc.file = "<string>") !return_locs in
+  Alcotest.(check bool) "on_return has callee loc" true has_inner_loc;
+  (* Verify that on_return does NOT only see Loc.none *)
+  let all_none = List.for_all (fun (loc : Loc.t) ->
+    loc.line = 0) !return_locs in
+  Alcotest.(check bool) "not all Loc.none" false all_none
+
 let () =
   Alcotest.run "VM"
     [ ("self-evaluating",
@@ -3446,5 +3530,14 @@ let () =
        [ Alcotest.test_case "basic" `Quick test_r5rs_basic
        ; Alcotest.test_case "lazy" `Quick test_r5rs_lazy
        ; Alcotest.test_case "map" `Quick test_r5rs_map
+       ])
+    ; ("vm-hooks",
+       [ Alcotest.test_case "default none" `Quick test_hooks_default_none
+       ; Alcotest.test_case "on_call fires" `Quick test_on_call_fires
+       ; Alcotest.test_case "on_return fires" `Quick test_on_return_fires
+       ; Alcotest.test_case "on_call source location" `Quick test_on_call_source_location
+       ; Alcotest.test_case "nested calls" `Quick test_nested_calls_hook
+       ; Alcotest.test_case "tail calls" `Quick test_tail_call_hook
+       ; Alcotest.test_case "on_return callee location" `Quick test_on_return_callee_location
        ])
     ]

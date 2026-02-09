@@ -7,20 +7,25 @@ let compile_error loc msg = raise (Compile_error (loc, msg))
 type state = {
   sym_table : Symbol.table;
   mutable instructions : Opcode.t list;  (* reversed *)
+  mutable source_locs : Loc.t list;      (* reversed, parallel to instructions *)
   mutable constants : Datum.t list;      (* reversed *)
   mutable symbols : Symbol.t list;       (* reversed *)
   mutable children : Datum.code list;    (* reversed *)
+  mutable current_loc : Loc.t;           (* set by compile_* functions *)
 }
 
 let create_state sym_table =
   { sym_table;
     instructions = [];
+    source_locs = [];
     constants = [];
     symbols = [];
-    children = [] }
+    children = [];
+    current_loc = Loc.none }
 
 let emit st op =
-  st.instructions <- op :: st.instructions
+  st.instructions <- op :: st.instructions;
+  st.source_locs <- st.current_loc :: st.source_locs
 
 let current_pc st =
   List.length st.instructions
@@ -83,6 +88,7 @@ let is_self_evaluating (s : Syntax.t) =
 (* --- Main compilation --- *)
 
 let rec compile_expr st (s : Syntax.t) ~tail =
+  st.current_loc <- s.loc;
   if is_self_evaluating s then begin
     let v = Syntax.to_datum s in
     let idx = add_constant st v in
@@ -117,6 +123,7 @@ let rec compile_expr st (s : Syntax.t) ~tail =
     compile_error s.loc "unexpected expression"
 
 and compile_form st (s : Syntax.t) (head : Syntax.t) ~tail =
+  st.current_loc <- s.loc;
   match head.datum with
   | Syntax.Symbol "quote" ->
     compile_quote st s
@@ -173,6 +180,7 @@ and compile_form st (s : Syntax.t) (head : Syntax.t) ~tail =
     compile_call st s ~tail
 
 and compile_quote st (s : Syntax.t) =
+  st.current_loc <- s.loc;
   let args = syntax_list_to_list s in
   (match args with
    | [_; datum] ->
@@ -182,6 +190,7 @@ and compile_quote st (s : Syntax.t) =
    | _ -> compile_error s.loc "quote expects exactly 1 argument")
 
 and compile_if st (s : Syntax.t) ~tail =
+  st.current_loc <- s.loc;
   let args = syntax_list_to_list s in
   match args with
   | [_; test; consequent; alternate] ->
@@ -213,6 +222,7 @@ and compile_if st (s : Syntax.t) ~tail =
     compile_error s.loc "if expects 2 or 3 arguments"
 
 and compile_lambda st (s : Syntax.t) =
+  st.current_loc <- s.loc;
   let args = syntax_list_to_list s in
   match args with
   | _ :: params_syntax :: body when body <> [] ->
@@ -226,12 +236,14 @@ and compile_lambda st (s : Syntax.t) =
     compile_error s.loc "lambda expects parameters and at least one body expression"
 
 and compile_define st (s : Syntax.t) =
+  st.current_loc <- s.loc;
   let args = syntax_list_to_list s in
   match args with
   | [_; name_syn; expr] when (match name_syn.datum with Syntax.Symbol _ -> true | _ -> false) ->
     (* (define x expr) *)
     let name = match name_syn.datum with Syntax.Symbol n -> n | _ -> assert false in
     compile_expr st expr ~tail:false;
+    st.current_loc <- s.loc;
     let idx = add_symbol st name in
     emit st (Opcode.Define idx)
   | _ :: name_syn :: _body when (match name_syn.datum with Syntax.Pair _ -> true | _ -> false) ->
@@ -246,6 +258,7 @@ and compile_define st (s : Syntax.t) =
           compile_body child_st body;
           let child_code = package_code child_st param_names variadic name in
           let child_idx = add_child st child_code in
+          st.current_loc <- s.loc;
           emit st (Opcode.MakeClosure child_idx);
           let sym_idx = add_symbol st name in
           emit st (Opcode.Define sym_idx)
@@ -255,6 +268,7 @@ and compile_define st (s : Syntax.t) =
     compile_error s.loc "malformed define"
 
 and compile_set_bang st (s : Syntax.t) =
+  st.current_loc <- s.loc;
   let args = syntax_list_to_list s in
   match args with
   | [_; name_syn; expr] ->
@@ -267,6 +281,7 @@ and compile_set_bang st (s : Syntax.t) =
   | _ -> compile_error s.loc "set! expects exactly 2 arguments"
 
 and compile_begin st (s : Syntax.t) ~tail =
+  st.current_loc <- s.loc;
   let args = syntax_list_to_list s in
   match args with
   | [_] ->
@@ -302,6 +317,7 @@ and parse_bindings loc bindings_syntax =
   |> fun (names, inits) -> (names, inits, loc)
 
 and compile_let st (s : Syntax.t) ~tail =
+  st.current_loc <- s.loc;
   let args = syntax_list_to_list s in
   match args with
   | _ :: bindings_syn :: body when body <> [] ->
@@ -327,6 +343,7 @@ and compile_let st (s : Syntax.t) ~tail =
   | _ -> compile_error s.loc "let expects bindings and at least one body expression"
 
 and compile_named_let st (s : Syntax.t) name ~tail =
+  st.current_loc <- s.loc;
   (* (let name ((x init) ...) body...)
      Desugar to: (letrec* ((name (lambda (x ...) body...))) (name init ...)) *)
   let args = syntax_list_to_list s in
@@ -367,6 +384,7 @@ and compile_named_let st (s : Syntax.t) name ~tail =
   | _ -> compile_error s.loc "malformed named let"
 
 and compile_let_star st (s : Syntax.t) ~tail =
+  st.current_loc <- s.loc;
   let args = syntax_list_to_list s in
   match args with
   | _ :: bindings_syn :: body when body <> [] ->
@@ -404,6 +422,7 @@ and compile_nested_lets st bindings body ~tail =
      | _ -> compile_error binding.Syntax.loc "let*: binding must be (name init)")
 
 and compile_letrec_star st (s : Syntax.t) ~tail =
+  st.current_loc <- s.loc;
   let args = syntax_list_to_list s in
   match args with
   | _ :: bindings_syn :: body when body <> [] ->
@@ -432,6 +451,7 @@ and compile_letrec_star st (s : Syntax.t) ~tail =
   | _ -> compile_error s.loc "letrec* expects bindings and at least one body expression"
 
 and compile_cond st (s : Syntax.t) ~tail =
+  st.current_loc <- s.loc;
   let args = syntax_list_to_list s in
   match args with
   | _ :: clauses ->
@@ -539,6 +559,7 @@ and compile_cond_arrow st test proc_expr end_jumps ~tail =
   patch_jump st jf_pc next_pc
 
 and compile_case st (s : Syntax.t) ~tail =
+  st.current_loc <- s.loc;
   let args = syntax_list_to_list s in
   match args with
   | _ :: key_expr :: clauses when clauses <> [] ->
@@ -679,6 +700,7 @@ and compile_case_datums_arrow st key_name datums proc_expr end_jumps =
   patch_jump st skip_pc after_body
 
 and compile_do st (s : Syntax.t) ~tail =
+  st.current_loc <- s.loc;
   (* (do ((var init step) ...) (test expr ...) body ...)
      Desugar to named let:
      (let loop ((var init) ...) (if test (begin expr ...) (begin body ... (loop step ...)))) *)
@@ -775,6 +797,7 @@ and compile_do st (s : Syntax.t) ~tail =
   | _ -> compile_error s.loc "do expects variable clauses and a test clause"
 
 and compile_and st (s : Syntax.t) ~tail =
+  st.current_loc <- s.loc;
   let args = syntax_list_to_list s in
   match args with
   | [_] ->
@@ -803,6 +826,7 @@ and compile_and st (s : Syntax.t) ~tail =
   | [] -> compile_error s.loc "impossible: empty list"
 
 and compile_or st (s : Syntax.t) ~tail =
+  st.current_loc <- s.loc;
   let args = syntax_list_to_list s in
   match args with
   | [_] ->
@@ -835,6 +859,7 @@ and compile_or st (s : Syntax.t) ~tail =
   | [] -> compile_error s.loc "impossible: empty list"
 
 and compile_when st (s : Syntax.t) ~tail =
+  st.current_loc <- s.loc;
   let args = syntax_list_to_list s in
   match args with
   | _ :: test :: body when body <> [] ->
@@ -853,6 +878,7 @@ and compile_when st (s : Syntax.t) ~tail =
   | _ -> compile_error s.loc "when expects a test and at least one body expression"
 
 and compile_unless st (s : Syntax.t) ~tail =
+  st.current_loc <- s.loc;
   let args = syntax_list_to_list s in
   match args with
   | _ :: test :: body when body <> [] ->
@@ -873,6 +899,7 @@ and compile_unless st (s : Syntax.t) ~tail =
   | _ -> compile_error s.loc "unless expects a test and at least one body expression"
 
 and compile_call st (s : Syntax.t) ~tail =
+  st.current_loc <- s.loc;
   let args = syntax_list_to_list s in
   match args with
   | [] -> compile_error s.loc "empty application"
@@ -885,6 +912,7 @@ and compile_call st (s : Syntax.t) ~tail =
     (* Evaluate operator last (into acc) *)
     compile_expr st proc ~tail:false;
     let n = List.length operands in
+    st.current_loc <- s.loc;
     if tail then
       emit st (Opcode.TailCall n)
     else
@@ -965,6 +993,7 @@ and package_code st param_names variadic name =
   let params = Array.of_list
     (List.map (Symbol.intern st.sym_table) param_names) in
   { Datum.instructions = Array.of_list (List.rev st.instructions);
+    source_map = Array.of_list (List.rev st.source_locs);
     constants = Array.of_list (List.rev st.constants);
     symbols = Array.of_list (List.rev st.symbols);
     children = Array.of_list (List.rev st.children);
@@ -974,6 +1003,7 @@ and package_code st param_names variadic name =
 
 let compile sym_table (s : Syntax.t) : Datum.code =
   let st = create_state sym_table in
+  st.current_loc <- s.loc;
   compile_expr st s ~tail:false;
   emit st Opcode.Halt;
   package_code st [] false "<top-level>"

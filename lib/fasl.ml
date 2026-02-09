@@ -1,7 +1,7 @@
 exception Fasl_error of string
 
 let version_major = 1
-let version_minor = 2
+let version_minor = 3
 
 let fasl_error msg = raise (Fasl_error msg)
 
@@ -270,6 +270,12 @@ let rec write_code_obj buf (code : Datum.code) =
   Array.iter (write_datum buf) code.constants;
   write_u32 buf (Array.length code.instructions);
   Array.iter (write_opcode buf) code.instructions;
+  (* source_map — same count as instructions *)
+  Array.iter (fun (loc : Loc.t) ->
+    write_str buf loc.file;
+    write_u32 buf loc.line;
+    write_u32 buf loc.col
+  ) code.source_map;
   write_u16 buf (Array.length code.children);
   Array.iter (write_code_obj buf) code.children
 
@@ -288,11 +294,16 @@ let rec read_code_obj symbols data pos =
   let instructions_count = read_u32 data pos in
   let instructions = Array.init instructions_count (fun _ ->
     read_opcode data pos) in
+  let source_map = Array.init instructions_count (fun _ ->
+    let file = read_str data pos in
+    let line = read_u32 data pos in
+    let col = read_u32 data pos in
+    Loc.make file line col) in
   let children_count = read_u16 data pos in
   let children = Array.init children_count (fun _ ->
     read_code_obj symbols data pos) in
   { Datum.name; variadic; params; symbols = syms; constants;
-    instructions; children }
+    instructions; source_map; children }
 
 (* --- Public code API --- *)
 
