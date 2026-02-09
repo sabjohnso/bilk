@@ -1,3 +1,27 @@
+(subdir srfi
+ (rule
+  (targets
+   1.fasl 2.fasl 8.fasl 11.fasl 16.fasl 26.fasl 28.fasl 31.fasl
+   41.fasl 48.fasl
+   111.fasl 113.fasl 117.fasl 125.fasl 128.fasl
+   132.fasl 133.fasl 145.fasl 156.fasl 158.fasl
+   162.fasl 175.fasl 189.fasl 195.fasl
+   210.fasl 214.fasl 219.fasl 223.fasl 228.fasl 234.fasl 235.fasl)
+  (deps
+   (glob_files *.sld)
+   (glob_files 41/*.sld))
+  (action
+   (run %{exe:../../tools/precompile_stdlib.exe} ..))))
+
+(subdir srfi/41
+ (rule
+  (targets primitive.fasl)
+  (deps
+   primitive.sld
+   (glob_files ../*.sld))
+  (action
+   (run %{exe:../../../tools/precompile_stdlib.exe} ../..))))
+
 (install
  (section share)
  (package wile)
@@ -33,4 +57,36 @@
   (srfi/223.sld as wile/stdlib/srfi/223.sld)
   (srfi/228.sld as wile/stdlib/srfi/228.sld)
   (srfi/234.sld as wile/stdlib/srfi/234.sld)
-  (srfi/235.sld as wile/stdlib/srfi/235.sld)))
+  (srfi/235.sld as wile/stdlib/srfi/235.sld)
+  (srfi/1.fasl as wile/stdlib/srfi/1.fasl)
+  (srfi/2.fasl as wile/stdlib/srfi/2.fasl)
+  (srfi/8.fasl as wile/stdlib/srfi/8.fasl)
+  (srfi/11.fasl as wile/stdlib/srfi/11.fasl)
+  (srfi/16.fasl as wile/stdlib/srfi/16.fasl)
+  (srfi/26.fasl as wile/stdlib/srfi/26.fasl)
+  (srfi/28.fasl as wile/stdlib/srfi/28.fasl)
+  (srfi/31.fasl as wile/stdlib/srfi/31.fasl)
+  (srfi/41.fasl as wile/stdlib/srfi/41.fasl)
+  (srfi/41/primitive.fasl as wile/stdlib/srfi/41/primitive.fasl)
+  (srfi/48.fasl as wile/stdlib/srfi/48.fasl)
+  (srfi/111.fasl as wile/stdlib/srfi/111.fasl)
+  (srfi/113.fasl as wile/stdlib/srfi/113.fasl)
+  (srfi/117.fasl as wile/stdlib/srfi/117.fasl)
+  (srfi/125.fasl as wile/stdlib/srfi/125.fasl)
+  (srfi/128.fasl as wile/stdlib/srfi/128.fasl)
+  (srfi/132.fasl as wile/stdlib/srfi/132.fasl)
+  (srfi/133.fasl as wile/stdlib/srfi/133.fasl)
+  (srfi/145.fasl as wile/stdlib/srfi/145.fasl)
+  (srfi/156.fasl as wile/stdlib/srfi/156.fasl)
+  (srfi/158.fasl as wile/stdlib/srfi/158.fasl)
+  (srfi/162.fasl as wile/stdlib/srfi/162.fasl)
+  (srfi/175.fasl as wile/stdlib/srfi/175.fasl)
+  (srfi/189.fasl as wile/stdlib/srfi/189.fasl)
+  (srfi/195.fasl as wile/stdlib/srfi/195.fasl)
+  (srfi/210.fasl as wile/stdlib/srfi/210.fasl)
+  (srfi/214.fasl as wile/stdlib/srfi/214.fasl)
+  (srfi/219.fasl as wile/stdlib/srfi/219.fasl)
+  (srfi/223.fasl as wile/stdlib/srfi/223.fasl)
+  (srfi/228.fasl as wile/stdlib/srfi/228.fasl)
+  (srfi/234.fasl as wile/stdlib/srfi/234.fasl)
+  (srfi/235.fasl as wile/stdlib/srfi/235.fasl)))
