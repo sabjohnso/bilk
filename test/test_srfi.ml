@@ -1776,6 +1776,602 @@ let test_srfi115_fold () =
        (lambda (i m acc) (+ acc 1)) \
        0 \"a1b23c456\")")
 
+(* ===== SRFI 145 — Assumptions ===== *)
+
+let test_srfi145_truthy () =
+  check_datum "assume truthy returns value"
+    (Datum.Fixnum 42)
+    (eval_port "(import (srfi 145)) (assume 42)")
+
+let test_srfi145_true () =
+  check_datum "assume #t"
+    (Datum.Bool true)
+    (eval_port "(import (srfi 145)) (assume #t)")
+
+let test_srfi145_expr () =
+  check_datum "assume expression"
+    (Datum.Fixnum 3)
+    (eval_port "(import (srfi 145)) (assume (+ 1 2))")
+
+let test_srfi145_false () =
+  check_datum "assume #f raises"
+    (Datum.Bool true)
+    (eval_port "(import (srfi 145)) \
+     (guard (e (#t #t)) (assume #f))")
+
+let test_srfi145_message () =
+  check_datum "assume false with objs"
+    (Datum.Bool true)
+    (eval_port "(import (srfi 145)) \
+     (guard (e (#t #t)) (assume #f \"should fail\"))")
+
+(* ===== SRFI 156 — Syntactic combiners ===== *)
+
+let test_srfi156_is () =
+  check_datum "is predicate"
+    (Datum.Bool true)
+    (eval_port "(import (srfi 156)) (is 3 odd?)")
+
+let test_srfi156_is_equal () =
+  check_datum "is with equal?"
+    (Datum.Bool true)
+    (eval_port "(import (srfi 156)) (is 5 = 5)")
+
+let test_srfi156_isnt () =
+  check_datum "isnt predicate"
+    (Datum.Bool true)
+    (eval_port "(import (srfi 156)) (isnt 4 odd?)")
+
+let test_srfi156_is_binary () =
+  check_datum "is binary comparison"
+    (Datum.Bool true)
+    (eval_port "(import (srfi 156)) (is 3 < 10)")
+
+let test_srfi156_filter () =
+  check_datum "is with filter"
+    (Datum.Fixnum 2)
+    (eval_port "(import (srfi 156) (srfi 1)) \
+     (length (filter (is _ even?) '(1 2 3 4)))")
+
+(* ===== SRFI 219 — Define higher-order lambda ===== *)
+
+let test_srfi219_basic () =
+  check_datum "define-curried basic"
+    (Datum.Fixnum 7)
+    (eval_port "(import (srfi 219)) \
+     (define-curried ((adder x) y) (+ x y)) \
+     ((adder 3) 4)")
+
+let test_srfi219_triple () =
+  check_datum "define-curried triple nesting"
+    (Datum.Fixnum 6)
+    (eval_port "(import (srfi 219)) \
+     (define-curried (((f a) b) c) (+ a b c)) \
+     (((f 1) 2) 3)")
+
+let test_srfi219_normal () =
+  check_datum "define-curried normal define still works"
+    (Datum.Fixnum 10)
+    (eval_port "(import (srfi 219)) \
+     (define (double x) (* 2 x)) \
+     (double 5)")
+
+(* ===== SRFI 223 — Generalized binary search ===== *)
+
+let test_srfi223_bisect_left () =
+  check_datum "bisect-left"
+    (Datum.Fixnum 2)
+    (eval_port "(import (srfi 223)) \
+     (bisect-left #(1 3 5 7 9) 5 vector-ref < 0 5)")
+
+let test_srfi223_bisect_right () =
+  check_datum "bisect-right"
+    (Datum.Fixnum 3)
+    (eval_port "(import (srfi 223)) \
+     (bisect-right #(1 3 5 7 9) 5 vector-ref < 0 5)")
+
+let test_srfi223_vector_bisect_left () =
+  check_datum "vector-bisect-left"
+    (Datum.Fixnum 2)
+    (eval_port "(import (srfi 223)) \
+     (vector-bisect-left #(1 3 5 7 9) 5 <)")
+
+let test_srfi223_vector_bisect_right () =
+  check_datum "vector-bisect-right"
+    (Datum.Fixnum 3)
+    (eval_port "(import (srfi 223)) \
+     (vector-bisect-right #(1 3 5 7 9) 5 <)")
+
+(* ===== SRFI 175 — ASCII character library ===== *)
+
+let test_srfi175_upper () =
+  check_datum "ascii-upper-case?"
+    (Datum.Bool true)
+    (eval_port "(import (srfi 175)) (ascii-upper-case? #\\A)")
+
+let test_srfi175_lower () =
+  check_datum "ascii-lower-case?"
+    (Datum.Bool true)
+    (eval_port "(import (srfi 175)) (ascii-lower-case? #\\z)")
+
+let test_srfi175_digit () =
+  check_datum "ascii-numeric?"
+    (Datum.Bool true)
+    (eval_port "(import (srfi 175)) (ascii-numeric? #\\5)")
+
+let test_srfi175_upcase () =
+  check_datum "ascii-upcase"
+    (Datum.Fixnum 65)
+    (eval_port "(import (srfi 175)) \
+     (char->integer (ascii-upcase #\\a))")
+
+let test_srfi175_downcase () =
+  check_datum "ascii-downcase"
+    (Datum.Fixnum 97)
+    (eval_port "(import (srfi 175)) \
+     (char->integer (ascii-downcase #\\A))")
+
+let test_srfi175_ci_eq () =
+  check_datum "ascii-ci=?"
+    (Datum.Bool true)
+    (eval_port "(import (srfi 175)) (ascii-ci=? #\\a #\\A)")
+
+let test_srfi175_alphanumeric () =
+  check_datum "ascii-alphanumeric?"
+    (Datum.Bool true)
+    (eval_port "(import (srfi 175)) (ascii-alphanumeric? #\\a)")
+
+let test_srfi175_non_alphanumeric () =
+  check_datum "ascii-alphanumeric? space"
+    (Datum.Bool false)
+    (eval_port "(import (srfi 175)) (ascii-alphanumeric? #\\space)")
+
+(* ===== SRFI 162 — Comparators sublibrary ===== *)
+
+let test_srfi162_default () =
+  check_datum "default-comparator via 162"
+    (Datum.Bool true)
+    (eval_port "(import (srfi 162)) \
+     (comparator? default-comparator)")
+
+let test_srfi162_boolean () =
+  check_datum "boolean-comparator"
+    (Datum.Bool true)
+    (eval_port "(import (srfi 162)) \
+     (comparator? boolean-comparator)")
+
+let test_srfi162_char () =
+  check_datum "char-comparator ordering"
+    (Datum.Bool true)
+    (eval_port "(import (srfi 162) (srfi 128)) \
+     (<? char-comparator #\\a #\\b)")
+
+let test_srfi162_string () =
+  check_datum "string-comparator ordering"
+    (Datum.Bool true)
+    (eval_port "(import (srfi 162) (srfi 128)) \
+     (<? string-comparator \"abc\" \"abd\")")
+
+let test_srfi162_real () =
+  check_datum "real-comparator"
+    (Datum.Bool true)
+    (eval_port "(import (srfi 162) (srfi 128)) \
+     (=? real-comparator 3 3)")
+
+(* ===== SRFI 228 — Composing Comparators ===== *)
+
+let test_srfi228_wrapper () =
+  check_datum "make-wrapper-comparator"
+    (Datum.Bool true)
+    (eval_port "(import (srfi 228) (srfi 128) (srfi 162)) \
+     (let ((c (make-wrapper-comparator number? \
+                number->string string-comparator))) \
+       (=? c 42 42))")
+
+let test_srfi228_product () =
+  check_datum "make-product-comparator"
+    (Datum.Bool true)
+    (eval_port "(import (srfi 228) (srfi 128) (srfi 162)) \
+     (let ((c (make-product-comparator \
+                (make-wrapper-comparator pair? car real-comparator) \
+                (make-wrapper-comparator pair? cdr real-comparator)))) \
+       (=? c (cons 1 2) (cons 1 2)))")
+
+let test_srfi228_sum () =
+  check_datum "make-sum-comparator"
+    (Datum.Bool true)
+    (eval_port "(import (srfi 228) (srfi 128) (srfi 162)) \
+     (let ((c (make-sum-comparator \
+                real-comparator \
+                string-comparator))) \
+       (and (=? c 3 3) (=? c \"a\" \"a\")))")
+
+(* ===== SRFI 195 — Multiple-value boxes ===== *)
+
+let test_srfi195_box () =
+  check_datum "box and unbox"
+    (Datum.Fixnum 42)
+    (eval_port "(import (srfi 195)) (unbox (box 42))")
+
+let test_srfi195_arity () =
+  check_datum "box-arity"
+    (Datum.Fixnum 3)
+    (eval_port "(import (srfi 195)) (box-arity (box 1 2 3))")
+
+let test_srfi195_unbox_value () =
+  check_datum "unbox-value"
+    (Datum.Fixnum 2)
+    (eval_port "(import (srfi 195)) (unbox-value (box 1 2 3) 1)")
+
+let test_srfi195_set_box () =
+  check_datum "set-box!"
+    (Datum.Fixnum 99)
+    (eval_port "(import (srfi 195)) \
+     (let ((b (box 1))) (set-box! b 99) (unbox b))")
+
+let test_srfi195_predicate () =
+  check_datum "box?"
+    (Datum.Bool true)
+    (eval_port "(import (srfi 195)) (box? (box 1))")
+
+(* ===== SRFI 48 — Intermediate format strings ===== *)
+
+let test_srfi48_basic () =
+  check_datum "format ~a"
+    (Datum.Str (Bytes.of_string "hello world"))
+    (eval_port "(import (srfi 48)) (format \"~a ~a\" \"hello\" \"world\")")
+
+let test_srfi48_decimal () =
+  check_datum "format ~d"
+    (Datum.Str (Bytes.of_string "42"))
+    (eval_port "(import (srfi 48)) (format \"~d\" 42)")
+
+let test_srfi48_hex () =
+  check_datum "format ~x"
+    (Datum.Str (Bytes.of_string "ff"))
+    (eval_port "(import (srfi 48)) (format \"~x\" 255)")
+
+let test_srfi48_octal () =
+  check_datum "format ~o"
+    (Datum.Str (Bytes.of_string "77"))
+    (eval_port "(import (srfi 48)) (format \"~o\" 63)")
+
+let test_srfi48_binary () =
+  check_datum "format ~b"
+    (Datum.Str (Bytes.of_string "1010"))
+    (eval_port "(import (srfi 48)) (format \"~b\" 10)")
+
+let test_srfi48_tilde () =
+  check_datum "format ~~"
+    (Datum.Str (Bytes.of_string "a~b"))
+    (eval_port "(import (srfi 48)) (format \"a~~b\")")
+
+let test_srfi48_newline () =
+  check_datum "format ~%"
+    (Datum.Str (Bytes.of_string "a\nb"))
+    (eval_port "(import (srfi 48)) (format \"a~%b\")")
+
+(* ===== SRFI 117 — Queues based on lists ===== *)
+
+let test_srfi117_make () =
+  check_datum "list-queue-front"
+    (Datum.Fixnum 1)
+    (eval_port "(import (srfi 117)) \
+     (list-queue-front (list-queue 1 2 3))")
+
+let test_srfi117_back () =
+  check_datum "list-queue-back"
+    (Datum.Fixnum 3)
+    (eval_port "(import (srfi 117)) \
+     (list-queue-back (list-queue 1 2 3))")
+
+let test_srfi117_empty () =
+  check_datum "list-queue-empty?"
+    (Datum.Bool true)
+    (eval_port "(import (srfi 117)) \
+     (list-queue-empty? (make-list-queue '()))")
+
+let test_srfi117_add_front () =
+  check_datum "list-queue-add-front!"
+    (Datum.Fixnum 0)
+    (eval_port "(import (srfi 117)) \
+     (let ((q (list-queue 1 2))) \
+       (list-queue-add-front! q 0) \
+       (list-queue-front q))")
+
+let test_srfi117_add_back () =
+  check_datum "list-queue-add-back!"
+    (Datum.Fixnum 9)
+    (eval_port "(import (srfi 117)) \
+     (let ((q (list-queue 1 2))) \
+       (list-queue-add-back! q 9) \
+       (list-queue-back q))")
+
+let test_srfi117_remove_front () =
+  check_datum "list-queue-remove-front!"
+    (Datum.Fixnum 1)
+    (eval_port "(import (srfi 117)) \
+     (let ((q (list-queue 1 2 3))) \
+       (list-queue-remove-front! q))")
+
+let test_srfi117_list () =
+  check_datum "list-queue-list"
+    (Datum.Fixnum 6)
+    (eval_port "(import (srfi 117)) \
+     (apply + (list-queue-list (list-queue 1 2 3)))")
+
+(* ===== SRFI 234 — Topological sorting ===== *)
+
+let test_srfi234_basic () =
+  check_datum "topological-sort basic"
+    (Datum.Str (Bytes.of_string "(a b c)"))
+    (eval_port "(import (srfi 234) (scheme write)) \
+     (let ((graph '((a b c) (b c) (c)))) \
+       (let ((p (open-output-string))) \
+         (write (topological-sort graph) p) \
+         (get-output-string p)))")
+
+let test_srfi234_edgelist () =
+  check_datum "edgelist->graph"
+    (Datum.Bool true)
+    (eval_port "(import (srfi 234)) \
+     (let ((g (edgelist->graph '((a b) (b c))))) \
+       (pair? g))")
+
+let test_srfi234_graph_edgelist () =
+  check_datum "graph->edgelist"
+    (Datum.Bool true)
+    (eval_port "(import (srfi 234)) \
+     (let ((el (graph->edgelist '((a b c) (b c))))) \
+       (list? el))")
+
+let test_srfi234_connected () =
+  check_datum "connected-components"
+    (Datum.Fixnum 2)
+    (eval_port "(import (srfi 234)) \
+     (length (connected-components \
+       '((a b) (b) (c d) (d))))")
+
+(* ===== SRFI 235 — Combinators ===== *)
+
+let test_srfi235_constantly () =
+  check_datum "constantly"
+    (Datum.Fixnum 5)
+    (eval_port "(import (srfi 235)) ((constantly 5) 1 2 3)")
+
+let test_srfi235_complement () =
+  check_datum "complement"
+    (Datum.Bool true)
+    (eval_port "(import (srfi 235)) ((complement even?) 3)")
+
+let test_srfi235_apply_chain () =
+  check_datum "apply-chain"
+    (Datum.Fixnum 8)
+    (eval_port "(import (srfi 235)) \
+     ((apply-chain (lambda (x) (+ x 2)) (lambda (x) (* x 2))) 3)")
+
+let test_srfi235_flip () =
+  check_datum "flip"
+    (Datum.Fixnum 2)
+    (eval_port "(import (srfi 235)) ((flip -) 3 5)")
+
+let test_srfi235_on () =
+  check_datum "on"
+    (Datum.Bool true)
+    (eval_port "(import (srfi 235)) \
+     ((on = string-length string-length) \"abc\" \"xyz\")")
+
+let test_srfi235_conjoin () =
+  check_datum "conjoin"
+    (Datum.Bool true)
+    (eval_port "(import (srfi 235)) \
+     ((conjoin positive? odd?) 3)")
+
+let test_srfi235_disjoin () =
+  check_datum "disjoin"
+    (Datum.Bool true)
+    (eval_port "(import (srfi 235)) \
+     ((disjoin even? negative?) -3)")
+
+let test_srfi235_each_of () =
+  check_datum "each-of"
+    (Datum.Fixnum 3)
+    (eval_port "(import (srfi 235)) \
+     (let ((a 0)) \
+       ((each-of (lambda (x) (set! a (+ a x))) \
+                 (lambda (x) (set! a (+ a x))) \
+                 (lambda (x) (set! a (+ a x)))) 1) \
+       a)")
+
+(* ===== SRFI 158 — Generators and accumulators ===== *)
+
+let test_srfi158_generator () =
+  check_datum "generator basics"
+    (Datum.Fixnum 1)
+    (eval_port "(import (srfi 158)) \
+     (let ((g (generator 1 2 3))) (g))")
+
+let test_srfi158_eof () =
+  check_datum "generator eof"
+    (Datum.Bool true)
+    (eval_port "(import (srfi 158)) \
+     (let ((g (generator 1))) (g) (eof-object? (g)))")
+
+let test_srfi158_circular () =
+  check_datum "circular-generator"
+    (Datum.Fixnum 1)
+    (eval_port "(import (srfi 158)) \
+     (let ((g (circular-generator 1 2 3))) (g) (g) (g) (g))")
+
+let test_srfi158_make_iota () =
+  check_datum "make-iota-generator"
+    (Datum.Fixnum 15)
+    (eval_port "(import (srfi 158)) \
+     (let ((g (make-iota-generator 6))) \
+       (let loop ((sum 0)) \
+         (let ((v (g))) \
+           (if (eof-object? v) sum \
+               (loop (+ sum v))))))")
+
+let test_srfi158_gmap () =
+  check_datum "gmap"
+    (Datum.Fixnum 2)
+    (eval_port "(import (srfi 158)) \
+     (let ((g (gmap (lambda (x) (* x 2)) (generator 1 2 3)))) (g))")
+
+let test_srfi158_gfilter () =
+  check_datum "gfilter"
+    (Datum.Fixnum 2)
+    (eval_port "(import (srfi 158)) \
+     (let ((g (gfilter even? (generator 1 2 3 4)))) (g))")
+
+let test_srfi158_gtake () =
+  check_datum "generator->list with gtake"
+    (Datum.Fixnum 3)
+    (eval_port "(import (srfi 158)) \
+     (length (generator->list (gtake (generator 1 2 3 4 5) 3)))")
+
+let test_srfi158_accumulator () =
+  check_datum "count-accumulator"
+    (Datum.Fixnum 3)
+    (eval_port "(import (srfi 158)) \
+     (let ((a (count-accumulator))) (a 1) (a 2) (a 3) (a (eof-object)))")
+
+let test_srfi158_list_accumulator () =
+  check_datum "list-accumulator"
+    (Datum.Fixnum 6)
+    (eval_port "(import (srfi 158)) \
+     (let ((a (list-accumulator))) (a 1) (a 2) (a 3) \
+       (apply + (a (eof-object))))")
+
+(* ===== SRFI 214 — Flexvectors ===== *)
+
+let test_srfi214_make () =
+  check_datum "flexvector-ref"
+    (Datum.Fixnum 20)
+    (eval_port "(import (srfi 214)) \
+     (flexvector-ref (flexvector 10 20 30) 1)")
+
+let test_srfi214_length () =
+  check_datum "flexvector-length"
+    (Datum.Fixnum 3)
+    (eval_port "(import (srfi 214)) \
+     (flexvector-length (flexvector 1 2 3))")
+
+let test_srfi214_add () =
+  check_datum "flexvector-add-back!"
+    (Datum.Fixnum 4)
+    (eval_port "(import (srfi 214)) \
+     (let ((fv (flexvector 1 2 3))) \
+       (flexvector-add-back! fv 4) \
+       (flexvector-length fv))")
+
+let test_srfi214_set () =
+  check_datum "flexvector-set!"
+    (Datum.Fixnum 99)
+    (eval_port "(import (srfi 214)) \
+     (let ((fv (flexvector 1 2 3))) \
+       (flexvector-set! fv 0 99) \
+       (flexvector-ref fv 0))")
+
+let test_srfi214_predicate () =
+  check_datum "flexvector?"
+    (Datum.Bool true)
+    (eval_port "(import (srfi 214)) (flexvector? (flexvector))")
+
+let test_srfi214_remove () =
+  check_datum "flexvector-remove!"
+    (Datum.Fixnum 2)
+    (eval_port "(import (srfi 214)) \
+     (let ((fv (flexvector 1 2 3))) \
+       (flexvector-remove! fv 0) \
+       (flexvector-length fv))")
+
+let test_srfi214_to_vector () =
+  check_datum "flexvector->vector"
+    (Datum.Fixnum 6)
+    (eval_port "(import (srfi 214)) \
+     (let ((v (flexvector->vector (flexvector 1 2 3)))) \
+       (+ (vector-ref v 0) (vector-ref v 1) (vector-ref v 2)))")
+
+(* ===== SRFI 189 — Maybe and Either ===== *)
+
+let test_srfi189_just () =
+  check_datum "just?"
+    (Datum.Bool true)
+    (eval_port "(import (srfi 189)) (just? (just 42))")
+
+let test_srfi189_nothing () =
+  check_datum "nothing?"
+    (Datum.Bool true)
+    (eval_port "(import (srfi 189)) (nothing? (nothing))")
+
+let test_srfi189_maybe_ref () =
+  check_datum "maybe-ref"
+    (Datum.Fixnum 42)
+    (eval_port "(import (srfi 189)) \
+     (maybe-ref (just 42) (lambda () 0) (lambda (x) x))")
+
+let test_srfi189_maybe_ref_nothing () =
+  check_datum "maybe-ref nothing"
+    (Datum.Fixnum 0)
+    (eval_port "(import (srfi 189)) \
+     (maybe-ref (nothing) (lambda () 0) (lambda (x) x))")
+
+let test_srfi189_right () =
+  check_datum "right?"
+    (Datum.Bool true)
+    (eval_port "(import (srfi 189)) (right? (right 1))")
+
+let test_srfi189_left () =
+  check_datum "left?"
+    (Datum.Bool true)
+    (eval_port "(import (srfi 189)) (left? (left 1))")
+
+let test_srfi189_maybe_map () =
+  check_datum "maybe-map"
+    (Datum.Fixnum 6)
+    (eval_port "(import (srfi 189)) \
+     (maybe-ref (maybe-map (lambda (x) (* x 2)) (just 3)) \
+       (lambda () 0) (lambda (x) x))")
+
+let test_srfi189_maybe_map_nothing () =
+  check_datum "maybe-map nothing"
+    (Datum.Bool true)
+    (eval_port "(import (srfi 189)) \
+     (nothing? (maybe-map (lambda (x) (* x 2)) (nothing)))")
+
+(* ===== SRFI 210 — Procedures and syntax for multiple values ===== *)
+
+let test_srfi210_coarity () =
+  check_datum "coarity"
+    (Datum.Fixnum 3)
+    (eval_port "(import (srfi 210)) \
+     (coarity (lambda () (values 1 2 3)))")
+
+let test_srfi210_identity () =
+  check_datum "identity"
+    (Datum.Fixnum 42)
+    (eval_port "(import (srfi 210)) (identity 42)")
+
+let test_srfi210_compose_left () =
+  check_datum "compose-left"
+    (Datum.Fixnum 10)
+    (eval_port "(import (srfi 210)) \
+     ((compose-left (lambda (x) (+ x 2)) (lambda (x) (* x 2))) 3)")
+
+let test_srfi210_compose_right () =
+  check_datum "compose-right"
+    (Datum.Fixnum 8)
+    (eval_port "(import (srfi 210)) \
+     ((compose-right (lambda (x) (+ x 2)) (lambda (x) (* x 2))) 3)")
+
+let test_srfi210_with_values () =
+  check_datum "with-values"
+    (Datum.Fixnum 5)
+    (eval_port "(import (srfi 210)) \
+     (with-values (lambda () (values 2 3)) +)")
+
 let () =
   Alcotest.run "SRFI"
     [ ("infrastructure",
@@ -2100,5 +2696,130 @@ let () =
        ; Alcotest.test_case "unfold" `Quick test_srfi125_unfold
        ; Alcotest.test_case "hash-table=?" `Quick test_srfi125_equal
        ; Alcotest.test_case "empty-copy" `Quick test_srfi125_empty_copy
+       ])
+    ; ("srfi-145",
+       [ Alcotest.test_case "truthy" `Quick test_srfi145_truthy
+       ; Alcotest.test_case "true" `Quick test_srfi145_true
+       ; Alcotest.test_case "expr" `Quick test_srfi145_expr
+       ; Alcotest.test_case "false raises" `Quick test_srfi145_false
+       ; Alcotest.test_case "message raises" `Quick test_srfi145_message
+       ])
+    ; ("srfi-156",
+       [ Alcotest.test_case "is predicate" `Quick test_srfi156_is
+       ; Alcotest.test_case "is equal" `Quick test_srfi156_is_equal
+       ; Alcotest.test_case "isnt" `Quick test_srfi156_isnt
+       ; Alcotest.test_case "is binary" `Quick test_srfi156_is_binary
+       ; Alcotest.test_case "filter" `Quick test_srfi156_filter
+       ])
+    ; ("srfi-219",
+       [ Alcotest.test_case "basic" `Quick test_srfi219_basic
+       ; Alcotest.test_case "triple" `Quick test_srfi219_triple
+       ; Alcotest.test_case "normal define" `Quick test_srfi219_normal
+       ])
+    ; ("srfi-223",
+       [ Alcotest.test_case "bisect-left" `Quick test_srfi223_bisect_left
+       ; Alcotest.test_case "bisect-right" `Quick test_srfi223_bisect_right
+       ; Alcotest.test_case "vector-bisect-left" `Quick test_srfi223_vector_bisect_left
+       ; Alcotest.test_case "vector-bisect-right" `Quick test_srfi223_vector_bisect_right
+       ])
+    ; ("srfi-175",
+       [ Alcotest.test_case "upper-case?" `Quick test_srfi175_upper
+       ; Alcotest.test_case "lower-case?" `Quick test_srfi175_lower
+       ; Alcotest.test_case "digit?" `Quick test_srfi175_digit
+       ; Alcotest.test_case "upcase" `Quick test_srfi175_upcase
+       ; Alcotest.test_case "downcase" `Quick test_srfi175_downcase
+       ; Alcotest.test_case "ci=?" `Quick test_srfi175_ci_eq
+       ; Alcotest.test_case "alphanumeric?" `Quick test_srfi175_alphanumeric
+       ; Alcotest.test_case "non-alphanumeric" `Quick test_srfi175_non_alphanumeric
+       ])
+    ; ("srfi-162",
+       [ Alcotest.test_case "default" `Quick test_srfi162_default
+       ; Alcotest.test_case "boolean" `Quick test_srfi162_boolean
+       ; Alcotest.test_case "char ordering" `Quick test_srfi162_char
+       ; Alcotest.test_case "string ordering" `Quick test_srfi162_string
+       ; Alcotest.test_case "real" `Quick test_srfi162_real
+       ])
+    ; ("srfi-228",
+       [ Alcotest.test_case "wrapper" `Quick test_srfi228_wrapper
+       ; Alcotest.test_case "product" `Quick test_srfi228_product
+       ; Alcotest.test_case "sum" `Quick test_srfi228_sum
+       ])
+    ; ("srfi-195",
+       [ Alcotest.test_case "box/unbox" `Quick test_srfi195_box
+       ; Alcotest.test_case "arity" `Quick test_srfi195_arity
+       ; Alcotest.test_case "unbox-value" `Quick test_srfi195_unbox_value
+       ; Alcotest.test_case "set-box!" `Quick test_srfi195_set_box
+       ; Alcotest.test_case "box?" `Quick test_srfi195_predicate
+       ])
+    ; ("srfi-48",
+       [ Alcotest.test_case "basic ~a" `Quick test_srfi48_basic
+       ; Alcotest.test_case "~d" `Quick test_srfi48_decimal
+       ; Alcotest.test_case "~x" `Quick test_srfi48_hex
+       ; Alcotest.test_case "~o" `Quick test_srfi48_octal
+       ; Alcotest.test_case "~b" `Quick test_srfi48_binary
+       ; Alcotest.test_case "~~" `Quick test_srfi48_tilde
+       ; Alcotest.test_case "~%" `Quick test_srfi48_newline
+       ])
+    ; ("srfi-117",
+       [ Alcotest.test_case "front" `Quick test_srfi117_make
+       ; Alcotest.test_case "back" `Quick test_srfi117_back
+       ; Alcotest.test_case "empty?" `Quick test_srfi117_empty
+       ; Alcotest.test_case "add-front!" `Quick test_srfi117_add_front
+       ; Alcotest.test_case "add-back!" `Quick test_srfi117_add_back
+       ; Alcotest.test_case "remove-front!" `Quick test_srfi117_remove_front
+       ; Alcotest.test_case "list" `Quick test_srfi117_list
+       ])
+    ; ("srfi-234",
+       [ Alcotest.test_case "basic sort" `Quick test_srfi234_basic
+       ; Alcotest.test_case "edgelist->graph" `Quick test_srfi234_edgelist
+       ; Alcotest.test_case "graph->edgelist" `Quick test_srfi234_graph_edgelist
+       ; Alcotest.test_case "connected-components" `Quick test_srfi234_connected
+       ])
+    ; ("srfi-235",
+       [ Alcotest.test_case "constantly" `Quick test_srfi235_constantly
+       ; Alcotest.test_case "complement" `Quick test_srfi235_complement
+       ; Alcotest.test_case "apply-chain" `Quick test_srfi235_apply_chain
+       ; Alcotest.test_case "flip" `Quick test_srfi235_flip
+       ; Alcotest.test_case "on" `Quick test_srfi235_on
+       ; Alcotest.test_case "conjoin" `Quick test_srfi235_conjoin
+       ; Alcotest.test_case "disjoin" `Quick test_srfi235_disjoin
+       ; Alcotest.test_case "each-of" `Quick test_srfi235_each_of
+       ])
+    ; ("srfi-158",
+       [ Alcotest.test_case "generator" `Quick test_srfi158_generator
+       ; Alcotest.test_case "eof" `Quick test_srfi158_eof
+       ; Alcotest.test_case "circular" `Quick test_srfi158_circular
+       ; Alcotest.test_case "make-iota" `Quick test_srfi158_make_iota
+       ; Alcotest.test_case "gmap" `Quick test_srfi158_gmap
+       ; Alcotest.test_case "gfilter" `Quick test_srfi158_gfilter
+       ; Alcotest.test_case "gtake" `Quick test_srfi158_gtake
+       ; Alcotest.test_case "count-accumulator" `Quick test_srfi158_accumulator
+       ; Alcotest.test_case "list-accumulator" `Quick test_srfi158_list_accumulator
+       ])
+    ; ("srfi-214",
+       [ Alcotest.test_case "ref" `Quick test_srfi214_make
+       ; Alcotest.test_case "length" `Quick test_srfi214_length
+       ; Alcotest.test_case "add-back!" `Quick test_srfi214_add
+       ; Alcotest.test_case "set!" `Quick test_srfi214_set
+       ; Alcotest.test_case "flexvector?" `Quick test_srfi214_predicate
+       ; Alcotest.test_case "remove!" `Quick test_srfi214_remove
+       ; Alcotest.test_case "->vector" `Quick test_srfi214_to_vector
+       ])
+    ; ("srfi-189",
+       [ Alcotest.test_case "just?" `Quick test_srfi189_just
+       ; Alcotest.test_case "nothing?" `Quick test_srfi189_nothing
+       ; Alcotest.test_case "maybe-ref just" `Quick test_srfi189_maybe_ref
+       ; Alcotest.test_case "maybe-ref nothing" `Quick test_srfi189_maybe_ref_nothing
+       ; Alcotest.test_case "right?" `Quick test_srfi189_right
+       ; Alcotest.test_case "left?" `Quick test_srfi189_left
+       ; Alcotest.test_case "maybe-map just" `Quick test_srfi189_maybe_map
+       ; Alcotest.test_case "maybe-map nothing" `Quick test_srfi189_maybe_map_nothing
+       ])
+    ; ("srfi-210",
+       [ Alcotest.test_case "coarity" `Quick test_srfi210_coarity
+       ; Alcotest.test_case "identity" `Quick test_srfi210_identity
+       ; Alcotest.test_case "compose-left" `Quick test_srfi210_compose_left
+       ; Alcotest.test_case "compose-right" `Quick test_srfi210_compose_right
+       ; Alcotest.test_case "with-values" `Quick test_srfi210_with_values
        ])
     ]
