@@ -503,8 +503,20 @@ and read_hash state loc =
     read_raw state
   | Some '!' ->
     ignore (Port.read_char state.port);
-    read_directive state;
-    read_raw state
+    if loc.Loc.line = 1 && loc.Loc.col = 1 then begin
+      match Port.peek_char state.port with
+      | Some c when c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' ->
+        (* Alphabetic after #! at file start — treat as directive *)
+        read_directive state;
+        read_raw state
+      | _ ->
+        (* Non-alphabetic (/, space, etc.) — shebang line *)
+        skip_line_comment state;
+        read_raw state
+    end else begin
+      read_directive state;
+      read_raw state
+    end
   | Some ('b' | 'B' | 'o' | 'O' | 'd' | 'D' | 'x' | 'X' | 'e' | 'E' | 'i' | 'I') ->
     (* Number prefix - need to "unread" the # *)
     read_number_with_prefix state loc

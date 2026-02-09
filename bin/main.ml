@@ -79,8 +79,9 @@ let run_expr expr =
 
 (* --- File mode --- *)
 
-let run_file path =
+let run_file path script_args =
   let inst = make_instance () in
+  inst.command_line := path :: script_args;
   inst.search_paths := Search_path.resolve ~base_dirs:[dir_for_path path];
   setup_package inst (dir_for_path path);
   handle_errors (fun () ->
@@ -396,7 +397,7 @@ let make_default_cmd () =
   let default_cmd expr file theme =
     match expr, file with
     | Some e, _ -> exit (run_expr e)
-    | _, Some f -> exit (run_file f)
+    | _, Some f -> exit (run_file f [])
     | None, None -> run_repl theme
   in
   let term = Term.(const default_cmd $ expr_opt $ file_arg $ theme_opt) in
@@ -836,6 +837,9 @@ let () =
         Array.sub Sys.argv 2 (argc - 2)
       ] in
       exit (Cmd.eval ~argv (make_ext_cmd ()))
+    | arg when String.length arg > 0 && arg.[0] <> '-' ->
+      let script_args = Array.to_list (Array.sub Sys.argv 2 (argc - 2)) in
+      exit (run_file arg script_args)
     | _ -> exit (Cmd.eval (make_default_cmd ()))
   end else
     exit (Cmd.eval (make_default_cmd ()))

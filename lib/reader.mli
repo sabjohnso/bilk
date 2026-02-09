@@ -11,7 +11,9 @@
     strings (all escape sequences and line continuations), lists,
     dotted pairs, vectors, bytevectors, quote shorthands,
     line / block / datum comments, [#!fold-case] / [#!no-fold-case]
-    directives, and datum labels. *)
+    directives, datum labels, and shebang lines ([#!] followed by a
+    non-alphabetic character at line 1, column 1 is treated as a line
+    comment). *)
 
 (** {1 Exceptions} *)
 

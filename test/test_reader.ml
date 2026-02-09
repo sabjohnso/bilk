@@ -339,6 +339,51 @@ let qcheck_roundtrip =
       let d' = read_one s in
       Datum.equal d d')
 
+(* Shebang *)
+
+let test_reader_shebang () =
+  (* Shebang line skipped *)
+  check_datum "shebang + expr"
+    (Datum.Fixnum 42)
+    (read_one "#!/usr/bin/env wile\n42");
+  (* Shebang with arguments *)
+  check_datum "shebang with args"
+    (Datum.Fixnum 42)
+    (read_one "#!/usr/bin/env wile --script\n42");
+  (* Shebang only — reads EOF *)
+  check_datum "shebang only"
+    Datum.Eof
+    (read_one "#!/usr/bin/env wile\n");
+  (* Shebang no trailing newline *)
+  check_datum "shebang no newline"
+    Datum.Eof
+    (read_one "#!/usr/bin/env wile");
+  (* Shebang with space after #! *)
+  check_datum "shebang space after bang"
+    (Datum.Fixnum 42)
+    (read_one "#! /usr/bin/env wile\n42");
+  (* Shebang + list expression *)
+  check_datum "shebang + list"
+    (Datum.Pair { car = Datum.Symbol "+";
+                  cdr = Datum.Pair { car = Datum.Fixnum 1;
+                                     cdr = Datum.Pair { car = Datum.Fixnum 2;
+                                                        cdr = Datum.Nil } } })
+    (read_one "#!/usr/bin/env wile\n(+ 1 2)")
+
+let test_reader_shebang_vs_directive () =
+  (* #!fold-case at start of file still works as directive *)
+  let p = Port.of_string "#!fold-case\nFOO" in
+  let d = Reader.read Readtable.default p in
+  check_datum "fold-case at start" (Datum.Symbol "foo") d;
+  (* #!fold-case NOT at line 1 col 1 works as directive *)
+  let p2 = Port.of_string "\n#!fold-case FOO" in
+  let d2 = Reader.read Readtable.default p2 in
+  check_datum "fold-case line 2" (Datum.Symbol "foo") d2;
+  (* #! at col > 1 is treated as directive (not shebang) *)
+  let p3 = Port.of_string " #!fold-case FOO" in
+  let d3 = Reader.read Readtable.default p3 in
+  check_datum "fold-case col > 1" (Datum.Symbol "foo") d3
+
 let () =
   Alcotest.run "Reader"
     [ ("Atoms",
@@ -370,6 +415,10 @@ let () =
        ; Alcotest.test_case "block comment" `Quick test_reader_block_comment
        ; Alcotest.test_case "datum comment" `Quick test_reader_datum_comment
        ; Alcotest.test_case "fold-case directive" `Quick test_reader_fold_case_directive
+       ])
+    ; ("Shebang",
+       [ Alcotest.test_case "shebang line" `Quick test_reader_shebang
+       ; Alcotest.test_case "shebang vs directive" `Quick test_reader_shebang_vs_directive
        ])
     ; ("Labels",
        [ Alcotest.test_case "datum labels" `Quick test_reader_datum_labels

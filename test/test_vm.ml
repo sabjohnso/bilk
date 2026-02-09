@@ -2690,6 +2690,29 @@ let test_import_process_context () =
   check_datum "command-line via import"
     (Datum.Bool true) (Instance.eval_string inst "(list? (command-line))")
 
+let test_command_line_script_args () =
+  let inst = Instance.create () in
+  inst.command_line := ["myscript.scm"; "arg1"; "arg2"];
+  check_datum "command-line car is script"
+    (Datum.Str (Bytes.of_string "myscript.scm"))
+    (Instance.eval_string inst "(car (command-line))");
+  check_datum "command-line length"
+    (Datum.Fixnum 3)
+    (Instance.eval_string inst "(length (command-line))");
+  check_datum "command-line second arg"
+    (Datum.Str (Bytes.of_string "arg1"))
+    (Instance.eval_string inst "(cadr (command-line))");
+  check_datum "command-line third arg"
+    (Datum.Str (Bytes.of_string "arg2"))
+    (Instance.eval_string inst "(list-ref (command-line) 2)")
+
+let test_shebang_eval_port () =
+  let inst = Instance.create () in
+  let port = Port.of_string "#!/usr/bin/env wile\n(+ 1 2)" in
+  let result = Instance.eval_port inst port in
+  check_datum "shebang eval_port"
+    (Datum.Fixnum 3) result
+
 (* --- time --- *)
 
 let test_current_second () =
@@ -3388,6 +3411,8 @@ let () =
        ; Alcotest.test_case "get-env-vars pair" `Quick test_get_env_vars_pair
        ; Alcotest.test_case "exit is procedure" `Quick test_procedure_exit
        ; Alcotest.test_case "import (scheme process-context)" `Quick test_import_process_context
+       ; Alcotest.test_case "command-line script args" `Quick test_command_line_script_args
+       ; Alcotest.test_case "shebang eval_port" `Quick test_shebang_eval_port
        ])
     ; ("time",
        [ Alcotest.test_case "current-second" `Quick test_current_second
