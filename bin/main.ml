@@ -805,13 +805,29 @@ let make_ext_cmd () =
 
 (* --- Debug subcommand --- *)
 
-let run_debug path =
+let run_debug path port =
   let inst = make_instance () in
   inst.search_paths := Search_path.resolve ~base_dirs:[dir_for_path path];
   setup_package inst (dir_for_path path);
   handle_errors (fun () ->
     let ds = Debug_server.create inst in
-    Debug_server.run_session ds stdin stdout path [])
+    match port with
+    | None ->
+      Debug_server.run_session ds stdin stdout path []
+    | Some p ->
+      let sock = Unix.socket PF_INET SOCK_STREAM 0 in
+      Unix.setsockopt sock SO_REUSEADDR true;
+      Unix.bind sock (Unix.ADDR_INET (Unix.inet_addr_any, p));
+      Unix.listen sock 1;
+      Printf.eprintf "Listening on port %d...\n%!" p;
+      let (client, _addr) = Unix.accept sock in
+      Fun.protect ~finally:(fun () ->
+        Unix.close client;
+        Unix.close sock)
+        (fun () ->
+          let ic = Unix.in_channel_of_descr client in
+          let oc = Unix.out_channel_of_descr client in
+          Debug_server.run_session ds ic oc path []))
 
 let make_debug_cmd () =
   let open Cmdliner in
@@ -819,14 +835,20 @@ let make_debug_cmd () =
     Arg.(required & pos 0 (some string) None &
          info [] ~docv:"FILE" ~doc:"Scheme source file to debug.")
   in
-  let cmd file = exit (run_debug file) in
-  let term = Term.(const cmd $ file_arg) in
+  let port_opt =
+    Arg.(value & opt (some int) None &
+         info ["port"] ~docv:"PORT"
+           ~doc:"Listen on a TCP port instead of using stdin/stdout.")
+  in
+  let cmd file port = exit (run_debug file port) in
+  let term = Term.(const cmd $ file_arg $ port_opt) in
   let info =
     Cmd.info "debug" ~version
       ~doc:"Debug a Scheme program via DAP"
       ~man:[`S "DESCRIPTION";
             `P "Launches a Debug Adapter Protocol (DAP) server that \
-                communicates over stdin/stdout. Connect a DAP client \
+                communicates over stdin/stdout (default) or over a TCP \
+                socket when $(b,--port) is given. Connect a DAP client \
                 (e.g. VS Code) to interactively debug the Scheme program."]
   in
   Cmd.v info term

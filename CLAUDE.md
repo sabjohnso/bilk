@@ -572,8 +572,9 @@ Changes to existing modules:
 | `Debug_server`  | Debug engine: breakpoints, stepping, inspection, DAP session |
 
 Adds a Debug Adapter Protocol (DAP) server for interactive debugging of
-Scheme programs.  Communication is over stdin/stdout.  Program output is
-redirected and sent as DAP "output" events.
+Scheme programs.  Communication is over stdin/stdout by default, or over
+a TCP socket when `--port` is given.  Program output is redirected and
+sent as DAP "output" events.
 
 Changes to existing modules:
 - `Vm`: Added `debug_state` type (mutable snapshot of env, frames, code, pc)
@@ -584,8 +585,9 @@ Changes to existing modules:
   `ref None`); all 10 `Vm.execute` call sites pass `?debug_state`
 - `Env`: Added `frame_bindings` — returns all `(symbol_id, value)` pairs
   from a frame
-- `bin/main.ml`: Added `wile debug` subcommand; `Dap.Dap_error` and
-  `Debug_server.Debug_error` in error handlers
+- `bin/main.ml`: Added `wile debug` subcommand with `--port` option for
+  TCP socket mode; `Dap.Dap_error` and `Debug_server.Debug_error` in
+  error handlers
 
 ## Development Workflow
 
