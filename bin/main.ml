@@ -343,7 +343,9 @@ let run_repl theme_name =
         | { Syntax.datum = Syntax.Eof; _ } -> ()
         | _ ->
           begin try
-            print_result (Instance.eval_syntax inst expr)
+            print_result (Instance.eval_syntax inst expr);
+            Port.flush !(inst.current_output);
+            Port.flush !(inst.current_error)
           with
           | Reader.Read_error (loc, msg) -> format_loc_error loc msg
           | Compiler.Compile_error (loc, msg) -> format_loc_error loc msg

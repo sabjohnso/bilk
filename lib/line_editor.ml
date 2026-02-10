@@ -309,6 +309,11 @@ let set_content st text =
 (* --- Main read loop --- *)
 
 let read_input t =
+  (* If previous output left the cursor mid-line, move to a fresh line
+     so the prompt doesn't overwrite output from display/write/etc. *)
+  let (_row, col) = Terminal.get_cursor_pos t.term in
+  if col > 1 then
+    Terminal.write_string t.term "\r\n";
   let st = {
     content = Buffer.create 80;
     cursor = 0;
