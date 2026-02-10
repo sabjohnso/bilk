@@ -589,6 +589,50 @@ Changes to existing modules:
   TCP socket mode; `Dap.Dap_error` and `Debug_server.Debug_error` in
   error handlers
 
+**Milestone 23 (Language Server Protocol)** — complete.
+
+| Module            | Purpose                                                        |
+|-------------------|----------------------------------------------------------------|
+| `Lsp`             | JSON-RPC 2.0 wire format: message types, framing, JSON helpers |
+| `Language_server`  | LSP server engine: diagnostics, hover, completion, definition, symbols, semantic tokens |
+
+Adds a Language Server Protocol (LSP) server for IDE integration.
+Communication is over stdin/stdout by default, or over a TCP socket
+when `--port` is given.  Supports textDocumentSync (full), hover,
+completion, go-to-definition, document symbols, and semantic tokens.
+
+Changes to existing modules:
+- `Highlight`: Exposed `sem_role`, `sem_mark` types, `analyze_semantics`
+  and `find_cursor_binding` functions in `.mli`
+- `Tokenizer`: Exposed `keywords` list in `.mli`
+- `bin/main.ml`: Added `wile lsp` subcommand with `--port` option;
+  `Lsp.Lsp_error` and `Language_server.Lsp_server_error` in error handlers
+
+**Milestone 24 (Profiler)** — complete.
+
+| Module           | Purpose                                                       |
+|------------------|---------------------------------------------------------------|
+| `Profiler`       | Runtime data collection via VM on_call/on_return hooks        |
+| `Profile_report` | Output generation: text table, flame graph SVG, trace JSON    |
+
+Adds a runtime profiler that uses M21 VM instrumentation hooks to collect
+per-procedure call counts, wall-clock timing (total and self), trace events
+for Chrome DevTools, and collapsed flame stacks for flame graph generation.
+
+Design:
+- Uses `debug_state` to get frame depth for tail-call reconciliation:
+  on each `on_call`, pops stack entries with `se_depth >= frame_depth`
+  (tail-replaced closures), records their timing before pushing new entry
+- Closures: tracked with full timing (push/pop stack entries)
+- Primitives: counted only (no stack push, instant return)
+- Three output formats: flat text table (sorted by self time), interactive
+  flame graph SVG (click-to-zoom), Chrome Trace Event JSON (for
+  chrome://tracing or Perfetto)
+
+Changes to existing modules:
+- `bin/main.ml`: Added `wile profile` subcommand with `--format` option
+  (text/flamegraph/trace); `Profiler.Profiler_error` in error handlers
+
 ## Development Workflow
 
 **This project uses TDD (Test-Driven Development).** Follow this cycle:
@@ -651,6 +695,10 @@ Tests live in `test/` as per-topic files and are run via `dune test`.
 | `test/test_extension.ml`    | Extension (23 tests: static registry, include-shared, FASL, C ext, scaffolding) |
 | `test/test_dap.ml`          | Dap (11 tests)                                      |
 | `test/test_debug_server.ml` | Debug_server (15 tests)                              |
+| `test/test_lsp.ml`           | Lsp (17 tests)                                      |
+| `test/test_language_server.ml` | Language_server (16 tests)                         |
+| `test/test_profiler.ml`        | Profiler (12 tests)                                |
+| `test/test_profile_report.ml`  | Profile_report (12 tests)                          |
 
 Test dependencies:
 - **alcotest** — unit test framework with readable output

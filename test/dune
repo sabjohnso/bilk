@@ -1,6 +1,10 @@
 (tests
- (names test_char_type test_datum test_readtable test_loc test_syntax test_port test_reader test_symbol test_env test_instance test_opcode test_compiler test_vm test_m6_review test_expander test_library test_fasl test_aot test_terminal test_history test_line_editor test_tokenizer test_highlight test_paredit test_semver test_package test_pkg_manager test_srfi test_venv test_search_path test_regexp_engine test_c_api test_extension test_dap test_debug_server)
+ (names test_char_type test_datum test_readtable test_loc test_syntax test_port test_reader test_symbol test_env test_instance test_opcode test_compiler test_vm test_m6_review test_expander test_library test_fasl test_aot test_terminal test_history test_line_editor test_tokenizer test_highlight test_paredit test_semver test_package test_pkg_manager test_srfi test_venv test_search_path test_regexp_engine test_c_api test_extension test_dap test_debug_server test_lsp test_profiler test_profile_report)
  (libraries wile alcotest qcheck-core qcheck-alcotest yojson))
+
+(test
+ (name test_language_server)
+ (libraries wile alcotest yojson threads.posix))
 
 (test
  (name test_c_embed)

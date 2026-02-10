@@ -28,6 +28,9 @@ let handle_errors f =
   | Extension.Extension_error msg -> format_error msg; 1
   | Debug_server.Debug_error msg -> format_error msg; 1
   | Dap.Dap_error msg -> format_error msg; 1
+  | Lsp.Lsp_error msg -> format_error msg; 1
+  | Language_server.Lsp_server_error msg -> format_error msg; 1
+  | Profiler.Profiler_error msg -> format_error msg; 1
   | Sys_error msg -> format_error msg; 1
   | Failure msg -> format_error msg; 1
 
@@ -416,6 +419,7 @@ let make_default_cmd () =
             `P "Use $(b,wile venv) to create a virtual environment.";
             `P "Use $(b,wile ext) to manage native extensions.";
             `P "Use $(b,wile debug) to debug a Scheme program via DAP.";
+            `P "Use $(b,wile lsp) to start the Language Server Protocol server.";
             `S "ENVIRONMENT";
             `P "$(b,WILE_VENV) — path to active virtual environment \
                 (its $(b,lib/) directory is searched for libraries).";
@@ -853,6 +857,110 @@ let make_debug_cmd () =
   in
   Cmd.v info term
 
+(* --- LSP subcommand --- *)
+
+let run_lsp port =
+  let inst = make_instance () in
+  inst.search_paths := Search_path.resolve ~base_dirs:[Sys.getcwd ()];
+  setup_package inst (Sys.getcwd ());
+  handle_errors (fun () ->
+    let ls = Language_server.create inst in
+    match port with
+    | None ->
+      Language_server.run_session ls stdin stdout
+    | Some p ->
+      let sock = Unix.socket PF_INET SOCK_STREAM 0 in
+      Unix.setsockopt sock SO_REUSEADDR true;
+      Unix.bind sock (Unix.ADDR_INET (Unix.inet_addr_any, p));
+      Unix.listen sock 1;
+      Printf.eprintf "LSP server listening on port %d...\n%!" p;
+      let (client, _addr) = Unix.accept sock in
+      Fun.protect ~finally:(fun () ->
+        Unix.close client;
+        Unix.close sock)
+        (fun () ->
+          let ic = Unix.in_channel_of_descr client in
+          let oc = Unix.out_channel_of_descr client in
+          Language_server.run_session ls ic oc))
+
+let make_lsp_cmd () =
+  let open Cmdliner in
+  let port_opt =
+    Arg.(value & opt (some int) None &
+         info ["port"] ~docv:"PORT"
+           ~doc:"Listen on a TCP port instead of using stdin/stdout.")
+  in
+  let cmd port = exit (run_lsp port) in
+  let term = Term.(const cmd $ port_opt) in
+  let info =
+    Cmd.info "lsp" ~version
+      ~doc:"Start the Language Server Protocol server"
+      ~man:[`S "DESCRIPTION";
+            `P "Launches an LSP server that communicates over \
+                stdin/stdout (default) or over a TCP socket when \
+                $(b,--port) is given. Connect an LSP client (e.g. \
+                VS Code, Emacs, Neovim) for IDE features like \
+                diagnostics, hover, completion, go-to-definition, \
+                document symbols, and semantic tokens."]
+  in
+  Cmd.v info term
+
+(* --- Profile subcommand --- *)
+
+let run_profile path format_str =
+  let inst = make_instance () in
+  inst.search_paths := Search_path.resolve ~base_dirs:[dir_for_path path];
+  setup_package inst (dir_for_path path);
+  handle_errors (fun () ->
+    let prof = Profiler.create () in
+    Profiler.install prof inst;
+    let port = Port.of_file path in
+    (try ignore (Instance.eval_port inst port)
+     with exn ->
+       Profiler.uninstall inst;
+       Profiler.finalize prof;
+       raise exn);
+    Profiler.uninstall inst;
+    Profiler.finalize prof;
+    match format_str with
+    | "text" ->
+      Printf.eprintf "%s%!" (Profile_report.text_report prof)
+    | "flamegraph" ->
+      print_string (Profile_report.flamegraph_svg prof)
+    | "trace" ->
+      print_string (Profile_report.trace_json prof)
+    | _ ->
+      raise (Profiler.Profiler_error
+        (Printf.sprintf "unknown format: %s (expected text, flamegraph, or trace)"
+           format_str)))
+
+let make_profile_cmd () =
+  let open Cmdliner in
+  let file_arg =
+    Arg.(required & pos 0 (some string) None &
+         info [] ~docv:"FILE" ~doc:"Scheme source file to profile.")
+  in
+  let format_opt =
+    Arg.(value & opt string "text" &
+         info ["format"] ~docv:"FORMAT"
+           ~doc:"Output format: $(b,text) (default, to stderr), \
+                 $(b,flamegraph) (SVG to stdout), or \
+                 $(b,trace) (Chrome Trace JSON to stdout).")
+  in
+  let cmd file format_str = exit (run_profile file format_str) in
+  let term = Term.(const cmd $ file_arg $ format_opt) in
+  let info =
+    Cmd.info "profile" ~version
+      ~doc:"Profile a Scheme program"
+      ~man:[`S "DESCRIPTION";
+            `P "Executes a Scheme source file with profiling enabled and \
+                produces a performance report. Three output formats are \
+                available: a flat text table (default, to stderr), a flame \
+                graph SVG (to stdout), or a Chrome Trace Event JSON file \
+                (to stdout, loadable in chrome://tracing or Perfetto)."]
+  in
+  Cmd.v info term
+
 (* Manual subcommand dispatch to avoid Cmd.group intercepting positional
    file arguments (e.g. "wile file.scm") as unknown subcommand names. *)
 let () =
@@ -896,6 +1004,18 @@ let () =
         Array.sub Sys.argv 2 (argc - 2)
       ] in
       exit (Cmd.eval ~argv (make_debug_cmd ()))
+    | "lsp" ->
+      let argv = Array.concat [
+        [| Sys.argv.(0) |];
+        Array.sub Sys.argv 2 (argc - 2)
+      ] in
+      exit (Cmd.eval ~argv (make_lsp_cmd ()))
+    | "profile" ->
+      let argv = Array.concat [
+        [| Sys.argv.(0) |];
+        Array.sub Sys.argv 2 (argc - 2)
+      ] in
+      exit (Cmd.eval ~argv (make_profile_cmd ()))
     | arg when String.length arg > 0 && arg.[0] <> '-' ->
       let script_args = Array.to_list (Array.sub Sys.argv 2 (argc - 2)) in
       exit (run_file arg script_args)
