@@ -344,8 +344,8 @@ let read_input t =
           text = "" || (cursor_at_end && f text)
       in
       if should_submit then begin
-        (* Final render with cursor past end to clear paren-match highlights *)
-        st.cursor <- String.length text;
+        (* Final render with cursor beyond all tokens to clear paren-match highlights *)
+        st.cursor <- String.length text + 1;
         render t st;
         Terminal.write_string t.term "\r\n";
         Input text
