@@ -94,8 +94,14 @@ let test_insert_close_paren_move_past () =
   check_edit "move past )" "(abc)" 5 result
 
 let test_insert_close_paren_skip_ws () =
+  (* Whitespace between content and closing paren is stripped *)
   let result = Paredit.insert_close_paren rt "(abc  )" 4 in
-  check_edit "skip ws to )" "(abc  )" 7 result
+  check_edit "skip ws to )" "(abc)" 5 result
+
+let test_insert_close_paren_strip_trailing_ws () =
+  (* Whitespace before cursor is also stripped *)
+  let result = Paredit.insert_close_paren rt "(abc   )" 7 in
+  check_edit "strip trailing ws" "(abc)" 5 result
 
 let test_insert_close_paren_insert () =
   let result = Paredit.insert_close_paren rt "abc" 2 in
@@ -374,6 +380,7 @@ let () =
       Alcotest.test_case "insert open paren empty" `Quick test_insert_open_paren_empty;
       Alcotest.test_case "insert close paren move past" `Quick test_insert_close_paren_move_past;
       Alcotest.test_case "insert close paren skip ws" `Quick test_insert_close_paren_skip_ws;
+      Alcotest.test_case "insert close paren strip trailing ws" `Quick test_insert_close_paren_strip_trailing_ws;
       Alcotest.test_case "insert close paren insert" `Quick test_insert_close_paren_insert;
       Alcotest.test_case "insert double quote pair" `Quick test_insert_double_quote_pair;
       Alcotest.test_case "insert double quote move past" `Quick test_insert_double_quote_move_past;

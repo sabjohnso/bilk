@@ -209,10 +209,17 @@ let insert_close_paren rt text cursor =
     while !p < len && (text.[!p] = ' ' || text.[!p] = '\t' || text.[!p] = '\n') do
       incr p
     done;
-    if !p < len && is_close text.[!p] then
-      (* Move past the existing close paren *)
-      { text; cursor = !p + 1 }
-    else begin
+    if !p < len && is_close text.[!p] then begin
+      (* Strip whitespace between previous non-whitespace and close paren *)
+      let ws_start = ref cursor in
+      while !ws_start > 0 && (text.[!ws_start - 1] = ' ' ||
+            text.[!ws_start - 1] = '\t' || text.[!ws_start - 1] = '\n') do
+        decr ws_start
+      done;
+      let before = String.sub text 0 !ws_start in
+      let after = String.sub text !p (len - !p) in
+      { text = before ^ after; cursor = String.length before + 1 }
+    end else begin
       let before = String.sub text 0 cursor in
       let after = String.sub text cursor (len - cursor) in
       { text = before ^ ")" ^ after; cursor = cursor + 1 }
