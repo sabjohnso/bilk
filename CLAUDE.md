@@ -564,6 +564,29 @@ Changes to existing modules:
   option ref`, default `None`); all `Vm.execute` call sites pass hooks
   from instance fields
 
+**Milestone 22 (Debug Server — DAP)** — complete.
+
+| Module          | Purpose                                               |
+|-----------------|-------------------------------------------------------|
+| `Dap`           | DAP wire format: message types, JSON helpers, framing |
+| `Debug_server`  | Debug engine: breakpoints, stepping, inspection, DAP session |
+
+Adds a Debug Adapter Protocol (DAP) server for interactive debugging of
+Scheme programs.  Communication is over stdin/stdout.  Program output is
+redirected and sent as DAP "output" events.
+
+Changes to existing modules:
+- `Vm`: Added `debug_state` type (mutable snapshot of env, frames, code, pc)
+  and `make_debug_state` constructor; `execute` gains `?debug_state` optional
+  parameter; `fire_on_call` populates debug state before firing callback
+  (zero overhead when `None`)
+- `Instance`: Added `debug_state : Vm.debug_state option ref` field (default
+  `ref None`); all 10 `Vm.execute` call sites pass `?debug_state`
+- `Env`: Added `frame_bindings` — returns all `(symbol_id, value)` pairs
+  from a frame
+- `bin/main.ml`: Added `wile debug` subcommand; `Dap.Dap_error` and
+  `Debug_server.Debug_error` in error handlers
+
 ## Development Workflow
 
 **This project uses TDD (Test-Driven Development).** Follow this cycle:
@@ -602,7 +625,7 @@ Tests live in `test/` as per-topic files and are run via `dune test`.
 | `test/test_instance.ml`    | Instance (31 tests)                                 |
 | `test/test_opcode.ml`      | Opcode (4 tests)                                    |
 | `test/test_compiler.ml`    | Compiler (20 tests)                                 |
-| `test/test_vm.ml`          | VM (423 tests: end-to-end via Instance.eval_string) |
+| `test/test_vm.ml`          | VM (425 tests: end-to-end via Instance.eval_string) |
 | `test/test_m6_review.ml`   | M6 bugfix regression (7 tests)                      |
 | `test/test_expander.ml`    | Expander (11 tests)                                 |
 | `test/test_library.ml`     | Library (25 tests)                                  |
@@ -624,6 +647,8 @@ Tests live in `test/` as per-topic files and are run via `dune test`.
 | `test/test_c_api.ml`        | Wile_c_api (49 tests)                               |
 | `test/test_c_embed.ml`      | C integration tests (50 tests via test_c_embed_impl.c) |
 | `test/test_extension.ml`    | Extension (23 tests: static registry, include-shared, FASL, C ext, scaffolding) |
+| `test/test_dap.ml`          | Dap (11 tests)                                      |
+| `test/test_debug_server.ml` | Debug_server (15 tests)                              |
 
 Test dependencies:
 - **alcotest** — unit test framework with readable output
@@ -671,6 +696,7 @@ Output is in `_build/default/_doc/_html/`.
 ## Runtime Dependencies
 
 - **cmdliner** — command-line argument parsing
+- **yojson** — JSON parsing and generation (used by DAP debug server)
 
 ## Documentation Dependencies
 

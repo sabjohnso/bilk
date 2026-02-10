@@ -55,3 +55,7 @@ val define_slot : t -> Symbol.t -> Datum.t ref -> unit
     [slot] into the top (innermost) frame under [sym].  This shares the
     cell rather than copying it, so mutations via one environment are
     visible in the other.  Used by the library system for imports. *)
+
+val frame_bindings : Datum.frame -> (int * Datum.t) list
+(** [frame_bindings frame] returns all [(symbol_id, value)] pairs in
+    [frame].  The order is unspecified. *)

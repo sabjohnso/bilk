@@ -23,6 +23,7 @@
   ocaml
   dune
   cmdliner
+  yojson
   (odoc :with-doc)
   (alcotest :with-test)
   (qcheck-core :with-test)

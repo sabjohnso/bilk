@@ -3035,6 +3035,28 @@ let test_on_call_dw_inner () =
   Alcotest.(check bool) "on_call fires for dw thunk" true has_thunk;
   Alcotest.(check bool) "on_call fires for dw after" true has_after
 
+let test_debug_state_populated () =
+  let inst = Instance.create () in
+  let ds = Vm.make_debug_state () in
+  inst.debug_state := Some ds;
+  let env_seen = ref false in
+  inst.on_call := Some (fun _loc _proc _args ->
+    if ds.dbg_env <> [] then env_seen := true);
+  ignore (Instance.eval_string inst "(+ 1 2)");
+  Alcotest.(check bool) "dbg_env populated" true !env_seen
+
+let test_debug_state_frames () =
+  let inst = Instance.create () in
+  let ds = Vm.make_debug_state () in
+  inst.debug_state := Some ds;
+  let max_depth = ref 0 in
+  inst.on_call := Some (fun _loc _proc _args ->
+    let depth = List.length ds.dbg_frames in
+    if depth > !max_depth then max_depth := depth);
+  ignore (Instance.eval_string inst
+    "(begin (define (f x) (+ x 1)) (define (g x) (f x)) (g 5))");
+  Alcotest.(check bool) "nested frames" true (!max_depth >= 1)
+
 let () =
   Alcotest.run "VM"
     [ ("self-evaluating",
@@ -3589,5 +3611,7 @@ let () =
        ; Alcotest.test_case "on_call apply inner" `Quick test_on_call_apply_inner
        ; Alcotest.test_case "on_call cwv inner" `Quick test_on_call_cwv_inner
        ; Alcotest.test_case "on_call dw inner" `Quick test_on_call_dw_inner
+       ; Alcotest.test_case "debug_state populated" `Quick test_debug_state_populated
+       ; Alcotest.test_case "debug_state frames" `Quick test_debug_state_frames
        ])
     ]

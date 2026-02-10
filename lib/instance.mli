@@ -63,6 +63,10 @@ type t = {
   (** Optional callback fired after each procedure return in the VM.
       Receives the source location and the return value.
       Default: [ref None]. *)
+  debug_state : Vm.debug_state option ref;
+  (** Optional debug state populated by the VM before each [on_call]
+      callback, providing access to the current environment and call
+      stack.  Default: [ref None]. *)
 }
 
 (** {1 Constructors} *)

@@ -1,5 +1,28 @@
 exception Runtime_error of string
 
+type debug_state = {
+  mutable dbg_env : Datum.env;
+  mutable dbg_frames : Datum.call_frame list;
+  mutable dbg_code : Datum.code;
+  mutable dbg_pc : int;
+}
+
+let make_debug_state () =
+  let empty_code : Datum.code = {
+    instructions = [||];
+    source_map = [||];
+    constants = [||];
+    symbols = [||];
+    children = [||];
+    params = [||];
+    variadic = false;
+    name = "";
+  } in
+  { dbg_env = [];
+    dbg_frames = [];
+    dbg_code = empty_code;
+    dbg_pc = 0 }
+
 (* Internal frame types for multi-step intrinsic operations.
    Standard frames are for normal calls/returns.
    The DW_* and CWV_* variants track state for dynamic-wind and call-with-values. *)
@@ -13,6 +36,7 @@ type vm_frame =
 let rec execute ?(winds : Datum.wind list ref option)
     ?(on_call : (Loc.t -> Datum.t -> Datum.t list -> unit) option)
     ?(on_return : (Loc.t -> Datum.t -> unit) option)
+    ?(debug_state : debug_state option)
     (env : Datum.env) (code : Datum.code) : Datum.t =
   let stack_size = 1024 in
   let stack = Array.make stack_size Datum.Void in
@@ -171,6 +195,14 @@ let rec execute ?(winds : Datum.wind list ref option)
   in
 
   let fire_on_call proc args =
+    (match debug_state with
+     | Some ds ->
+       ds.dbg_env <- !cur_env;
+       ds.dbg_frames <- List.filter_map (function
+         | Standard cf -> Some cf | _ -> None) !frames;
+       ds.dbg_code <- !cur_code;
+       ds.dbg_pc <- max 0 (!pc - 1)
+     | None -> ());
     match on_call with
     | Some f -> f (!cur_code).source_map.(max 0 (!pc - 1)) proc args
     | None -> ()

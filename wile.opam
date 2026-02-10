@@ -13,6 +13,7 @@ depends: [
   "ocaml"
   "dune" {>= "3.6"}
   "cmdliner"
+  "yojson"
   "odoc" {with-doc}
   "alcotest" {with-test}
   "qcheck-core" {with-test}

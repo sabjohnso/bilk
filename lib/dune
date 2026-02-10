@@ -1,7 +1,7 @@
 (library
  (name wile)
  (public_name wile)
- (libraries unix dynlink)
+ (libraries unix dynlink yojson)
  (foreign_stubs (language c) (names wile_stubs ext_stubs))
  (c_library_flags (-ldl))
  (install_c_headers wile))

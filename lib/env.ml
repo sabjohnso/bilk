@@ -56,3 +56,6 @@ let define_slot env sym slot =
   match env with
   | [] -> failwith "Env.define_slot: empty environment (impossible)"
   | frame :: _ -> Hashtbl.replace frame (Symbol.id sym) slot
+
+let frame_bindings frame =
+  Hashtbl.fold (fun id slot acc -> (id, !slot) :: acc) frame []

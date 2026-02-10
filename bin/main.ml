@@ -26,6 +26,8 @@ let handle_errors f =
   | Pkg_manager.Pkg_error msg -> format_error msg; 1
   | Venv.Venv_error msg -> format_error msg; 1
   | Extension.Extension_error msg -> format_error msg; 1
+  | Debug_server.Debug_error msg -> format_error msg; 1
+  | Dap.Dap_error msg -> format_error msg; 1
   | Sys_error msg -> format_error msg; 1
   | Failure msg -> format_error msg; 1
 
@@ -413,6 +415,7 @@ let make_default_cmd () =
             `P "Use $(b,wile pkg) to manage local packages.";
             `P "Use $(b,wile venv) to create a virtual environment.";
             `P "Use $(b,wile ext) to manage native extensions.";
+            `P "Use $(b,wile debug) to debug a Scheme program via DAP.";
             `S "ENVIRONMENT";
             `P "$(b,WILE_VENV) — path to active virtual environment \
                 (its $(b,lib/) directory is searched for libraries).";
@@ -800,6 +803,34 @@ let make_ext_cmd () =
     make_ext_init_cmd ();
   ]
 
+(* --- Debug subcommand --- *)
+
+let run_debug path =
+  let inst = make_instance () in
+  inst.search_paths := Search_path.resolve ~base_dirs:[dir_for_path path];
+  setup_package inst (dir_for_path path);
+  handle_errors (fun () ->
+    let ds = Debug_server.create inst in
+    Debug_server.run_session ds stdin stdout path [])
+
+let make_debug_cmd () =
+  let open Cmdliner in
+  let file_arg =
+    Arg.(required & pos 0 (some string) None &
+         info [] ~docv:"FILE" ~doc:"Scheme source file to debug.")
+  in
+  let cmd file = exit (run_debug file) in
+  let term = Term.(const cmd $ file_arg) in
+  let info =
+    Cmd.info "debug" ~version
+      ~doc:"Debug a Scheme program via DAP"
+      ~man:[`S "DESCRIPTION";
+            `P "Launches a Debug Adapter Protocol (DAP) server that \
+                communicates over stdin/stdout. Connect a DAP client \
+                (e.g. VS Code) to interactively debug the Scheme program."]
+  in
+  Cmd.v info term
+
 (* Manual subcommand dispatch to avoid Cmd.group intercepting positional
    file arguments (e.g. "wile file.scm") as unknown subcommand names. *)
 let () =
@@ -837,6 +868,12 @@ let () =
         Array.sub Sys.argv 2 (argc - 2)
       ] in
       exit (Cmd.eval ~argv (make_ext_cmd ()))
+    | "debug" ->
+      let argv = Array.concat [
+        [| Sys.argv.(0) |];
+        Array.sub Sys.argv 2 (argc - 2)
+      ] in
+      exit (Cmd.eval ~argv (make_debug_cmd ()))
     | arg when String.length arg > 0 && arg.[0] <> '-' ->
       let script_args = Array.to_list (Array.sub Sys.argv 2 (argc - 2)) in
       exit (run_file arg script_args)

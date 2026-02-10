@@ -20,6 +20,7 @@ type t = {
   extension_lib_env : (Env.t * Expander.syn_env) option ref;
   on_call : (Loc.t -> Datum.t -> Datum.t list -> unit) option ref;
   on_return : (Loc.t -> Datum.t -> unit) option ref;
+  debug_state : Vm.debug_state option ref;
 }
 
 (* --- Primitive helpers --- *)
@@ -2499,7 +2500,7 @@ let eval_boot inst src =
   let expr = Reader.read_syntax inst.readtable port in
   let expanded = expand_with_callbacks inst expr in
   let code = Compiler.compile inst.symbols expanded in
-  ignore (Vm.execute ~winds:inst.winds ?on_call:(!(inst.on_call)) ?on_return:(!(inst.on_return)) inst.global_env code)
+  ignore (Vm.execute ~winds:inst.winds ?on_call:(!(inst.on_call)) ?on_return:(!(inst.on_return)) ?debug_state:(!(inst.debug_state)) inst.global_env code)
 
 let call inst proc args =
   let n = List.length args in
@@ -2518,7 +2519,7 @@ let call inst proc args =
     constants; symbols = [||]; children = [||];
     params = [||]; variadic = false; name = "<call>";
   } in
-  Vm.execute ~winds:inst.winds ?on_call:(!(inst.on_call)) ?on_return:(!(inst.on_return)) inst.global_env code
+  Vm.execute ~winds:inst.winds ?on_call:(!(inst.on_call)) ?on_return:(!(inst.on_return)) ?debug_state:(!(inst.debug_state)) inst.global_env code
 
 let create ?(readtable = Readtable.default) () =
   let symbols = Symbol.create_table () in
@@ -2542,7 +2543,8 @@ let create ?(readtable = Readtable.default) () =
                eval_envs = Hashtbl.create 4;
                eval_env_counter = ref 0;
                extension_lib_env = ref None;
-               on_call = ref None; on_return = ref None } in
+               on_call = ref None; on_return = ref None;
+               debug_state = ref None } in
   List.iter (eval_boot inst) boot_definitions;
   (* Register higher-order port procedures that need the instance *)
   let register_late name fn =
@@ -2660,7 +2662,7 @@ let create ?(readtable = Readtable.default) () =
       let expanded = Expander.expand ~syn_env:se ~gensym
         ~features ~has_library ~read_include expr_syn in
       let code = Compiler.compile inst.symbols expanded in
-      Vm.execute ~winds:inst.winds ?on_call:(!(inst.on_call)) ?on_return:(!(inst.on_return)) env code
+      Vm.execute ~winds:inst.winds ?on_call:(!(inst.on_call)) ?on_return:(!(inst.on_return)) ?debug_state:(!(inst.debug_state)) env code
     | _ -> runtime_error (Printf.sprintf "eval: expected 2 arguments, got %d" (List.length args)));
   register_late "load" (fun args -> match args with
     | [Datum.Str s] ->
@@ -2673,7 +2675,7 @@ let create ?(readtable = Readtable.default) () =
         | _ ->
           let expanded = expand_with_callbacks inst expr in
           let code = Compiler.compile inst.symbols expanded in
-          ignore (Vm.execute ~winds:inst.winds ?on_call:(!(inst.on_call)) ?on_return:(!(inst.on_return)) inst.global_env code);
+          ignore (Vm.execute ~winds:inst.winds ?on_call:(!(inst.on_call)) ?on_return:(!(inst.on_return)) ?debug_state:(!(inst.debug_state)) inst.global_env code);
           loop ()
       in
       loop ()
@@ -2696,7 +2698,7 @@ let create ?(readtable = Readtable.default) () =
           let expanded = Expander.expand ~syn_env:se ~gensym
             ~features ~has_library ~read_include expr in
           let code = Compiler.compile inst.symbols expanded in
-          ignore (Vm.execute ~winds:inst.winds ?on_call:(!(inst.on_call)) ?on_return:(!(inst.on_return)) env code);
+          ignore (Vm.execute ~winds:inst.winds ?on_call:(!(inst.on_call)) ?on_return:(!(inst.on_return)) ?debug_state:(!(inst.debug_state)) env code);
           loop ()
       in
       loop ()
@@ -4625,7 +4627,7 @@ let process_define_library ?sld_path inst name_syn decls =
     let expanded = expand_in_lib expr in
     let code = Compiler.compile inst.symbols expanded in
     if tracking then fasl_decls := Fasl.Lib_code code :: !fasl_decls;
-    ignore (Vm.execute ~winds:inst.winds ?on_call:(!(inst.on_call)) ?on_return:(!(inst.on_return)) lib_env code)
+    ignore (Vm.execute ~winds:inst.winds ?on_call:(!(inst.on_call)) ?on_return:(!(inst.on_return)) ?debug_state:(!(inst.debug_state)) lib_env code)
   in
   let eval_forms_in_lib forms =
     List.iter eval_in_lib forms
@@ -4795,7 +4797,7 @@ let replay_lib_fasl inst (fasl : Fasl.lib_fasl) =
         Env.define_slot lib_env sym slot
       ) rt_bindings
     | Fasl.Lib_code code ->
-      ignore (Vm.execute ~winds:inst.winds ?on_call:(!(inst.on_call)) ?on_return:(!(inst.on_return)) lib_env code)
+      ignore (Vm.execute ~winds:inst.winds ?on_call:(!(inst.on_call)) ?on_return:(!(inst.on_return)) ?debug_state:(!(inst.debug_state)) lib_env code)
     | Fasl.Lib_native name ->
       let lib_syn_env = Expander.core_env () in
       inst.extension_lib_env := Some (lib_env, lib_syn_env);
@@ -4924,7 +4926,7 @@ let eval_syntax inst expr =
   | Expression ->
     let expanded = expand_with_callbacks inst expr in
     let code = Compiler.compile inst.symbols expanded in
-    Vm.execute ~winds:inst.winds ?on_call:(!(inst.on_call)) ?on_return:(!(inst.on_return)) inst.global_env code
+    Vm.execute ~winds:inst.winds ?on_call:(!(inst.on_call)) ?on_return:(!(inst.on_return)) ?debug_state:(!(inst.debug_state)) inst.global_env code
 
 let eval_datum inst d =
   let expr = Syntax.from_datum Loc.none d in
@@ -4950,7 +4952,7 @@ let load_file inst path =
 
 let load_fasl inst path =
   let code = Fasl.read_code_from_file inst.symbols path in
-  ignore (Vm.execute ~winds:inst.winds ?on_call:(!(inst.on_call)) ?on_return:(!(inst.on_return)) inst.global_env code)
+  ignore (Vm.execute ~winds:inst.winds ?on_call:(!(inst.on_call)) ?on_return:(!(inst.on_return)) ?debug_state:(!(inst.debug_state)) inst.global_env code)
 
 (* --- Ahead-of-time compilation --- *)
 
@@ -4986,7 +4988,7 @@ let run_program inst prog =
     | Fasl.Lib_import iset ->
       process_import_set inst iset
     | Fasl.Lib_code code ->
-      last := Vm.execute ~winds:inst.winds ?on_call:(!(inst.on_call)) ?on_return:(!(inst.on_return)) inst.global_env code
+      last := Vm.execute ~winds:inst.winds ?on_call:(!(inst.on_call)) ?on_return:(!(inst.on_return)) ?debug_state:(!(inst.debug_state)) inst.global_env code
     | Fasl.Lib_native name ->
       !load_native_ref inst
         ~search_dirs:!(inst.search_paths) ~sld_dir:None name
