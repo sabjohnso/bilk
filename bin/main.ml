@@ -7,6 +7,67 @@ let history_file =
   | Some home -> Some (Filename.concat home ".wile_history")
   | None -> None
 
+(* --- Persistent REPL settings --- *)
+
+let config_dir () =
+  match Sys.getenv_opt "WILE_HOME" with
+  | Some d when d <> "" -> Some d
+  | _ ->
+    match Sys.getenv_opt "HOME" with
+    | Some home -> Some (Filename.concat home ".wile")
+    | None -> None
+
+let config_file () =
+  match config_dir () with
+  | Some dir -> Some (Filename.concat dir "config")
+  | None -> None
+
+(** Load config as an alist of [Datum.t] pairs from a Scheme s-expression file.
+    Returns an empty list on missing file or parse error. *)
+let load_config () : (string * Datum.t) list =
+  match config_file () with
+  | None -> []
+  | Some path ->
+    if Sys.file_exists path then
+      try
+        let port = Port.of_file path in
+        let rt = Readtable.default in
+        let sexp = Reader.read_syntax rt port in
+        let datum = Syntax.to_datum sexp in
+        (* Expect an alist: ((key . value) ...) *)
+        match Datum.to_list datum with
+        | Some pairs ->
+          List.filter_map (fun pair ->
+            match pair with
+            | Datum.Pair { car = Datum.Symbol key; cdr = value } ->
+              Some (key, value)
+            | _ -> None
+          ) pairs
+        | None -> []
+      with _ -> []
+    else []
+
+(** Save config as an alist s-expression.
+    Each entry is [(key . value)] where value is a [Datum.t]. *)
+let save_config (pairs : (string * Datum.t) list) =
+  match config_file () with
+  | None -> ()
+  | Some path ->
+    (match config_dir () with
+     | Some dir ->
+       (try
+          if not (Sys.file_exists dir) then Sys.mkdir dir 0o755
+        with Sys_error _ -> ())
+     | None -> ());
+    try
+      let alist = Datum.list_of (List.map (fun (k, v) ->
+        Datum.Pair { car = Datum.Symbol k; cdr = v }
+      ) pairs) in
+      let oc = open_out path in
+      Printf.fprintf oc "%s\n" (Datum.to_string alist);
+      close_out oc
+    with Sys_error _ -> ()
+
 (* --- Error formatting --- *)
 
 let format_loc_error loc msg =
@@ -242,6 +303,16 @@ let resolve_theme name =
       None
     end
 
+let save_repl_settings theme_ref paredit_ref =
+  let theme_val = match !theme_ref with
+    | Some (t : Highlight.theme) -> Datum.Str (Bytes.of_string t.name)
+    | None -> Datum.Bool false
+  in
+  save_config [
+    ("theme", theme_val);
+    ("paredit", Datum.Bool !paredit_ref);
+  ]
+
 let handle_repl_command inst theme_ref paredit_ref line =
   let line = String.trim line in
   match line with
@@ -250,6 +321,7 @@ let handle_repl_command inst theme_ref paredit_ref line =
   | ",env" -> repl_env inst
   | ",paredit" ->
     paredit_ref := not !(paredit_ref);
+    save_repl_settings theme_ref paredit_ref;
     if !(paredit_ref) then
       Printf.printf "Paredit mode enabled.\n%!"
     else
@@ -273,6 +345,7 @@ let handle_repl_command inst theme_ref paredit_ref line =
       else begin
         let theme = resolve_theme name in
         theme_ref := theme;
+        save_repl_settings theme_ref paredit_ref;
         match theme with
         | Some t -> Printf.printf "Switched to theme: %s\n%!" t.Highlight.name
         | None -> Printf.printf "Highlighting disabled.\n%!"
@@ -304,15 +377,24 @@ let run_repl theme_name =
   inst.search_paths := Search_path.resolve ~base_dirs:[Sys.getcwd ()];
   setup_package inst (Sys.getcwd ());
   Printf.printf "Wile Scheme %s\nType ,help for REPL commands, Ctrl-D to exit.\n%!" version;
+  let saved = load_config () in
   let initial_theme = match theme_name with
     | Some name -> resolve_theme name
     | None ->
       match Sys.getenv_opt "WILE_THEME" with
       | Some name -> resolve_theme name
-      | None -> Some Highlight.dark_theme
+      | None ->
+        match List.assoc_opt "theme" saved with
+        | Some (Datum.Str b) -> resolve_theme (Bytes.to_string b)
+        | Some (Datum.Bool false) -> None
+        | _ -> Some Highlight.dark_theme
+  in
+  let initial_paredit = match List.assoc_opt "paredit" saved with
+    | Some (Datum.Bool b) -> b
+    | _ -> true
   in
   let theme_ref = ref initial_theme in
-  let paredit_ref = ref true in
+  let paredit_ref = ref initial_paredit in
   let highlight_fn text cursor =
     match !theme_ref with
     | None -> text
