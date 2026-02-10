@@ -51,3 +51,6 @@ val tokenize : Readtable.t -> string -> token list
 (** [is_keyword name] returns [true] if [name] is a known Scheme special
     form or syntax keyword. *)
 val is_keyword : string -> bool
+
+(** The list of known Scheme special form and syntax keyword names. *)
+val keywords : string list

@@ -80,3 +80,44 @@ val fg : int -> style
 
 (** [fg_bold color] returns a bold style with the foreground color set. *)
 val fg_bold : int -> style
+
+(** {1 Semantic analysis} *)
+
+(** The role a token plays in a binding structure. *)
+type sem_role = Defn_name | Param | Bound_var
+
+(** A semantic mark recording a binding-site token's role, name, and
+    the byte range of the enclosing scope. *)
+type sem_mark = {
+  role : sem_role;
+  name : string;
+  scope_start : int;
+  scope_end : int;
+}
+
+(** [analyze_semantics tokens text] walks the token stream looking for
+    binding-form patterns (define, lambda, let, do, etc.) and returns a
+    hashtable mapping byte offsets of binding-site tokens to their
+    {!sem_mark} records.
+
+    @param tokens tokens from {!Tokenizer.tokenize}
+    @param text the source text that was tokenized *)
+val analyze_semantics :
+  Tokenizer.token list -> string -> (int, sem_mark) Hashtbl.t
+
+(** [find_cursor_binding tokens text cursor_pos marks] finds the
+    identifier at [cursor_pos] and its innermost binding site.
+
+    Returns [Some (tok_start, tok_stop, binding_opt)] where
+    [binding_opt] is [Some (bind_start, bind_stop)] if a binding site
+    was found, or [None] if the identifier is unbound or is itself
+    a binding site.  Returns [None] if no identifier is at [cursor_pos].
+
+    @param tokens tokens from {!Tokenizer.tokenize}
+    @param text the source text
+    @param cursor_pos byte offset of the cursor
+    @param marks result of {!analyze_semantics} *)
+val find_cursor_binding :
+  Tokenizer.token list -> string -> int ->
+  (int, sem_mark) Hashtbl.t ->
+  (int * int * (int * int) option) option
