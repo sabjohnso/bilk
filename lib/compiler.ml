@@ -81,7 +81,7 @@ let rec syntax_to_params loc s =
 
 let is_self_evaluating (s : Syntax.t) =
   match s.datum with
-  | Syntax.Bool _ | Syntax.Fixnum _ | Syntax.Flonum _
+  | Syntax.Bool _ | Syntax.Fixnum _ | Syntax.Rational _ | Syntax.Flonum _
   | Syntax.Char _ | Syntax.Str _ -> true
   | _ -> false
 

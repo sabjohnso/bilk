@@ -163,6 +163,7 @@ let rec write_datum buf (d : Datum.t) =
   | Bool false -> write_u8 buf 0
   | Bool true -> write_u8 buf 1
   | Fixnum n -> write_u8 buf 2; write_i64 buf n
+  | Rational (n, d) -> write_u8 buf 13; write_i64 buf n; write_i64 buf d
   | Flonum f -> write_u8 buf 3; write_f64 buf f
   | Char c -> write_u8 buf 4; write_u32 buf (Uchar.to_int c)
   | Str s -> write_u8 buf 5; write_bytes_data buf s
@@ -221,6 +222,10 @@ let rec read_datum symbols data pos =
   | 10 -> Datum.Nil
   | 11 -> Datum.Eof
   | 12 -> Datum.Void
+  | 13 ->
+    let n = read_i64 data pos in
+    let d = read_i64 data pos in
+    Datum.Rational (n, d)
   | _ -> fasl_error (Printf.sprintf "unknown datum tag: %d" tag)
 
 (* --- Binding encoding --- *)

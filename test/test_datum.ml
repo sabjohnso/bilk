@@ -191,6 +191,19 @@ let test_datum_pp () =
   Alcotest.(check string) "bytevector" "#u8(1 2 3)"
     (Datum.to_string (Bytevector (Bytes.of_string "\x01\x02\x03")))
 
+let test_datum_rational () =
+  check_datum "1/2 eq" (Datum.Rational (1, 2)) (Datum.Rational (1, 2));
+  check_datum "-3/4 eq" (Datum.Rational (-3, 4)) (Datum.Rational (-3, 4));
+  Alcotest.(check bool) "1/2 != 1/3" false
+    (Datum.equal (Datum.Rational (1, 2)) (Datum.Rational (1, 3)));
+  Alcotest.(check bool) "1/2 != 2/3" false
+    (Datum.equal (Datum.Rational (1, 2)) (Datum.Rational (2, 3)));
+  Alcotest.(check string) "1/2 pp" "1/2" (Datum.to_string (Datum.Rational (1, 2)));
+  Alcotest.(check string) "-3/4 pp" "-3/4" (Datum.to_string (Datum.Rational (-3, 4)));
+  Alcotest.(check string) "0/1 would be Fixnum" "0" (Datum.to_string (Datum.Fixnum 0));
+  Alcotest.(check bool) "rational != fixnum" false
+    (Datum.equal (Datum.Rational (1, 2)) (Datum.Fixnum 1))
+
 let test_datum_port () =
   let ip = Port.of_string "x" in
   let op = Port.open_output_string () in
@@ -223,6 +236,7 @@ let () =
        ; Alcotest.test_case "closure" `Quick test_datum_closure
        ; Alcotest.test_case "continuation" `Quick test_datum_continuation
        ; Alcotest.test_case "values" `Quick test_datum_values
+       ; Alcotest.test_case "rational" `Quick test_datum_rational
        ; Alcotest.test_case "port" `Quick test_datum_port
        ])
     ; ("Helpers",

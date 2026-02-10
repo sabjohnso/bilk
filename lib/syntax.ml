@@ -2,6 +2,7 @@ type t = { loc : Loc.t; datum : datum }
 and datum =
   | Bool of bool
   | Fixnum of int
+  | Rational of int * int
   | Flonum of float
   | Char of Uchar.t
   | Str of string
@@ -18,6 +19,7 @@ let rec to_datum t =
   match t.datum with
   | Bool b -> Datum.Bool b
   | Fixnum n -> Datum.Fixnum n
+  | Rational (n, d) -> Datum.Rational (n, d)
   | Flonum f -> Datum.Flonum f
   | Char c -> Datum.Char c
   | Str s -> Datum.Str (Bytes.of_string s)
@@ -32,6 +34,7 @@ let rec from_datum loc (d : Datum.t) =
   let datum = match d with
     | Datum.Bool b -> Bool b
     | Datum.Fixnum n -> Fixnum n
+    | Datum.Rational (n, d) -> Rational (n, d)
     | Datum.Flonum f -> Flonum f
     | Datum.Char c -> Char c
     | Datum.Str s -> Str (Bytes.to_string s)
@@ -59,6 +62,7 @@ let rec equal_datum a b =
   match (a.datum, b.datum) with
   | Bool x, Bool y -> x = y
   | Fixnum x, Fixnum y -> x = y
+  | Rational (n1, d1), Rational (n2, d2) -> n1 = n2 && d1 = d2
   | Flonum x, Flonum y -> Float.equal x y
   | Char x, Char y -> Uchar.equal x y
   | Str x, Str y -> String.equal x y

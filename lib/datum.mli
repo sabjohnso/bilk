@@ -30,6 +30,7 @@ type error_obj = {
 and t =
   | Bool of bool               (** [#t] / [#f] *)
   | Fixnum of int              (** Exact integer (machine word) *)
+  | Rational of int * int      (** Exact rational (numerator, denominator); invariant: d > 0, gcd(|n|,d) = 1 *)
   | Flonum of float            (** Inexact real *)
   | Char of Uchar.t            (** Unicode character *)
   | Str of bytes               (** Mutable string (bytes) *)

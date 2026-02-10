@@ -175,6 +175,7 @@ let sym_name t id =
 let datum_type d =
   match d with
   | Datum.Fixnum _ -> "integer"
+  | Datum.Rational _ -> "rational"
   | Datum.Flonum _ -> "float"
   | Datum.Bool _ -> "boolean"
   | Datum.Char _ -> "char"

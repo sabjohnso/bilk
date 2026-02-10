@@ -665,9 +665,104 @@ let test_dw_thunk_result () =
 
 let test_division () =
   check_datum "/ exact" (Datum.Fixnum 3) (eval "(/ 6 2)");
-  check_datum "/ inexact" (Datum.Flonum 2.5) (eval "(/ 5 2)");
+  check_datum "/ rational" (Datum.Rational (5, 2)) (eval "(/ 5 2)");
   check_datum "/ float" (Datum.Flonum 2.0) (eval "(/ 6.0 3.0)");
-  check_datum "/ reciprocal" (Datum.Flonum 0.5) (eval "(/ 2)")
+  check_datum "/ reciprocal" (Datum.Rational (1, 2)) (eval "(/ 2)")
+
+let test_rational_arithmetic () =
+  (* Rational literals *)
+  check_datum "rational literal" (Datum.Rational (1, 2)) (eval "1/2");
+  check_datum "negative rational" (Datum.Rational (-3, 4)) (eval "-3/4");
+  (* Addition *)
+  check_datum "rat + rat" (Datum.Rational (5, 6)) (eval "(+ 1/2 1/3)");
+  check_datum "rat + fix" (Datum.Rational (3, 2)) (eval "(+ 1/2 1)");
+  check_datum "rat + flo" (Datum.Flonum 1.5) (eval "(+ 1/2 1.0)");
+  check_datum "fix + rat" (Datum.Rational (7, 3)) (eval "(+ 2 1/3)");
+  (* Subtraction *)
+  check_datum "rat - rat" (Datum.Rational (1, 6)) (eval "(- 1/2 1/3)");
+  check_datum "negate rat" (Datum.Rational (-1, 2)) (eval "(- 1/2)");
+  (* Multiplication *)
+  check_datum "rat * rat" (Datum.Rational (1, 6)) (eval "(* 1/2 1/3)");
+  check_datum "rat * fix" (Datum.Fixnum 1) (eval "(* 1/2 2)");
+  check_datum "rat * flo" (Datum.Flonum 1.0) (eval "(* 1/2 2.0)");
+  (* Division *)
+  check_datum "/ 1 2" (Datum.Rational (1, 2)) (eval "(/ 1 2)");
+  check_datum "/ rat rat" (Datum.Rational (3, 2)) (eval "(/ 1/2 1/3)");
+  check_datum "/ chain" (Datum.Rational (1, 6)) (eval "(/ 1 2 3)");
+  (* Mixed operations *)
+  check_datum "+ 1/3 1/6" (Datum.Rational (1, 2)) (eval "(+ 1/3 1/6)");
+  check_datum "* 3/4 2/3" (Datum.Rational (1, 2)) (eval "(* 3/4 2/3)");
+  (* Predicates *)
+  check_datum "number? rat" (Datum.Bool true) (eval "(number? 1/2)");
+  check_datum "integer? rat" (Datum.Bool false) (eval "(integer? 1/2)");
+  check_datum "exact? rat" (Datum.Bool true) (eval "(exact? 1/2)");
+  check_datum "inexact? rat" (Datum.Bool false) (eval "(inexact? 1/2)");
+  check_datum "rational? rat" (Datum.Bool true) (eval "(rational? 1/2)");
+  check_datum "rational? fix" (Datum.Bool true) (eval "(rational? 42)");
+  check_datum "rational? flo" (Datum.Bool true) (eval "(rational? 3.14)");
+  check_datum "rational? inf" (Datum.Bool false) (eval "(rational? +inf.0)");
+  check_datum "zero? rat" (Datum.Bool false) (eval "(zero? 1/2)");
+  check_datum "positive? rat" (Datum.Bool true) (eval "(positive? 1/2)");
+  check_datum "negative? rat" (Datum.Bool true) (eval "(negative? -1/2)");
+  check_datum "finite? rat" (Datum.Bool true) (eval "(finite? 1/2)");
+  check_datum "infinite? rat" (Datum.Bool false) (eval "(infinite? 1/2)");
+  check_datum "nan? rat" (Datum.Bool false) (eval "(nan? 1/2)");
+  (* Comparisons via as_flonum *)
+  check_datum "< rat" (Datum.Bool true) (eval "(< 1/3 1/2)");
+  check_datum "> rat" (Datum.Bool true) (eval "(> 1/2 1/3)");
+  check_datum "= rat" (Datum.Bool true) (eval "(= 1/2 2/4)");
+  check_datum "= rat/fix" (Datum.Bool true) (eval "(= 1/1 1)");
+  (* eqv? *)
+  check_datum "eqv? rat same" (Datum.Bool true) (eval "(eqv? 1/2 1/2)");
+  check_datum "eqv? rat diff" (Datum.Bool false) (eval "(eqv? 1/2 1/3)");
+  (* abs *)
+  check_datum "abs rat" (Datum.Rational (3, 4)) (eval "(abs -3/4)");
+  check_datum "abs rat pos" (Datum.Rational (1, 2)) (eval "(abs 1/2)");
+  (* min/max preserve exactness *)
+  check_datum "min rat" (Datum.Rational (1, 3)) (eval "(min 1/2 1/3)");
+  check_datum "max rat" (Datum.Rational (1, 2)) (eval "(max 1/2 1/3)");
+  check_datum "min rat/fix" (Datum.Rational (1, 2)) (eval "(min 1/2 1)");
+  check_datum "max rat/fix" (Datum.Fixnum 1) (eval "(max 1/2 1)");
+  (* floor/ceiling/truncate/round of rationals *)
+  check_datum "floor 7/2" (Datum.Fixnum 3) (eval "(floor 7/2)");
+  check_datum "floor -7/2" (Datum.Fixnum (-4)) (eval "(floor -7/2)");
+  check_datum "ceiling 7/2" (Datum.Fixnum 4) (eval "(ceiling 7/2)");
+  check_datum "ceiling -7/2" (Datum.Fixnum (-3)) (eval "(ceiling -7/2)");
+  check_datum "truncate 7/2" (Datum.Fixnum 3) (eval "(truncate 7/2)");
+  check_datum "truncate -7/2" (Datum.Fixnum (-3)) (eval "(truncate -7/2)");
+  check_datum "round 7/2" (Datum.Fixnum 4) (eval "(round 7/2)");
+  check_datum "round 5/2" (Datum.Fixnum 2) (eval "(round 5/2)");
+  check_datum "round 3/2" (Datum.Fixnum 2) (eval "(round 3/2)");
+  (* gcd/lcm with rationals *)
+  check_datum "gcd rat" (Datum.Rational (1, 6)) (eval "(gcd 1/2 1/3)");
+  check_datum "lcm rat" (Datum.Fixnum 1) (eval "(lcm 1/2 1/3)");
+  (* exact/inexact conversions *)
+  check_datum "inexact rat" (Datum.Flonum 0.5) (eval "(inexact 1/2)");
+  check_datum "exact 0.5" (Datum.Rational (1, 2)) (eval "(exact 0.5)");
+  check_datum "exact 0.25" (Datum.Rational (1, 4)) (eval "(exact 0.25)");
+  (* expt with rationals *)
+  check_datum "expt rat" (Datum.Rational (1, 4)) (eval "(expt 1/2 2)");
+  check_datum "expt neg exp" (Datum.Rational (1, 8)) (eval "(expt 2 -3)");
+  check_datum "expt rat neg" (Datum.Fixnum 4) (eval "(expt 1/2 -2)");
+  (* sqrt of rationals *)
+  check_datum "sqrt 1/4" (Datum.Rational (1, 2)) (eval "(sqrt 1/4)");
+  check_datum "sqrt 4/9" (Datum.Rational (2, 3)) (eval "(sqrt 4/9)");
+  (* number->string for rationals *)
+  check_datum "num->str rat" (Datum.Str (Bytes.of_string "1/2")) (eval "(number->string 1/2)");
+  check_datum "num->str neg rat" (Datum.Str (Bytes.of_string "-3/4")) (eval "(number->string -3/4)");
+  (* string->number for rationals *)
+  check_datum "str->num rat" (Datum.Rational (1, 2)) (eval "(string->number \"1/2\")");
+  check_datum "str->num rat neg" (Datum.Rational (-3, 4)) (eval "(string->number \"-3/4\")");
+  check_datum "str->num rat norm" (Datum.Fixnum 2) (eval "(string->number \"4/2\")");
+  check_datum "str->num rat bad" (Datum.Bool false) (eval "(string->number \"1/0\")");
+  (* numerator/denominator *)
+  check_datum "numerator rat" (Datum.Fixnum 1) (eval "(numerator 1/2)");
+  check_datum "numerator neg rat" (Datum.Fixnum (-3)) (eval "(numerator -3/4)");
+  check_datum "numerator fix" (Datum.Fixnum 5) (eval "(numerator 5)");
+  check_datum "denominator rat" (Datum.Fixnum 2) (eval "(denominator 1/2)");
+  check_datum "denominator fix" (Datum.Fixnum 1) (eval "(denominator 5)");
+  check_datum "numerator flo" (Datum.Flonum 1.0) (eval "(numerator 0.5)");
+  check_datum "denominator flo" (Datum.Flonum 2.0) (eval "(denominator 0.5)")
 
 let test_abs () =
   check_datum "abs pos" (Datum.Fixnum 5) (eval "(abs 5)");
@@ -3249,6 +3344,7 @@ let () =
        ])
     ; ("numeric",
        [ Alcotest.test_case "division" `Quick test_division
+       ; Alcotest.test_case "rational arithmetic" `Quick test_rational_arithmetic
        ; Alcotest.test_case "abs" `Quick test_abs
        ; Alcotest.test_case "min/max" `Quick test_min_max
        ; Alcotest.test_case "quotient/remainder/modulo" `Quick test_quotient_remainder_modulo

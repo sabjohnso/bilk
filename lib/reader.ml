@@ -256,6 +256,18 @@ let read_character state =
 
 (* Number parsing *)
 
+let rec gcd a b = if b = 0 then abs a else gcd b (a mod b)
+
+let make_rational_syntax n d =
+  if d = 0 then None  (* caller must handle *)
+  else
+    let sign = if (n >= 0) = (d >= 0) then 1 else -1 in
+    let n = abs n and d = abs d in
+    let g = gcd n d in
+    let n = sign * (n / g) and d = d / g in
+    if d = 1 then Some (Syntax.Fixnum n)
+    else Some (Syntax.Rational (n, d))
+
 type num_prefix = {
   radix : int option;  (* None = default 10 *)
   exact : bool option; (* None = default, Some true = #e, Some false = #i *)
@@ -345,16 +357,67 @@ let parse_number prefix token =
               && f >= Float.of_int min_int
               && f <= Float.of_int max_int then
              Some (Syntax.Fixnum (Float.to_int f))
-           else None
+           else
+             (* #e on non-integer float: convert decimal representation to
+                exact rational. Parse the original token to get the decimal
+                digits and compute n / 10^k rather than using IEEE 754 bits. *)
+             let norm = normalize_exponent token in
+             let sign = if f < 0.0 then -1 else 1 in
+             let abs_tok = match norm.[0] with
+               | '+' | '-' -> String.sub norm 1 (String.length norm - 1)
+               | _ -> norm
+             in
+             (* Split around exponent marker *)
+             let (mantissa_str, exp_val) =
+               match String.index_opt abs_tok 'e' with
+               | Some i ->
+                 (String.sub abs_tok 0 i,
+                  int_of_string (String.sub abs_tok (i+1) (String.length abs_tok - i - 1)))
+               | None -> (abs_tok, 0)
+             in
+             (* Count decimal digits after dot *)
+             let (digits_str, dec_places) =
+               match String.index_opt mantissa_str '.' with
+               | Some i ->
+                 let before = String.sub mantissa_str 0 i in
+                 let after = String.sub mantissa_str (i+1) (String.length mantissa_str - i - 1) in
+                 (before ^ after, String.length after)
+               | None -> (mantissa_str, 0)
+             in
+             let n = int_of_string digits_str * sign in
+             let effective_exp = exp_val - dec_places in
+             if effective_exp >= 0 then
+               let pow10 = int_of_float (10.0 ** float_of_int effective_exp) in
+               Some (Syntax.Fixnum (n * pow10))
+             else
+               let d = int_of_float (10.0 ** float_of_int (- effective_exp)) in
+               make_rational_syntax n d
          | _ -> Some (Syntax.Flonum f))
       | None -> None
     end else begin
-      match parse_integer radix token with
-      | Some n ->
-        (match prefix.exact with
-         | Some false -> Some (Syntax.Flonum (float_of_int n))
-         | _ -> Some (Syntax.Fixnum n))
-      | None -> None
+      (* Try rational n/d *)
+      match String.index_opt token '/' with
+      | Some slash when slash > 0 && slash < String.length token - 1
+                        && String.length token > 1 ->
+        let num_str = String.sub token 0 slash in
+        let den_str = String.sub token (slash + 1) (String.length token - slash - 1) in
+        (match parse_integer radix num_str, parse_integer radix den_str with
+         | Some n, Some d ->
+           if d = 0 then None  (* will fall through to error *)
+           else
+             (match prefix.exact with
+              | Some false ->
+                Some (Syntax.Flonum (float_of_int n /. float_of_int d))
+              | _ ->
+                make_rational_syntax n d)
+         | _ -> None)
+      | _ ->
+        match parse_integer radix token with
+        | Some n ->
+          (match prefix.exact with
+           | Some false -> Some (Syntax.Flonum (float_of_int n))
+           | _ -> Some (Syntax.Fixnum n))
+        | None -> None
     end
 
 (* Parse a token as either number or symbol *)

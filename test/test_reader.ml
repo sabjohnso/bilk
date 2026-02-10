@@ -278,7 +278,6 @@ let test_reader_errors () =
   check_error "hex escape too large" "\"\\x110000;\"";
   check_error "digit-leading token" "123abc";
   check_error "large integer" "99999999999999999999";
-  check_error "exact float" "#e3.14";
   check_error "exact infinity" "#e+inf.0";
   check_error "exact nan" "#e+nan.0"
 
@@ -384,6 +383,31 @@ let test_reader_shebang_vs_directive () =
   let d3 = Reader.read Readtable.default p3 in
   check_datum "fold-case col > 1" (Datum.Symbol "foo") d3
 
+let test_reader_rationals () =
+  (* Simple rationals *)
+  check_datum "1/2" (Datum.Rational (1, 2)) (read_one "1/2");
+  check_datum "-3/4" (Datum.Rational (-3, 4)) (read_one "-3/4");
+  check_datum "+1/2" (Datum.Rational (1, 2)) (read_one "+1/2");
+  (* Normalization *)
+  check_datum "6/4" (Datum.Rational (3, 2)) (read_one "6/4");
+  check_datum "4/2" (Datum.Fixnum 2) (read_one "4/2");
+  check_datum "0/5" (Datum.Fixnum 0) (read_one "0/5");
+  (* Negative denominator normalization *)
+  check_datum "1/-2" (Datum.Rational (-1, 2)) (read_one "1/-2");
+  (* Radix prefixes *)
+  check_datum "#b101/10" (Datum.Rational (5, 2)) (read_one "#b101/10");
+  check_datum "#xa/b" (Datum.Rational (10, 11)) (read_one "#xa/b");
+  (* Exactness *)
+  check_datum "#i1/2" (Datum.Flonum 0.5) (read_one "#i1/2");
+  check_datum "#e0.5" (Datum.Rational (1, 2)) (read_one "#e0.5");
+  (* Standalone / is a symbol *)
+  check_datum "/" (Datum.Symbol "/") (read_one "/");
+  (* 1/0 is an error *)
+  (try
+    let _ = read_one "1/0" in
+    Alcotest.fail "1/0 should raise error"
+  with Reader.Read_error _ -> ())
+
 let () =
   Alcotest.run "Reader"
     [ ("Atoms",
@@ -396,6 +420,7 @@ let () =
        ; Alcotest.test_case "floats" `Quick test_reader_floats
        ; Alcotest.test_case "symbols" `Quick test_reader_symbols
        ; Alcotest.test_case "escaped symbols" `Quick test_reader_symbols_escaped
+       ; Alcotest.test_case "rationals" `Quick test_reader_rationals
        ; Alcotest.test_case "fold-case" `Quick test_reader_fold_case
        ; Alcotest.test_case "characters" `Quick test_reader_characters
        ; Alcotest.test_case "strings" `Quick test_reader_strings

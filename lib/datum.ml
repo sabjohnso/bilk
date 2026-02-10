@@ -15,6 +15,7 @@ type error_obj = {
 and t =
   | Bool of bool
   | Fixnum of int
+  | Rational of int * int
   | Flonum of float
   | Char of Uchar.t
   | Str of bytes
@@ -117,6 +118,7 @@ let rec equal a b =
   match (a, b) with
   | Bool x, Bool y -> x = y
   | Fixnum x, Fixnum y -> x = y
+  | Rational (n1, d1), Rational (n2, d2) -> n1 = n2 && d1 = d2
   | Flonum x, Flonum y -> Float.equal x y
   | Char x, Char y -> Uchar.equal x y
   | Str x, Str y -> Bytes.equal x y
@@ -151,6 +153,7 @@ let rec pp fmt = function
   | Bool true -> Format.fprintf fmt "#t"
   | Bool false -> Format.fprintf fmt "#f"
   | Fixnum n -> Format.fprintf fmt "%d" n
+  | Rational (n, d) -> Format.fprintf fmt "%d/%d" n d
   | Flonum f ->
     if Float.is_nan f then Format.fprintf fmt "+nan.0"
     else if Float.is_infinite f then

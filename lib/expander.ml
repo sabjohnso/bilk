@@ -101,7 +101,7 @@ let rec parse_pattern ~literals (s : Syntax.t) : pattern =
   | Syntax.Symbol name ->
     if List.mem name literals then Pat_literal name
     else Pat_var name
-  | Syntax.Bool _ | Syntax.Fixnum _ | Syntax.Char _ | Syntax.Str _ ->
+  | Syntax.Bool _ | Syntax.Fixnum _ | Syntax.Rational _ | Syntax.Char _ | Syntax.Str _ ->
     Pat_const s.datum
   | Syntax.Nil -> Pat_nil
   | Syntax.Pair _ ->
@@ -445,7 +445,7 @@ let rec parse_template ~pat_vars (s : Syntax.t) : template =
     (match List.assoc_opt name pat_vars with
      | Some _ -> Tmpl_var name
      | None -> Tmpl_id name)
-  | Syntax.Bool _ | Syntax.Fixnum _ | Syntax.Flonum _
+  | Syntax.Bool _ | Syntax.Fixnum _ | Syntax.Rational _ | Syntax.Flonum _
   | Syntax.Char _ | Syntax.Str _ ->
     Tmpl_const s.datum
   | Syntax.Nil -> Tmpl_nil
@@ -1160,7 +1160,7 @@ let default_read_include ~fold_case:_ _ =
 
 let rec expand_impl ~syn_env ~gensym ~ctx (s : Syntax.t) : Syntax.t =
   match s.datum with
-  | Syntax.Bool _ | Syntax.Fixnum _ | Syntax.Flonum _
+  | Syntax.Bool _ | Syntax.Fixnum _ | Syntax.Rational _ | Syntax.Flonum _
   | Syntax.Char _ | Syntax.Str _ | Syntax.Bytevector _ | Syntax.Eof ->
     s  (* self-evaluating *)
 
