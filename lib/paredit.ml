@@ -219,11 +219,9 @@ let insert_close_paren rt text cursor =
       let before = String.sub text 0 !ws_start in
       let after = String.sub text !p (len - !p) in
       { text = before ^ after; cursor = String.length before + 1 }
-    end else begin
-      let before = String.sub text 0 cursor in
-      let after = String.sub text cursor (len - cursor) in
-      { text = before ^ ")" ^ after; cursor = cursor + 1 }
-    end
+    end else
+      (* No closing paren found — reject the input *)
+      no_change text cursor
   end
 
 let insert_double_quote rt text cursor =

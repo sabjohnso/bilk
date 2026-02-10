@@ -393,7 +393,11 @@ let read_input t =
         | '(' | '[' ->
           apply_paredit_result st (Paredit.insert_open_paren text st.cursor)
         | ')' | ']' ->
-          apply_paredit_result st (Paredit.insert_close_paren rt text st.cursor)
+          let result = Paredit.insert_close_paren rt text st.cursor in
+          if result.text = text && result.cursor = st.cursor then
+            Terminal.write_string t.term "\x07"  (* bell *)
+          else
+            apply_paredit_result st result
         | '"' ->
           apply_paredit_result st (Paredit.insert_double_quote rt text st.cursor)
         | _ -> insert_char st c

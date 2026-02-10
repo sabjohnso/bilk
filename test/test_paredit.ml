@@ -103,9 +103,14 @@ let test_insert_close_paren_strip_trailing_ws () =
   let result = Paredit.insert_close_paren rt "(abc   )" 7 in
   check_edit "strip trailing ws" "(abc)" 5 result
 
-let test_insert_close_paren_insert () =
+let test_insert_close_paren_no_match () =
+  (* No closing paren to jump to — no change (bell in editor) *)
   let result = Paredit.insert_close_paren rt "abc" 2 in
-  check_edit "insert )" "ab)c" 3 result
+  check_edit "no match" "abc" 2 result
+
+let test_insert_close_paren_no_match_empty () =
+  let result = Paredit.insert_close_paren rt "" 0 in
+  check_edit "no match empty" "" 0 result
 
 let test_insert_double_quote_pair () =
   let result = Paredit.insert_double_quote rt "abc" 1 in
@@ -381,7 +386,8 @@ let () =
       Alcotest.test_case "insert close paren move past" `Quick test_insert_close_paren_move_past;
       Alcotest.test_case "insert close paren skip ws" `Quick test_insert_close_paren_skip_ws;
       Alcotest.test_case "insert close paren strip trailing ws" `Quick test_insert_close_paren_strip_trailing_ws;
-      Alcotest.test_case "insert close paren insert" `Quick test_insert_close_paren_insert;
+      Alcotest.test_case "insert close paren no match" `Quick test_insert_close_paren_no_match;
+      Alcotest.test_case "insert close paren no match empty" `Quick test_insert_close_paren_no_match_empty;
       Alcotest.test_case "insert double quote pair" `Quick test_insert_double_quote_pair;
       Alcotest.test_case "insert double quote move past" `Quick test_insert_double_quote_move_past;
     ];
