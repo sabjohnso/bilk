@@ -344,12 +344,9 @@ let read_input t =
           text = "" || (cursor_at_end && f text)
       in
       if should_submit then begin
-        (* Move cursor to end and print newline *)
-        let nlines = num_lines text in
-        let cur_row = cursor_row text st.cursor in
-        let remaining = nlines - 1 - cur_row in
-        if remaining > 0 then
-          Terminal.write_string t.term (Printf.sprintf "\x1b[%dB" remaining);
+        (* Final render with cursor past end to clear paren-match highlights *)
+        st.cursor <- String.length text;
+        render t st;
         Terminal.write_string t.term "\r\n";
         Input text
       end else begin
