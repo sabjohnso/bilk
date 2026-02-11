@@ -290,6 +290,101 @@ let test_setup_package_paths_preserves_existing () =
     Alcotest.(check bool) "preserves existing"
       true (List.mem "/existing/path" !(inst.search_paths)))
 
+(* --- discover_available_libraries --- *)
+
+let lib_name_testable =
+  Alcotest.testable
+    (fun fmt l -> Format.fprintf fmt "(%s)" (String.concat " " l))
+    (=)
+
+let test_discover_empty () =
+  with_temp_dir (fun dir ->
+    let results = Instance.discover_available_libraries [dir] in
+    Alcotest.(check (list lib_name_testable)) "empty dir" [] results)
+
+let test_discover_basic () =
+  with_temp_dir (fun dir ->
+    (* Create scheme/base.sld *)
+    write_file (Filename.concat dir "scheme/base.sld") "";
+    write_file (Filename.concat dir "srfi/1.sld") "";
+    let results = Instance.discover_available_libraries [dir] in
+    let sorted = List.sort compare results in
+    Alcotest.(check (list lib_name_testable)) "two libs"
+      [["scheme"; "base"]; ["srfi"; "1"]] sorted)
+
+let test_discover_nested () =
+  with_temp_dir (fun dir ->
+    write_file (Filename.concat dir "my/deep/lib.sld") "";
+    let results = Instance.discover_available_libraries [dir] in
+    Alcotest.(check (list lib_name_testable)) "nested"
+      [["my"; "deep"; "lib"]] results)
+
+let test_discover_dedup () =
+  with_temp_dir (fun dir ->
+    let d1 = Filename.concat dir "a" in
+    let d2 = Filename.concat dir "b" in
+    write_file (Filename.concat d1 "foo/bar.sld") "";
+    write_file (Filename.concat d2 "foo/bar.sld") "";
+    let results = Instance.discover_available_libraries [d1; d2] in
+    Alcotest.(check (list lib_name_testable)) "dedup"
+      [["foo"; "bar"]] results)
+
+let test_discover_nonexistent_dir () =
+  let results = Instance.discover_available_libraries ["/tmp/nonexistent_wile_test_dir"] in
+  Alcotest.(check (list lib_name_testable)) "nonexistent" [] results
+
+let test_discover_symlink_loop () =
+  with_temp_dir (fun dir ->
+    write_file (Filename.concat dir "foo/bar.sld") "";
+    (* Create a symlink cycle: foo/loop -> foo *)
+    Unix.symlink (Filename.concat dir "foo") (Filename.concat dir "foo/loop");
+    let results = Instance.discover_available_libraries [dir] in
+    let sorted = List.sort compare results in
+    (* Should find bar.sld exactly once, not infinite-loop *)
+    Alcotest.(check (list lib_name_testable)) "symlink loop"
+      [["foo"; "bar"]] sorted)
+
+(* --- ensure_library --- *)
+
+let test_ensure_library_builtin () =
+  let inst = Instance.create () in
+  match Instance.ensure_library inst ["scheme"; "base"] with
+  | Some lib ->
+    Alcotest.(check (list string)) "name" ["scheme"; "base"] lib.Library.name
+  | None -> Alcotest.fail "expected Some for (scheme base)"
+
+let test_ensure_library_unknown () =
+  let inst = Instance.create () in
+  match Instance.ensure_library inst ["no"; "such"; "lib"] with
+  | None -> ()
+  | Some _ -> Alcotest.fail "expected None for unknown library"
+
+let test_ensure_library_no_import () =
+  (* ensure_library should load the library but NOT import its bindings
+     into the global environment. *)
+  with_temp_dir (fun dir ->
+    write_file (Filename.concat dir "test-ensure/noimport.sld")
+      {|(define-library (test-ensure noimport)
+          (export ensure-secret)
+          (import (scheme base))
+          (begin (define ensure-secret 42)))|};
+    let inst = Instance.create () in
+    inst.search_paths := [dir];
+    (* Snapshot bound names *)
+    let bound_before = List.length (List.filter (fun sym ->
+      Option.is_some (Env.lookup inst.global_env sym)
+    ) (Symbol.all inst.symbols)) in
+    let lib = Instance.ensure_library inst ["test-ensure"; "noimport"] in
+    Alcotest.(check bool) "library loaded" true (Option.is_some lib);
+    (* The global env should NOT have the library's export *)
+    Alcotest.(check bool) "ensure-secret not in global env" true
+      (Option.is_none (Instance.lookup inst "ensure-secret"));
+    (* Bound name count should be unchanged *)
+    let bound_after = List.length (List.filter (fun sym ->
+      Option.is_some (Env.lookup inst.global_env sym)
+    ) (Symbol.all inst.symbols)) in
+    Alcotest.(check int) "bound count unchanged" bound_before bound_after)
+
 let () =
   Alcotest.run "Instance"
     [ ("Instance",
@@ -332,5 +427,18 @@ let () =
        [ Alcotest.test_case "setup_package_paths basic" `Quick test_setup_package_paths_basic
        ; Alcotest.test_case "setup_package_paths empty deps" `Quick test_setup_package_paths_empty_deps
        ; Alcotest.test_case "setup_package_paths preserves existing" `Quick test_setup_package_paths_preserves_existing
+       ])
+    ; ("discover_available_libraries",
+       [ Alcotest.test_case "empty dir" `Quick test_discover_empty
+       ; Alcotest.test_case "basic" `Quick test_discover_basic
+       ; Alcotest.test_case "nested" `Quick test_discover_nested
+       ; Alcotest.test_case "dedup" `Quick test_discover_dedup
+       ; Alcotest.test_case "nonexistent dir" `Quick test_discover_nonexistent_dir
+       ; Alcotest.test_case "symlink loop" `Quick test_discover_symlink_loop
+       ])
+    ; ("ensure_library",
+       [ Alcotest.test_case "builtin" `Quick test_ensure_library_builtin
+       ; Alcotest.test_case "unknown" `Quick test_ensure_library_unknown
+       ; Alcotest.test_case "no import" `Quick test_ensure_library_no_import
        ])
     ]

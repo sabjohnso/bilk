@@ -33,6 +33,14 @@ let register (reg : registry) lib =
 let lookup (reg : registry) name =
   Hashtbl.find_opt reg (name_key name)
 
+let list_all (reg : registry) =
+  Hashtbl.fold (fun _key lib acc -> lib :: acc) reg []
+
+let export_names lib =
+  let rt = Hashtbl.fold (fun name _v acc -> name :: acc) lib.exports [] in
+  let syn = Hashtbl.fold (fun name _v acc -> name :: acc) lib.syntax_exports [] in
+  (rt, syn)
+
 (* --- Syntax helpers --- *)
 
 let compile_error loc msg = raise (Compiler.Compile_error (loc, msg))

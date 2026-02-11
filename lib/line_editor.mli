@@ -16,6 +16,16 @@
     complete expression ready for submission. *)
 type completeness_check = string -> bool
 
+(** Result of a tab-completion request. *)
+type completion_result =
+  | No_completions
+      (** No matches found. *)
+  | Single of string * int
+      (** [(new_text, new_cursor)] — unique completion applied. *)
+  | Multiple of string * int * string
+      (** [(new_text, new_cursor, display)] — common prefix applied,
+          [display] string to show below input. *)
+
 (** Editor configuration. *)
 type config = {
   prompt : string;
@@ -47,6 +57,10 @@ type config = {
 
   readtable : Readtable.t option;
   (** Readtable for paredit operations. Required when [paredit] is [Some _]. *)
+
+  complete : (string -> int -> width:int -> completion_result) option;
+  (** When [Some f], Tab calls [f text cursor ~width] to compute completions.
+      When [None], Tab is ignored. *)
 }
 
 (** Result of a {!read_input} call. *)

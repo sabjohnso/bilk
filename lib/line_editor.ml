@@ -1,5 +1,10 @@
 type completeness_check = string -> bool
 
+type completion_result =
+  | No_completions
+  | Single of string * int
+  | Multiple of string * int * string
+
 type config = {
   prompt : string;
   continuation_prompt : string;
@@ -9,6 +14,7 @@ type config = {
   highlight : (string -> int -> string) option;
   paredit : bool ref option;
   readtable : Readtable.t option;
+  complete : (string -> int -> width:int -> completion_result) option;
 }
 
 type input_result =
@@ -127,13 +133,79 @@ let apply_paredit_result st (result : Paredit.edit_result) =
 
 (* --- Rendering --- *)
 
+(* Visible width of a string, ignoring ANSI escape sequences *)
+let visible_length s =
+  let len = String.length s in
+  let vis = ref 0 in
+  let i = ref 0 in
+  while !i < len do
+    if s.[!i] = '\x1b' then begin
+      (* Skip ESC [ ... final_byte *)
+      incr i;
+      if !i < len && s.[!i] = '[' then begin
+        incr i;
+        while !i < len && not (s.[!i] >= '\x40' && s.[!i] <= '\x7e') do incr i done;
+        if !i < len then incr i  (* skip the final byte *)
+      end
+    end else begin
+      incr vis;
+      incr i
+    end
+  done;
+  !vis
+
+(* Byte offset in [s] of the [n]th visible character (0-indexed),
+   skipping ANSI CSI sequences.  Returns [String.length s] if there
+   are fewer than [n] visible characters. *)
+let visible_byte_offset s n =
+  let len = String.length s in
+  let vis = ref 0 in
+  let i = ref 0 in
+  while !i < len && !vis < n do
+    if s.[!i] = '\x1b' then begin
+      incr i;
+      if !i < len && s.[!i] = '[' then begin
+        incr i;
+        while !i < len && not (s.[!i] >= '\x40' && s.[!i] <= '\x7e') do incr i done;
+        if !i < len then incr i
+      end
+    end else begin
+      incr vis;
+      incr i
+    end
+  done;
+  !i
+
+(* Strip all ANSI CSI sequences from [s], returning only visible characters. *)
+let strip_ansi s =
+  let len = String.length s in
+  let buf = Buffer.create len in
+  let i = ref 0 in
+  while !i < len do
+    if s.[!i] = '\x1b' then begin
+      incr i;
+      if !i < len && s.[!i] = '[' then begin
+        incr i;
+        while !i < len && not (s.[!i] >= '\x40' && s.[!i] <= '\x7e') do incr i done;
+        if !i < len then incr i
+      end
+    end else begin
+      Buffer.add_char buf s.[!i];
+      incr i
+    end
+  done;
+  Buffer.contents buf
+
 let effective_prompt t =
   if paredit_active t then
-    (* Insert [paredit] before the trailing "> " *)
     let p = t.config.prompt in
-    let len = String.length p in
-    if len >= 2 && p.[len - 2] = '>' && p.[len - 1] = ' ' then
-      String.sub p 0 (len - 2) ^ "[paredit]> "
+    let visible = strip_ansi p in
+    let vlen = String.length visible in
+    if vlen >= 2 && visible.[vlen - 2] = '>' && visible.[vlen - 1] = ' ' then
+      (* Splice "[paredit]" just before the '>' in the original string *)
+      let gt_byte = visible_byte_offset p (vlen - 2) in
+      String.sub p 0 gt_byte ^ "[paredit]" ^
+        String.sub p gt_byte (String.length p - gt_byte)
     else
       p ^ "[paredit] "
   else
@@ -141,9 +213,9 @@ let effective_prompt t =
 
 let effective_continuation_prompt t =
   let prompt = effective_prompt t in
-  let target_len = String.length prompt in
+  let target_len = visible_length prompt in
   let cont = t.config.continuation_prompt in
-  let cont_len = String.length cont in
+  let cont_len = visible_length cont in
   if cont_len >= target_len then cont
   else cont ^ String.make (target_len - cont_len) ' '
 
@@ -189,8 +261,8 @@ let render t st =
   let lines_up = last_line - cur_row in
   if lines_up > 0 then
     Terminal.write_string t.term (Printf.sprintf "\x1b[%dA" lines_up);
-  let prompt_len = if cur_row = 0 then String.length prompt
-                   else String.length cont_prompt in
+  let prompt_len = if cur_row = 0 then visible_length prompt
+                   else visible_length cont_prompt in
   Terminal.move_to_column t.term (prompt_len + cur_col + 1);
   st.rendered_row <- cur_row
 
@@ -589,7 +661,41 @@ let read_input t =
       end;
       loop ()
 
-    | Terminal.Tab | Terminal.Unknown ->
+    | Terminal.Tab ->
+      (match t.config.complete with
+       | None -> ()
+       | Some complete_fn ->
+         let text = content_string st in
+         let (_rows, cols) = Terminal.get_terminal_size t.term in
+         let width = max 40 cols in
+         (match complete_fn text st.cursor ~width with
+          | No_completions ->
+            Terminal.write_string t.term "\x07"  (* bell *)
+          | Single (new_text, new_cursor) ->
+            Buffer.clear st.content;
+            Buffer.add_string st.content new_text;
+            st.cursor <- new_cursor;
+            render t st
+          | Multiple (new_text, new_cursor, display) ->
+            Buffer.clear st.content;
+            Buffer.add_string st.content new_text;
+            st.cursor <- new_cursor;
+            (* Show candidates below the input *)
+            let text' = content_string st in
+            let nlines = num_lines text' in
+            let cur_row = cursor_row text' st.cursor in
+            let remaining = nlines - 1 - cur_row in
+            if remaining > 0 then
+              Terminal.write_string t.term (Printf.sprintf "\x1b[%dB" remaining);
+            Terminal.write_string t.term "\r\n";
+            Terminal.write_string t.term display;
+            Terminal.write_string t.term "\r\n";
+            (* Re-render the input *)
+            st.rendered_row <- 0;
+            render t st));
+      loop ()
+
+    | Terminal.Unknown ->
       loop ()
   in
   loop ()

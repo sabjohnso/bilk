@@ -239,6 +239,57 @@ let test_registry () =
   | None -> ()
   | Some _ -> Alcotest.fail "expected None"
 
+(* --- list_all --- *)
+
+let test_list_all_empty () =
+  let reg = Library.create_registry () in
+  Alcotest.(check int) "empty registry" 0 (List.length (Library.list_all reg))
+
+let test_list_all () =
+  let reg = Library.create_registry () in
+  let lib = make_test_lib () in
+  Library.register reg lib;
+  let libs = Library.list_all reg in
+  Alcotest.(check int) "one library" 1 (List.length libs);
+  let names = List.map (fun (l : Library.t) -> l.name) libs in
+  Alcotest.(check bool) "has test lib" true
+    (List.mem ["test"; "lib"] names)
+
+let test_list_all_multiple () =
+  let reg = Library.create_registry () in
+  let lib1 = make_test_lib () in
+  Library.register reg lib1;
+  let lib2 : Library.t = {
+    name = ["other"; "lib"];
+    env = Env.empty ();
+    exports = Hashtbl.create 0;
+    syntax_exports = Hashtbl.create 0;
+  } in
+  Library.register reg lib2;
+  let libs = Library.list_all reg in
+  Alcotest.(check int) "two libraries" 2 (List.length libs)
+
+(* --- export_names --- *)
+
+let test_export_names () =
+  let lib = make_test_lib () in
+  let (rt, syn) = Library.export_names lib in
+  let rt_sorted = List.sort String.compare rt in
+  let syn_sorted = List.sort String.compare syn in
+  Alcotest.(check (list string)) "runtime exports" ["+"; "car"] rt_sorted;
+  Alcotest.(check (list string)) "syntax exports" ["let"] syn_sorted
+
+let test_export_names_empty () =
+  let lib : Library.t = {
+    name = ["empty"];
+    env = Env.empty ();
+    exports = Hashtbl.create 0;
+    syntax_exports = Hashtbl.create 0;
+  } in
+  let (rt, syn) = Library.export_names lib in
+  Alcotest.(check (list string)) "no runtime" [] rt;
+  Alcotest.(check (list string)) "no syntax" [] syn
+
 let () =
   Alcotest.run "Library"
     [ ("parse",
@@ -273,5 +324,10 @@ let () =
        ])
     ; ("registry",
        [ Alcotest.test_case "register + lookup" `Quick test_registry
+       ; Alcotest.test_case "list_all empty" `Quick test_list_all_empty
+       ; Alcotest.test_case "list_all" `Quick test_list_all
+       ; Alcotest.test_case "list_all multiple" `Quick test_list_all_multiple
+       ; Alcotest.test_case "export_names" `Quick test_export_names
+       ; Alcotest.test_case "export_names empty" `Quick test_export_names_empty
        ])
     ]

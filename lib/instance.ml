@@ -5703,6 +5703,57 @@ let run_program inst prog =
   ) prog.Fasl.declarations;
   !last
 
+let ensure_library inst name = lookup_or_load inst name
+
+(* --- Library discovery --- *)
+
+let path_to_lib_name ~search_dir path =
+  let rel = String.sub path (String.length search_dir + 1)
+    (String.length path - String.length search_dir - 1) in
+  let no_ext = Filename.chop_extension rel in
+  String.split_on_char Filename.dir_sep.[0] no_ext
+
+let dir_identity path =
+  try
+    let st = Unix.stat path in
+    Some (st.Unix.st_dev, st.Unix.st_ino)
+  with Unix.Unix_error _ -> None
+
+let discover_available_libraries search_dirs =
+  let seen_libs = Hashtbl.create 32 in
+  let visited_dirs = Hashtbl.create 32 in
+  let results = ref [] in
+  let rec walk search_dir dir =
+    match dir_identity dir with
+    | None -> ()
+    | Some id ->
+      if Hashtbl.mem visited_dirs id then ()
+      else begin
+        Hashtbl.replace visited_dirs id ();
+        let entries = try Sys.readdir dir with Sys_error _ -> [||] in
+        Array.iter (fun entry ->
+          let path = Filename.concat dir entry in
+          let is_dir = try Sys.is_directory path with Sys_error _ -> false in
+          if is_dir then
+            walk search_dir path
+          else if Filename.check_suffix entry ".sld" then begin
+            let name = path_to_lib_name ~search_dir path in
+            let key = String.concat "\x00" name in
+            if not (Hashtbl.mem seen_libs key) then begin
+              Hashtbl.replace seen_libs key ();
+              results := name :: !results
+            end
+          end
+        ) entries
+      end
+  in
+  List.iter (fun dir ->
+    if (try Sys.file_exists dir && Sys.is_directory dir
+        with Sys_error _ -> false) then
+      walk dir dir
+  ) search_dirs;
+  !results
+
 (* --- Package integration --- *)
 
 let setup_package_paths inst ~registry_root pkg =

@@ -260,6 +260,9 @@ let repl_help () =
   print_endline "  ,quit  ,q       Exit the REPL";
   print_endline "  ,load <file>    Load and evaluate a Scheme file";
   print_endline "  ,env            List bound names in the global environment";
+  print_endline "  ,libs           List loaded/registered libraries";
+  print_endline "  ,available      List all discoverable libraries on disk";
+  print_endline "  ,exports <lib>  Show exports of a library (e.g. ,exports (scheme base))";
   print_endline "  ,theme <name>   Switch theme (dark, light, none, or file path)";
   print_endline "  ,paredit        Toggle paredit mode (structural editing)"
 
@@ -273,6 +276,46 @@ let repl_env inst =
   let sorted = List.sort String.compare bound in
   List.iter (fun name -> print_string name; print_char ' ') sorted;
   print_newline ()
+
+let repl_libs inst =
+  let libs = Library.list_all inst.Instance.libraries in
+  let names = List.map (fun (l : Library.t) -> Library.name_to_string l.name) libs in
+  let sorted = List.sort String.compare names in
+  List.iter print_endline sorted
+
+let repl_available inst =
+  let names = Instance.discover_available_libraries !(inst.Instance.search_paths) in
+  let strs = List.map Library.name_to_string names in
+  let sorted = List.sort String.compare strs in
+  List.iter print_endline sorted
+
+let repl_exports inst arg =
+  try
+    let port = Port.of_string arg in
+    let syntax = Reader.read_syntax inst.Instance.readtable port in
+    let lib_name = Library.parse_library_name syntax in
+    match Instance.ensure_library inst lib_name with
+    | None ->
+      Printf.eprintf "Library not found: %s\n%!" (Library.name_to_string lib_name)
+    | Some lib ->
+      let (rt, syn) = Library.export_names lib in
+      let rt_sorted = List.sort String.compare rt in
+      let syn_sorted = List.sort String.compare syn in
+      if syn_sorted <> [] then begin
+        Printf.printf "Syntax:\n";
+        List.iter (fun name -> Printf.printf "  %s\n" name) syn_sorted
+      end;
+      if rt_sorted <> [] then begin
+        Printf.printf "Runtime:\n";
+        List.iter (fun name -> Printf.printf "  %s\n" name) rt_sorted
+      end;
+      Printf.printf "%!"
+  with
+  | Reader.Read_error (_, msg) ->
+    Printf.eprintf "Error parsing library name: %s\n%!" msg
+  | Compiler.Compile_error (_, msg) ->
+    Printf.eprintf "Error parsing library name: %s\n%!" msg
+  | Failure msg -> format_error msg
 
 let repl_load inst path =
   try
@@ -319,6 +362,10 @@ let handle_repl_command inst theme_ref paredit_ref line =
   | ",quit" | ",q" -> exit 0
   | ",help" | ",h" -> repl_help ()
   | ",env" -> repl_env inst
+  | ",libs" -> repl_libs inst
+  | ",available" -> repl_available inst
+  | ",exports" ->
+    Printf.eprintf "Usage: ,exports (library name)\n%!"
   | ",paredit" ->
     paredit_ref := not !(paredit_ref);
     save_repl_settings theme_ref paredit_ref;
@@ -339,6 +386,10 @@ let handle_repl_command inst theme_ref paredit_ref line =
       let path = String.trim (String.sub line 6 (String.length line - 6)) in
       if path = "" then Printf.eprintf "Usage: ,load <file>\n%!"
       else repl_load inst path
+    end else if String.length line > 9 && String.sub line 0 9 = ",exports " then begin
+      let arg = String.trim (String.sub line 9 (String.length line - 9)) in
+      if arg = "" then Printf.eprintf "Usage: ,exports (library name)\n%!"
+      else repl_exports inst arg
     end else if String.length line > 7 && String.sub line 0 7 = ",theme " then begin
       let name = String.trim (String.sub line 7 (String.length line - 7)) in
       if name = "" then Printf.eprintf "Usage: ,theme <dark|light|none|path>\n%!"
@@ -400,8 +451,58 @@ let run_repl theme_name =
     | None -> text
     | Some theme -> Highlight.highlight_line theme inst.readtable text cursor
   in
+  let repl_commands =
+    [",help"; ",h"; ",quit"; ",q"; ",load"; ",env"; ",libs";
+     ",available"; ",exports"; ",theme"; ",paredit"]
+  in
+  let cached_candidates = ref [] in
+  let cache_gen = ref (-1) in
+  let get_scheme_candidates () =
+    let gen = List.length (Symbol.all inst.Instance.symbols) in
+    if gen <> !cache_gen then begin
+      let syms = Symbol.all inst.Instance.symbols in
+      let bound = List.filter_map (fun sym ->
+        match Env.lookup inst.Instance.global_env sym with
+        | Some _ -> Some (Symbol.name sym)
+        | None -> None
+      ) syms in
+      let syntax_names = Expander.binding_names inst.Instance.syn_env in
+      let all = bound @ syntax_names in
+      cached_candidates := List.sort_uniq String.compare all;
+      cache_gen := gen
+    end;
+    !cached_candidates
+  in
+  let complete_fn text cursor ~width =
+    let (prefix, start) = Completion.extract_prefix text cursor in
+    if prefix = "" then Line_editor.No_completions
+    else
+      let candidates =
+        if String.length prefix > 0 && prefix.[0] = ',' then
+          repl_commands
+        else
+          get_scheme_candidates ()
+      in
+      let matches = Completion.find_matches prefix candidates in
+      match matches with
+      | [] -> Line_editor.No_completions
+      | [single] ->
+        let before = String.sub text 0 start in
+        let after = String.sub text cursor (String.length text - cursor) in
+        let new_text = before ^ single ^ after in
+        let new_cursor = start + String.length single in
+        Line_editor.Single (new_text, new_cursor)
+      | _ ->
+        let cp = Completion.common_prefix matches in
+        let before = String.sub text 0 start in
+        let after = String.sub text cursor (String.length text - cursor) in
+        let new_text = before ^ cp ^ after in
+        let new_cursor = start + String.length cp in
+        let display = Completion.format_columns ~width matches in
+        Line_editor.Multiple (new_text, new_cursor, display)
+  in
   let editor = Line_editor.create {
-    prompt = "wile> ";
+    prompt = "\x1b[1mwile>\x1b[0m ";
     continuation_prompt = "  ... ";
     history_file;
     max_history = 1000;
@@ -409,6 +510,7 @@ let run_repl theme_name =
     highlight = Some highlight_fn;
     paredit = Some paredit_ref;
     readtable = Some inst.readtable;
+    complete = Some complete_fn;
   } in
   at_exit (fun () -> Line_editor.destroy editor);
   let print_result v =

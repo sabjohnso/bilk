@@ -175,6 +175,16 @@ val load_native_ref :
     {!Extension} at module-init time to break the dependency cycle
     [Instance -> Extension -> Instance]. *)
 
+val ensure_library : t -> Library.library_name -> Library.t option
+(** [ensure_library inst name] loads the library if needed (auto-load from
+    [.sld]) and returns it, without importing bindings into the global
+    environment.  Returns [None] if not found. *)
+
+val discover_available_libraries : string list -> Library.library_name list
+(** [discover_available_libraries search_dirs] scans directories for [.sld]
+    files and returns the corresponding library names.  Deduplicates across
+    multiple search directories. *)
+
 val setup_package_paths : t -> registry_root:string -> Package.t -> unit
 (** [setup_package_paths inst ~registry_root pkg] resolves the package's
     dependencies, computes search paths for the resolved packages, and

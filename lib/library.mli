@@ -59,6 +59,12 @@ val lookup : registry -> library_name -> t option
 (** [lookup reg name] returns the library registered under [name],
     or [None] if not found. *)
 
+val list_all : registry -> t list
+(** [list_all reg] returns all libraries in the registry. *)
+
+val export_names : t -> string list * string list
+(** [export_names lib] returns [(runtime_export_names, syntax_export_names)]. *)
+
 (** {1 Display} *)
 
 val name_to_string : library_name -> string
