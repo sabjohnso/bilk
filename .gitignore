@@ -20,6 +20,12 @@ _opam/
 .DS_Store
 Thumbs.db
 
+# Project notes (local only)
+CLAUDE.md
+PLAN.md
+SRFI.org
+r7rs.pdf
+
 # Scheme
 *.so
 *.fasl
