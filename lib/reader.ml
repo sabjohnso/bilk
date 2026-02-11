@@ -256,16 +256,16 @@ let read_character state =
 
 (* Number parsing *)
 
-let rec gcd a b = if b = 0 then abs a else gcd b (a mod b)
+let make_fixnum_z_syntax (z : Z.t) =
+  if Z.fits_int z then Syntax.Fixnum (Z.to_int z) else Syntax.Bignum z
 
-let make_rational_syntax n d =
-  if d = 0 then None  (* caller must handle *)
+let make_rational_syntax (n : Z.t) (d : Z.t) =
+  if Z.sign d = 0 then None  (* caller must handle *)
   else
-    let sign = if (n >= 0) = (d >= 0) then 1 else -1 in
-    let n = abs n and d = abs d in
-    let g = gcd n d in
-    let n = sign * (n / g) and d = d / g in
-    if d = 1 then Some (Syntax.Fixnum n)
+    let n, d = if Z.sign d < 0 then (Z.neg n, Z.neg d) else (n, d) in
+    let g = Z.gcd (Z.abs n) d in
+    let n = Z.div n g and d = Z.div d g in
+    if Z.equal d Z.one then Some (make_fixnum_z_syntax n)
     else Some (Syntax.Rational (n, d))
 
 type num_prefix = {
@@ -279,14 +279,15 @@ let parse_integer radix s =
   else
     let start, sign =
       match s.[0] with
-      | '+' -> (1, 1)
-      | '-' -> (1, -1)
-      | _ -> (0, 1)
+      | '+' -> (1, Z.one)
+      | '-' -> (1, Z.minus_one)
+      | _ -> (0, Z.one)
     in
     if start >= len then None
     else
+      let z_radix = Z.of_int radix in
       let rec loop acc i =
-        if i >= len then Some (sign * acc)
+        if i >= len then Some (Z.mul sign acc)
         else
           let c = s.[i] in
           let digit =
@@ -297,12 +298,9 @@ let parse_integer radix s =
             | _ -> radix (* invalid *)
           in
           if digit >= radix then None
-          else
-            let acc' = acc * radix + digit in
-            if acc' < acc then None
-            else loop acc' (i + 1)
+          else loop (Z.add (Z.mul acc z_radix) (Z.of_int digit)) (i + 1)
       in
-      loop 0 start
+      loop Z.zero start
 
 let parse_float s =
   (* Check for special values first *)
@@ -353,16 +351,14 @@ let parse_number prefix token =
       | Some f ->
         (match prefix.exact with
          | Some true ->
-           if Float.is_integer f
-              && f >= Float.of_int min_int
-              && f <= Float.of_int max_int then
-             Some (Syntax.Fixnum (Float.to_int f))
+           if Float.is_integer f then
+             Some (make_fixnum_z_syntax (Z.of_float f))
            else
              (* #e on non-integer float: convert decimal representation to
                 exact rational. Parse the original token to get the decimal
                 digits and compute n / 10^k rather than using IEEE 754 bits. *)
              let norm = normalize_exponent token in
-             let sign = if f < 0.0 then -1 else 1 in
+             let sign = if f < 0.0 then Z.minus_one else Z.one in
              let abs_tok = match norm.[0] with
                | '+' | '-' -> String.sub norm 1 (String.length norm - 1)
                | _ -> norm
@@ -384,13 +380,13 @@ let parse_number prefix token =
                  (before ^ after, String.length after)
                | None -> (mantissa_str, 0)
              in
-             let n = int_of_string digits_str * sign in
+             let n = Z.mul (Z.of_string digits_str) sign in
              let effective_exp = exp_val - dec_places in
              if effective_exp >= 0 then
-               let pow10 = int_of_float (10.0 ** float_of_int effective_exp) in
-               Some (Syntax.Fixnum (n * pow10))
+               let pow10 = Z.pow (Z.of_int 10) effective_exp in
+               Some (make_fixnum_z_syntax (Z.mul n pow10))
              else
-               let d = int_of_float (10.0 ** float_of_int (- effective_exp)) in
+               let d = Z.pow (Z.of_int 10) (- effective_exp) in
                make_rational_syntax n d
          | _ -> Some (Syntax.Flonum f))
       | None -> None
@@ -403,20 +399,20 @@ let parse_number prefix token =
         let den_str = String.sub token (slash + 1) (String.length token - slash - 1) in
         (match parse_integer radix num_str, parse_integer radix den_str with
          | Some n, Some d ->
-           if d = 0 then None  (* will fall through to error *)
+           if Z.sign d = 0 then None  (* will fall through to error *)
            else
              (match prefix.exact with
               | Some false ->
-                Some (Syntax.Flonum (float_of_int n /. float_of_int d))
+                Some (Syntax.Flonum (Z.to_float n /. Z.to_float d))
               | _ ->
                 make_rational_syntax n d)
          | _ -> None)
       | _ ->
         match parse_integer radix token with
-        | Some n ->
+        | Some z ->
           (match prefix.exact with
-           | Some false -> Some (Syntax.Flonum (float_of_int n))
-           | _ -> Some (Syntax.Fixnum n))
+           | Some false -> Some (Syntax.Flonum (Z.to_float z))
+           | _ -> Some (make_fixnum_z_syntax z))
         | None -> None
     end
 
@@ -425,18 +421,20 @@ let syn_wrap d = Syntax.make Loc.none d
 
 (* Is a Syntax.datum an exact type? *)
 let is_exact_syntax = function
-  | Syntax.Fixnum _ | Syntax.Rational _ -> true | _ -> false
+  | Syntax.Fixnum _ | Syntax.Bignum _ | Syntax.Rational _ -> true | _ -> false
 
 (* Convert Syntax.datum to inexact *)
 let to_inexact_syntax = function
   | Syntax.Fixnum n -> Syntax.Flonum (float_of_int n)
-  | Syntax.Rational (n, d) -> Syntax.Flonum (float_of_int n /. float_of_int d)
+  | Syntax.Bignum z -> Syntax.Flonum (Z.to_float z)
+  | Syntax.Rational (n, d) -> Syntax.Flonum (Z.to_float n /. Z.to_float d)
   | d -> d
 
 (* Is a Syntax.datum zero? *)
 let is_zero_syntax = function
   | Syntax.Fixnum 0 -> true
-  | Syntax.Rational (0, _) -> true
+  | Syntax.Bignum z -> Z.sign z = 0
+  | Syntax.Rational (n, _) -> Z.sign n = 0
   | Syntax.Flonum f -> f = 0.0
   | _ -> false
 
@@ -481,12 +479,14 @@ let parse_complex state prefix token =
       let r = (match r_datum with
         | Syntax.Flonum f -> f
         | Syntax.Fixnum n -> float_of_int n
-        | Syntax.Rational (n, d) -> float_of_int n /. float_of_int d
+        | Syntax.Bignum z -> Z.to_float z
+        | Syntax.Rational (n, d) -> Z.to_float n /. Z.to_float d
         | _ -> error state (Printf.sprintf "invalid polar magnitude: %s" r_str)) in
       let t = (match t_datum with
         | Syntax.Flonum f -> f
         | Syntax.Fixnum n -> float_of_int n
-        | Syntax.Rational (n, d) -> float_of_int n /. float_of_int d
+        | Syntax.Bignum z -> Z.to_float z
+        | Syntax.Rational (n, d) -> Z.to_float n /. Z.to_float d
         | _ -> error state (Printf.sprintf "invalid polar angle: %s" t_str)) in
       let re_f = r *. cos t and im_f = r *. sin t in
       (match prefix.exact with
@@ -843,6 +843,7 @@ and read_bytevector state start_loc =
        | Syntax.Fixnum n when n >= 0 && n <= 255 ->
          loop (n :: acc)
        | Syntax.Fixnum _ -> error state "bytevector element out of range (0-255)"
+       | Syntax.Bignum _ -> error state "bytevector element out of range (0-255)"
        | _ -> error state "bytevector elements must be integers")
   in
   loop []

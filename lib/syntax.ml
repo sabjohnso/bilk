@@ -2,7 +2,8 @@ type t = { loc : Loc.t; datum : datum }
 and datum =
   | Bool of bool
   | Fixnum of int
-  | Rational of int * int
+  | Bignum of Z.t
+  | Rational of Z.t * Z.t
   | Flonum of float
   | Complex of t * t
   | Char of Uchar.t
@@ -20,6 +21,7 @@ let rec to_datum t =
   match t.datum with
   | Bool b -> Datum.Bool b
   | Fixnum n -> Datum.Fixnum n
+  | Bignum z -> Datum.Bignum z
   | Rational (n, d) -> Datum.Rational (n, d)
   | Flonum f -> Datum.Flonum f
   | Complex (re, im) -> Datum.Complex (to_datum re, to_datum im)
@@ -36,6 +38,7 @@ let rec from_datum loc (d : Datum.t) =
   let datum = match d with
     | Datum.Bool b -> Bool b
     | Datum.Fixnum n -> Fixnum n
+    | Datum.Bignum z -> Bignum z
     | Datum.Rational (n, d) -> Rational (n, d)
     | Datum.Flonum f -> Flonum f
     | Datum.Complex (re, im) -> Complex (from_datum loc re, from_datum loc im)
@@ -65,7 +68,9 @@ let rec equal_datum a b =
   match (a.datum, b.datum) with
   | Bool x, Bool y -> x = y
   | Fixnum x, Fixnum y -> x = y
-  | Rational (n1, d1), Rational (n2, d2) -> n1 = n2 && d1 = d2
+  | Bignum x, Bignum y -> Z.equal x y
+  | Fixnum x, Bignum y | Bignum y, Fixnum x -> Z.equal (Z.of_int x) y
+  | Rational (n1, d1), Rational (n2, d2) -> Z.equal n1 n2 && Z.equal d1 d2
   | Flonum x, Flonum y -> Float.equal x y
   | Complex (r1, i1), Complex (r2, i2) -> equal_datum r1 r2 && equal_datum i1 i2
   | Char x, Char y -> Uchar.equal x y

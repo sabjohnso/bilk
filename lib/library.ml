@@ -57,6 +57,7 @@ let parse_library_name s =
       match p.Syntax.datum with
       | Syntax.Symbol name -> name
       | Syntax.Fixnum n -> string_of_int n
+      | Syntax.Bignum z -> Z.to_string z
       | _ -> compile_error p.loc "library name: expected identifier or integer"
     ) parts
 

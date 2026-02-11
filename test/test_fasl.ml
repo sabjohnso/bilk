@@ -4,7 +4,7 @@ open Wile
 
 let test_version_constants () =
   Alcotest.(check int) "major" 1 Fasl.version_major;
-  Alcotest.(check int) "minor" 4 Fasl.version_minor
+  Alcotest.(check int) "minor" 5 Fasl.version_minor
 
 let test_fasl_error_catchable () =
   Alcotest.check_raises "fasl error"
@@ -82,6 +82,26 @@ let test_datum_fixnum () =
   Alcotest.(check datum_testable) "negative" (Datum.Fixnum (-1)) (roundtrip_datum (Datum.Fixnum (-1)));
   Alcotest.(check datum_testable) "max_int" (Datum.Fixnum max_int) (roundtrip_datum (Datum.Fixnum max_int));
   Alcotest.(check datum_testable) "min_int" (Datum.Fixnum min_int) (roundtrip_datum (Datum.Fixnum min_int))
+
+let test_datum_bignum () =
+  let big = Z.of_string "99999999999999999999999999999" in
+  Alcotest.(check datum_testable) "bignum" (Datum.Bignum big) (roundtrip_datum (Datum.Bignum big));
+  Alcotest.(check datum_testable) "neg bignum" (Datum.Bignum (Z.neg big))
+    (roundtrip_datum (Datum.Bignum (Z.neg big)));
+  (* Bignum that fits in fixnum demotes on read *)
+  let small_z = Z.of_int 42 in
+  Alcotest.(check datum_testable) "bignum demote" (Datum.Fixnum 42)
+    (roundtrip_datum (Datum.Bignum small_z))
+
+let test_datum_rational () =
+  let r = Datum.Rational (Z.of_int 1, Z.of_int 2) in
+  Alcotest.(check datum_testable) "1/2" r (roundtrip_datum r);
+  let r2 = Datum.Rational (Z.of_int (-3), Z.of_int 4) in
+  Alcotest.(check datum_testable) "-3/4" r2 (roundtrip_datum r2);
+  (* Rational with large components *)
+  let big = Z.of_string "99999999999999999999999999999" in
+  let r3 = Datum.Rational (Z.one, big) in
+  Alcotest.(check datum_testable) "big rat" r3 (roundtrip_datum r3)
 
 let test_datum_flonum () =
   Alcotest.(check datum_testable) "pi" (Datum.Flonum 3.14) (roundtrip_datum (Datum.Flonum 3.14));
@@ -792,6 +812,8 @@ let () =
     ; ("datum-atoms",
        [ Alcotest.test_case "bool" `Quick test_datum_bool
        ; Alcotest.test_case "fixnum" `Quick test_datum_fixnum
+       ; Alcotest.test_case "bignum" `Quick test_datum_bignum
+       ; Alcotest.test_case "rational" `Quick test_datum_rational
        ; Alcotest.test_case "flonum" `Quick test_datum_flonum
        ; Alcotest.test_case "char" `Quick test_datum_char
        ; Alcotest.test_case "str" `Quick test_datum_str

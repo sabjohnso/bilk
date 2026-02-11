@@ -27,30 +27,42 @@ type t = {
 
 let runtime_error msg = raise (Vm.Runtime_error msg)
 
-let as_fixnum name = function
-  | Datum.Fixnum n -> n
+(* Smart constructor: Fixnum if fits, Bignum otherwise *)
+let make_fixnum_z (z : Z.t) : Datum.t =
+  if Z.fits_int z then Datum.Fixnum (Z.to_int z) else Datum.Bignum z
+
+(* Extract exact integer as Z.t *)
+let as_exact_int name = function
+  | Datum.Fixnum n -> Z.of_int n
+  | Datum.Bignum z -> z
   | v -> runtime_error (Printf.sprintf "%s: expected integer, got %s" name (Datum.to_string v))
 
-let rec gcd a b = if b = 0 then abs a else gcd b (a mod b)
+let as_index name = function
+  | Datum.Fixnum n -> n
+  | Datum.Bignum z ->
+    if Z.fits_int z then Z.to_int z
+    else runtime_error (Printf.sprintf "%s: index too large" name)
+  | v -> runtime_error (Printf.sprintf "%s: expected integer, got %s" name (Datum.to_string v))
 
-let make_rational n d =
-  if d = 0 then runtime_error "division by zero";
-  let sign = if (n >= 0) = (d >= 0) then 1 else -1 in
-  let n = abs n and d = abs d in
-  let g = gcd n d in
-  let n = sign * (n / g) and d = d / g in
-  if d = 1 then Datum.Fixnum n
+(* make_rational with Z.t components *)
+let make_rational (n : Z.t) (d : Z.t) =
+  if Z.sign d = 0 then runtime_error "division by zero";
+  let n, d = if Z.sign d < 0 then (Z.neg n, Z.neg d) else (n, d) in
+  let g = Z.gcd (Z.abs n) d in
+  let n = Z.div n g and d = Z.div d g in
+  if Z.equal d Z.one then make_fixnum_z n
   else Datum.Rational (n, d)
 
 let as_flonum name = function
   | Datum.Flonum f -> f
   | Datum.Fixnum n -> Float.of_int n
-  | Datum.Rational (n, d) -> Float.of_int n /. Float.of_int d
+  | Datum.Bignum z -> Z.to_float z
+  | Datum.Rational (n, d) -> Z.to_float n /. Z.to_float d
   | Datum.Complex _ -> runtime_error (Printf.sprintf "%s: expected real number, got complex" name)
   | v -> runtime_error (Printf.sprintf "%s: expected number, got %s" name (Datum.to_string v))
 
 let is_numeric = function
-  | Datum.Fixnum _ | Datum.Rational _ | Datum.Flonum _ | Datum.Complex _ -> true
+  | Datum.Fixnum _ | Datum.Bignum _ | Datum.Rational _ | Datum.Flonum _ | Datum.Complex _ -> true
   | _ -> false
 
 let has_complex args =
@@ -63,23 +75,25 @@ let has_rational args =
   List.exists (function Datum.Rational _ -> true | _ -> false) args
 
 let is_exact_datum = function
-  | Datum.Fixnum _ | Datum.Rational _ -> true | _ -> false
+  | Datum.Fixnum _ | Datum.Bignum _ | Datum.Rational _ -> true | _ -> false
 
 let is_datum_zero = function
   | Datum.Fixnum 0 -> true
-  | Datum.Rational (0, _) -> true
+  | Datum.Bignum z -> Z.sign z = 0
+  | Datum.Rational (n, _) -> Z.sign n = 0
   | Datum.Flonum f -> f = 0.0
   | _ -> false
 
 let to_inexact_datum = function
   | Datum.Fixnum n -> Datum.Flonum (float_of_int n)
-  | Datum.Rational (n, d) -> Datum.Flonum (float_of_int n /. float_of_int d)
+  | Datum.Bignum z -> Datum.Flonum (Z.to_float z)
+  | Datum.Rational (n, d) -> Datum.Flonum (Z.to_float n /. Z.to_float d)
   | v -> v
 
 let as_complex name v =
   match v with
   | Datum.Complex (re, im) -> (re, im)
-  | Datum.Fixnum _ | Datum.Rational _ | Datum.Flonum _ -> (v, Datum.Fixnum 0)
+  | Datum.Fixnum _ | Datum.Bignum _ | Datum.Rational _ | Datum.Flonum _ -> (v, Datum.Fixnum 0)
   | _ -> runtime_error (Printf.sprintf "%s: expected number, got %s" name (Datum.to_string v))
 
 let make_complex re im =
@@ -91,25 +105,35 @@ let make_complex re im =
   else
     Datum.Complex (to_inexact_datum re, to_inexact_datum im)
 
+(* Extract exact number as Z.t rational pair *)
 let to_rational_pair name = function
-  | Datum.Fixnum n -> (n, 1)
+  | Datum.Fixnum n -> (Z.of_int n, Z.one)
+  | Datum.Bignum z -> (z, Z.one)
   | Datum.Rational (n, d) -> (n, d)
   | v -> runtime_error (Printf.sprintf "%s: expected exact number, got %s" name (Datum.to_string v))
 
 let make_prim name fn : Datum.t =
   Datum.Primitive { prim_name = name; prim_fn = fn; prim_intrinsic = None }
 
-let chain_compare name cmp args =
+let exact_compare a b =
+  let (an, ad) = to_rational_pair "" a in
+  let (bn, bd) = to_rational_pair "" b in
+  Z.compare (Z.mul an bd) (Z.mul bn ad)
+
+let chain_compare name cmp_f cmp_z args =
   match args with
   | [] | [_] -> runtime_error (Printf.sprintf "%s: expected at least 2 arguments" name)
   | _ ->
     if has_complex args then
       runtime_error (Printf.sprintf "%s: not defined for complex numbers" name);
+    let all_exact = List.for_all is_exact_datum args in
     let rec go = function
       | [] | [_] -> Datum.Bool true
       | a :: ((b :: _) as rest) ->
         if is_numeric a && is_numeric b then
-          if cmp (as_flonum name a) (as_flonum name b) then go rest
+          let ok = if all_exact then cmp_z (exact_compare a b) 0
+                   else cmp_f (as_flonum name a) (as_flonum name b) in
+          if ok then go rest
           else Datum.Bool false
         else runtime_error (Printf.sprintf "%s: expected numeric arguments" name)
     in
@@ -130,19 +154,20 @@ let rec prim_add args =
     List.fold_left (fun acc x ->
       let (an, ad) = to_rational_pair "+" acc in
       let (bn, bd) = to_rational_pair "+" x in
-      make_rational (an * bd + bn * ad) (ad * bd)
+      make_rational (Z.add (Z.mul an bd) (Z.mul bn ad)) (Z.mul ad bd)
     ) (Datum.Fixnum 0) args
   else
-    Datum.Fixnum (List.fold_left (fun acc x -> acc + as_fixnum "+" x) 0 args)
+    make_fixnum_z (List.fold_left (fun acc x -> Z.add acc (as_exact_int "+" x)) Z.zero args)
 
 and prim_sub args =
   match args with
   | [] -> runtime_error "-: expected at least 1 argument"
   | [Datum.Complex (re, im)] -> make_complex (prim_sub [re]) (prim_sub [im])
-  | [Datum.Rational (n, d)] -> Datum.Rational (-n, d)
+  | [Datum.Rational (n, d)] -> Datum.Rational (Z.neg n, d)
+  | [Datum.Bignum z] -> make_fixnum_z (Z.neg z)
   | [x] ->
     if has_flonum [x] then Datum.Flonum (-. (as_flonum "-" x))
-    else Datum.Fixnum (- (as_fixnum "-" x))
+    else Datum.Fixnum (- (match x with Datum.Fixnum n -> n | _ -> runtime_error "-: expected number"))
   | first :: rest ->
     if has_complex args then
       let (fr, fi) = as_complex "-" first in
@@ -157,10 +182,10 @@ and prim_sub args =
       List.fold_left (fun acc x ->
         let (an, ad) = to_rational_pair "-" acc in
         let (bn, bd) = to_rational_pair "-" x in
-        make_rational (an * bd - bn * ad) (ad * bd)
+        make_rational (Z.sub (Z.mul an bd) (Z.mul bn ad)) (Z.mul ad bd)
       ) first rest
     else
-      Datum.Fixnum (List.fold_left (fun acc x -> acc - as_fixnum "-" x) (as_fixnum "-" first) rest)
+      make_fixnum_z (List.fold_left (fun acc x -> Z.sub acc (as_exact_int "-" x)) (as_exact_int "-" first) rest)
 
 and prim_mul args =
   match args with
@@ -179,21 +204,27 @@ and prim_mul args =
     List.fold_left (fun acc x ->
       let (an, ad) = to_rational_pair "*" acc in
       let (bn, bd) = to_rational_pair "*" x in
-      make_rational (an * bn) (ad * bd)
+      make_rational (Z.mul an bn) (Z.mul ad bd)
     ) (Datum.Fixnum 1) args
   else
-    Datum.Fixnum (List.fold_left (fun acc x -> acc * as_fixnum "*" x) 1 args)
+    make_fixnum_z (List.fold_left (fun acc x -> Z.mul acc (as_exact_int "*" x)) Z.one args)
 
-let prim_lt args = chain_compare "<" (<) args
+let prim_lt args = chain_compare "<" (<) (<) args
 
 let real_equal a b = match a, b with
   | Datum.Fixnum x, Datum.Fixnum y -> x = y
+  | Datum.Bignum x, Datum.Bignum y -> Z.equal x y
+  | Datum.Fixnum n, Datum.Bignum z | Datum.Bignum z, Datum.Fixnum n -> Z.equal z (Z.of_int n)
   | Datum.Flonum x, Datum.Flonum y -> Float.equal x y
-  | Datum.Rational (n1, d1), Datum.Rational (n2, d2) -> n1 * d2 = n2 * d1
+  | Datum.Rational (n1, d1), Datum.Rational (n2, d2) -> Z.equal (Z.mul n1 d2) (Z.mul n2 d1)
   | Datum.Fixnum n, Datum.Flonum f | Datum.Flonum f, Datum.Fixnum n -> Float.equal (float_of_int n) f
-  | Datum.Fixnum n, Datum.Rational (nr, dr) | Datum.Rational (nr, dr), Datum.Fixnum n -> n * dr = nr
+  | Datum.Bignum z, Datum.Flonum f | Datum.Flonum f, Datum.Bignum z -> Float.equal (Z.to_float z) f
+  | Datum.Fixnum n, Datum.Rational (nr, dr) | Datum.Rational (nr, dr), Datum.Fixnum n ->
+    Z.equal (Z.mul (Z.of_int n) dr) nr
+  | Datum.Bignum z, Datum.Rational (nr, dr) | Datum.Rational (nr, dr), Datum.Bignum z ->
+    Z.equal (Z.mul z dr) nr
   | Datum.Rational (n, d), Datum.Flonum f | Datum.Flonum f, Datum.Rational (n, d) ->
-    Float.equal (float_of_int n /. float_of_int d) f
+    Float.equal (Z.to_float n /. Z.to_float d) f
   | _ -> false
 
 let prim_num_eq args =
@@ -212,7 +243,7 @@ let prim_num_eq args =
     in
     go args
 
-let prim_gt args = chain_compare ">" (>) args
+let prim_gt args = chain_compare ">" (>) (>) args
 
 (* --- List primitives --- *)
 
@@ -259,7 +290,8 @@ let rec prim_eqv args =
     let result = match (a, b) with
       | Datum.Bool x, Datum.Bool y -> x = y
       | Datum.Fixnum x, Datum.Fixnum y -> x = y
-      | Datum.Rational (n1, d1), Datum.Rational (n2, d2) -> n1 = n2 && d1 = d2
+      | Datum.Bignum x, Datum.Bignum y -> Z.equal x y
+      | Datum.Rational (n1, d1), Datum.Rational (n2, d2) -> Z.equal n1 n2 && Z.equal d1 d2
       | Datum.Flonum x, Datum.Flonum y -> Float.equal x y
       | Datum.Complex (r1, i1), Datum.Complex (r2, i2) ->
         (match prim_eqv [r1; r2] with Datum.Bool true ->
@@ -278,9 +310,9 @@ let prim_eq args = prim_eqv args
 let prim_list args =
   List.fold_right (fun x acc -> Datum.Pair { car = x; cdr = acc }) args Datum.Nil
 
-let prim_le args = chain_compare "<=" (<=) args
+let prim_le args = chain_compare "<=" (<=) (<=) args
 
-let prim_ge args = chain_compare ">=" (>=) args
+let prim_ge args = chain_compare ">=" (>=) (>=) args
 
 (* --- I/O primitives --- *)
 
@@ -333,9 +365,12 @@ let rec prim_div args =
        if is_datum_zero denom then runtime_error "/: division by zero";
        make_complex (prim_div [a; denom]) (prim_div [prim_sub [b]; denom])
      | Datum.Fixnum 0 -> runtime_error "/: division by zero"
-     | Datum.Fixnum n -> make_rational 1 n
+     | Datum.Fixnum n -> make_rational Z.one (Z.of_int n)
+     | Datum.Bignum z ->
+       if Z.sign z = 0 then runtime_error "/: division by zero";
+       make_rational Z.one z
      | Datum.Rational (n, d) ->
-       if n = 0 then runtime_error "/: division by zero";
+       if Z.sign n = 0 then runtime_error "/: division by zero";
        make_rational d n
      | Datum.Flonum f ->
        if f = 0.0 then runtime_error "/: division by zero";
@@ -363,14 +398,15 @@ let rec prim_div args =
       List.fold_left (fun acc x ->
         let (an, ad) = to_rational_pair "/" acc in
         let (bn, bd) = to_rational_pair "/" x in
-        if bn = 0 then runtime_error "/: division by zero";
-        make_rational (an * bd) (ad * bn)
+        if Z.sign bn = 0 then runtime_error "/: division by zero";
+        make_rational (Z.mul an bd) (Z.mul ad bn)
       ) first rest
 
 let prim_abs args =
   match args with
   | [Datum.Fixnum n] -> Datum.Fixnum (abs n)
-  | [Datum.Rational (n, d)] -> Datum.Rational (abs n, d)
+  | [Datum.Bignum z] -> make_fixnum_z (Z.abs z)
+  | [Datum.Rational (n, d)] -> Datum.Rational (Z.abs n, d)
   | [Datum.Flonum f] -> Datum.Flonum (Float.abs f)
   | [Datum.Complex _] -> runtime_error "abs: not defined for complex numbers"
   | [_] -> runtime_error "abs: expected number"
@@ -386,7 +422,7 @@ let prim_min args =
         (as_flonum "min" first) rest)
     else
       List.fold_left (fun acc x ->
-        if as_flonum "min" x < as_flonum "min" acc then x else acc
+        if exact_compare x acc < 0 then x else acc
       ) first rest
 
 let prim_max args =
@@ -399,46 +435,45 @@ let prim_max args =
         (as_flonum "max" first) rest)
     else
       List.fold_left (fun acc x ->
-        if as_flonum "max" x > as_flonum "max" acc then x else acc
+        if exact_compare x acc > 0 then x else acc
       ) first rest
 
 let prim_quotient args =
   match args with
   | [a; b] ->
-    let n = as_fixnum "quotient" a in
-    let d = as_fixnum "quotient" b in
-    if d = 0 then runtime_error "quotient: division by zero";
-    Datum.Fixnum (Int.div n d)
+    let n = as_exact_int "quotient" a in
+    let d = as_exact_int "quotient" b in
+    if Z.sign d = 0 then runtime_error "quotient: division by zero";
+    make_fixnum_z (Z.div n d)
   | _ -> runtime_error (Printf.sprintf "quotient: expected 2 arguments, got %d" (List.length args))
 
 let prim_remainder args =
   match args with
   | [a; b] ->
-    let n = as_fixnum "remainder" a in
-    let d = as_fixnum "remainder" b in
-    if d = 0 then runtime_error "remainder: division by zero";
-    Datum.Fixnum (Int.rem n d)
+    let n = as_exact_int "remainder" a in
+    let d = as_exact_int "remainder" b in
+    if Z.sign d = 0 then runtime_error "remainder: division by zero";
+    make_fixnum_z (Z.rem n d)
   | _ -> runtime_error (Printf.sprintf "remainder: expected 2 arguments, got %d" (List.length args))
 
 let prim_modulo args =
   match args with
   | [a; b] ->
-    let n = as_fixnum "modulo" a in
-    let d = as_fixnum "modulo" b in
-    if d = 0 then runtime_error "modulo: division by zero";
-    let r = Int.rem n d in
-    if r = 0 then Datum.Fixnum 0
-    else if (r > 0) = (d > 0) then Datum.Fixnum r
-    else Datum.Fixnum (r + d)
+    let n = as_exact_int "modulo" a in
+    let d = as_exact_int "modulo" b in
+    if Z.sign d = 0 then runtime_error "modulo: division by zero";
+    let r = Z.rem n d in
+    if Z.sign r = 0 then make_fixnum_z Z.zero
+    else if (Z.sign r > 0) = (Z.sign d > 0) then make_fixnum_z r
+    else make_fixnum_z (Z.add r d)
   | _ -> runtime_error (Printf.sprintf "modulo: expected 2 arguments, got %d" (List.length args))
 
 let prim_floor args =
   match args with
   | [Datum.Fixnum n] -> Datum.Fixnum n
+  | [Datum.Bignum z] -> Datum.Bignum z
   | [Datum.Rational (n, d)] ->
-    (* Floor division: round toward negative infinity *)
-    if n >= 0 then Datum.Fixnum (n / d)
-    else Datum.Fixnum (- ((-n + d - 1) / d))
+    make_fixnum_z (Z.fdiv n d)
   | [Datum.Flonum f] -> Datum.Flonum (floor f)
   | [Datum.Complex _] -> runtime_error "floor: not defined for complex numbers"
   | [_] -> runtime_error "floor: expected number"
@@ -447,10 +482,9 @@ let prim_floor args =
 let prim_ceiling args =
   match args with
   | [Datum.Fixnum n] -> Datum.Fixnum n
+  | [Datum.Bignum z] -> Datum.Bignum z
   | [Datum.Rational (n, d)] ->
-    (* Ceiling division: round toward positive infinity *)
-    if n >= 0 then Datum.Fixnum ((n + d - 1) / d)
-    else Datum.Fixnum (- ((-n) / d))
+    make_fixnum_z (Z.cdiv n d)
   | [Datum.Flonum f] -> Datum.Flonum (ceil f)
   | [Datum.Complex _] -> runtime_error "ceiling: not defined for complex numbers"
   | [_] -> runtime_error "ceiling: expected number"
@@ -459,9 +493,10 @@ let prim_ceiling args =
 let prim_truncate args =
   match args with
   | [Datum.Fixnum n] -> Datum.Fixnum n
+  | [Datum.Bignum z] -> Datum.Bignum z
   | [Datum.Rational (n, d)] ->
     (* Truncate toward zero *)
-    Datum.Fixnum (n / d)
+    make_fixnum_z (Z.div n d)
   | [Datum.Flonum f] -> Datum.Flonum (Float.of_int (int_of_float f))
   | [Datum.Complex _] -> runtime_error "truncate: not defined for complex numbers"
   | [_] -> runtime_error "truncate: expected number"
@@ -470,22 +505,23 @@ let prim_truncate args =
 let prim_round args =
   match args with
   | [Datum.Fixnum n] -> Datum.Fixnum n
+  | [Datum.Bignum z] -> Datum.Bignum z
   | [Datum.Rational (n, d)] ->
     (* Banker's rounding for rationals *)
-    let q = n / d in
-    let r = n - q * d in  (* remainder with sign of n *)
-    let abs_r2 = 2 * abs r in
-    let abs_d = abs d in
+    let q = Z.div n d in
+    let r = Z.sub n (Z.mul q d) in  (* remainder with sign of n *)
+    let abs_r2 = Z.mul (Z.abs r) (Z.of_int 2) in
+    let abs_d = Z.abs d in
     let rounded =
-      if abs_r2 < abs_d then q
-      else if abs_r2 > abs_d then
-        if n >= 0 then q + 1 else q - 1
+      if Z.lt abs_r2 abs_d then q
+      else if Z.gt abs_r2 abs_d then
+        if Z.sign n >= 0 then Z.succ q else Z.pred q
       else
         (* Exactly half: round to even *)
-        if q mod 2 = 0 then q
-        else if n >= 0 then q + 1 else q - 1
+        if Z.is_even q then q
+        else if Z.sign n >= 0 then Z.succ q else Z.pred q
     in
-    Datum.Fixnum rounded
+    make_fixnum_z rounded
   | [Datum.Flonum f] ->
     (* R7RS: round to even (banker's rounding).
        f -. floor f is always in [0, 1), so only frac = 0.5 needs special
@@ -507,49 +543,68 @@ let prim_round args =
 let prim_floor_quotient args =
   match args with
   | [a; b] ->
-    let fa = as_flonum "floor-quotient" a in
-    let fb = as_flonum "floor-quotient" b in
-    if fb = 0.0 then runtime_error "floor-quotient: division by zero";
-    let q = Float.of_int (int_of_float (floor (fa /. fb))) in
-    if not (has_flonum [a; b]) then Datum.Fixnum (Float.to_int q)
-    else Datum.Flonum q
+    if has_flonum [a; b] then begin
+      let fa = as_flonum "floor-quotient" a in
+      let fb = as_flonum "floor-quotient" b in
+      if fb = 0.0 then runtime_error "floor-quotient: division by zero";
+      Datum.Flonum (Float.of_int (int_of_float (floor (fa /. fb))))
+    end else begin
+      let na = as_exact_int "floor-quotient" a in
+      let nb = as_exact_int "floor-quotient" b in
+      if Z.sign nb = 0 then runtime_error "floor-quotient: division by zero";
+      make_fixnum_z (Z.fdiv na nb)
+    end
   | _ -> runtime_error (Printf.sprintf "floor-quotient: expected 2 arguments, got %d" (List.length args))
 
 let prim_floor_remainder args =
   match args with
   | [a; b] ->
-    let fa = as_flonum "floor-remainder" a in
-    let fb = as_flonum "floor-remainder" b in
-    if fb = 0.0 then runtime_error "floor-remainder: division by zero";
-    let r = fa -. fb *. floor (fa /. fb) in
-    if not (has_flonum [a; b]) then Datum.Fixnum (Float.to_int r)
-    else Datum.Flonum r
+    if has_flonum [a; b] then begin
+      let fa = as_flonum "floor-remainder" a in
+      let fb = as_flonum "floor-remainder" b in
+      if fb = 0.0 then runtime_error "floor-remainder: division by zero";
+      Datum.Flonum (fa -. fb *. floor (fa /. fb))
+    end else begin
+      let na = as_exact_int "floor-remainder" a in
+      let nb = as_exact_int "floor-remainder" b in
+      if Z.sign nb = 0 then runtime_error "floor-remainder: division by zero";
+      let r = Z.sub na (Z.mul (Z.fdiv na nb) nb) in
+      make_fixnum_z r
+    end
   | _ -> runtime_error (Printf.sprintf "floor-remainder: expected 2 arguments, got %d" (List.length args))
 
 let prim_truncate_quotient args =
   match args with
   | [a; b] ->
-    let fa = as_flonum "truncate-quotient" a in
-    let fb = as_flonum "truncate-quotient" b in
-    if fb = 0.0 then runtime_error "truncate-quotient: division by zero";
-    let q = Float.of_int (int_of_float (fa /. fb)) in
-    if not (has_flonum [a; b]) then Datum.Fixnum (Float.to_int q)
-    else Datum.Flonum q
+    if has_flonum [a; b] then begin
+      let fa = as_flonum "truncate-quotient" a in
+      let fb = as_flonum "truncate-quotient" b in
+      if fb = 0.0 then runtime_error "truncate-quotient: division by zero";
+      Datum.Flonum (Float.of_int (int_of_float (fa /. fb)))
+    end else begin
+      let na = as_exact_int "truncate-quotient" a in
+      let nb = as_exact_int "truncate-quotient" b in
+      if Z.sign nb = 0 then runtime_error "truncate-quotient: division by zero";
+      make_fixnum_z (Z.div na nb)
+    end
   | _ -> runtime_error (Printf.sprintf "truncate-quotient: expected 2 arguments, got %d" (List.length args))
 
 let prim_truncate_remainder args =
   match args with
   | [a; b] ->
-    let fa = as_flonum "truncate-remainder" a in
-    let fb = as_flonum "truncate-remainder" b in
-    if fb = 0.0 then runtime_error "truncate-remainder: division by zero";
-    let q = Float.of_int (int_of_float (fa /. fb)) in
-    let r = fa -. fb *. q in
-    if not (has_flonum [a; b]) then Datum.Fixnum (Float.to_int r)
-    else Datum.Flonum r
+    if has_flonum [a; b] then begin
+      let fa = as_flonum "truncate-remainder" a in
+      let fb = as_flonum "truncate-remainder" b in
+      if fb = 0.0 then runtime_error "truncate-remainder: division by zero";
+      let q = Float.of_int (int_of_float (fa /. fb)) in
+      Datum.Flonum (fa -. fb *. q)
+    end else begin
+      let na = as_exact_int "truncate-remainder" a in
+      let nb = as_exact_int "truncate-remainder" b in
+      if Z.sign nb = 0 then runtime_error "truncate-remainder: division by zero";
+      make_fixnum_z (Z.rem na nb)
+    end
   | _ -> runtime_error (Printf.sprintf "truncate-remainder: expected 2 arguments, got %d" (List.length args))
-
-let lcm_int a b = if a = 0 || b = 0 then 0 else abs (a * b / gcd a b)
 
 let prim_gcd args =
   match args with
@@ -560,11 +615,10 @@ let prim_gcd args =
       List.fold_left (fun acc x ->
         let (an, ad) = to_rational_pair "gcd" acc in
         let (bn, bd) = to_rational_pair "gcd" x in
-        make_rational (gcd an bn) (lcm_int ad bd)
+        make_rational (Z.gcd an bn) (Z.lcm ad bd)
       ) (Datum.Fixnum 0) args
     else
-      let ns = List.map (as_fixnum "gcd") args in
-      Datum.Fixnum (List.fold_left gcd 0 ns)
+      make_fixnum_z (List.fold_left (fun acc x -> Z.gcd acc (as_exact_int "gcd" x)) Z.zero args)
 
 let prim_lcm args =
   match args with
@@ -575,16 +629,16 @@ let prim_lcm args =
       List.fold_left (fun acc x ->
         let (an, ad) = to_rational_pair "lcm" acc in
         let (bn, bd) = to_rational_pair "lcm" x in
-        make_rational (lcm_int an bn) (gcd ad bd)
+        make_rational (Z.lcm an bn) (Z.gcd ad bd)
       ) (Datum.Fixnum 1) args
     else
-      let ns = List.map (as_fixnum "lcm") args in
-      Datum.Fixnum (List.fold_left lcm_int 1 ns)
+      make_fixnum_z (List.fold_left (fun acc x -> Z.lcm acc (as_exact_int "lcm" x)) Z.one args)
 
 let prim_exact_to_inexact args =
   match args with
   | [Datum.Fixnum n] -> Datum.Flonum (float_of_int n)
-  | [Datum.Rational (n, d)] -> Datum.Flonum (float_of_int n /. float_of_int d)
+  | [Datum.Bignum z] -> Datum.Flonum (Z.to_float z)
+  | [Datum.Rational (n, d)] -> Datum.Flonum (Z.to_float n /. Z.to_float d)
   | [Datum.Flonum f] -> Datum.Flonum f
   | [Datum.Complex (re, im)] -> make_complex (to_inexact_datum re) (to_inexact_datum im)
   | [_] -> runtime_error "inexact: expected number"
@@ -593,26 +647,26 @@ let prim_exact_to_inexact args =
 let rec prim_inexact_to_exact args =
   match args with
   | [Datum.Fixnum n] -> Datum.Fixnum n
+  | [Datum.Bignum _ as v] -> v
   | [Datum.Rational _ as v] -> v
   | [Datum.Complex (re, im)] ->
     let exact_re = prim_inexact_to_exact [re] in
     let exact_im = prim_inexact_to_exact [im] in
     make_complex exact_re exact_im
   | [Datum.Flonum f] ->
-    if Float.is_integer f then Datum.Fixnum (Float.to_int f)
+    if Float.is_integer f then
+      make_fixnum_z (Z.of_float f)
     else
       (* IEEE 754 decomposition: f = frac * 2^exp *)
       let (frac, exp) = Float.frexp f in
       let mantissa_bits = 53 in
-      let n = Float.to_int (Float.ldexp frac mantissa_bits) in
+      let n = Z.of_float (Float.ldexp frac mantissa_bits) in
       let d_exp = mantissa_bits - exp in
-      if d_exp >= 0 && d_exp < Sys.int_size - 1 then
-        let d = 1 lsl d_exp in
+      if d_exp >= 0 then
+        let d = Z.shift_left Z.one d_exp in
         make_rational n d
-      else if d_exp < 0 then
-        Datum.Fixnum (n * (1 lsl (- d_exp)))
       else
-        runtime_error (Printf.sprintf "exact: cannot convert %s to exact" (string_of_float f))
+        make_fixnum_z (Z.shift_left n (- d_exp))
   | [_] -> runtime_error "exact: expected number"
   | _ -> runtime_error (Printf.sprintf "exact: expected 1 argument, got %d" (List.length args))
 
@@ -642,7 +696,7 @@ let prim_expt args =
     if has_complex [a; b] then
       (* For exact complex base with non-negative integer exponent: use component-wise mul *)
       (match a, b with
-       | Datum.Complex _, Datum.Fixnum n when n >= 0 ->
+       | Datum.Complex _, (Datum.Fixnum n) when n >= 0 ->
          let (re, im) = as_complex "expt" a in
          let rec pow_complex (ar, ai) e =
            if e = 0 then (Datum.Fixnum 1, Datum.Fixnum 0)
@@ -676,30 +730,26 @@ let prim_expt args =
       else
         Datum.Flonum (Float.pow af bf)
     else
+      let try_exact_int_exp base_z exp_z =
+        let exp_int = Z.to_int exp_z in  (* Z.pow takes int exponent *)
+        if Z.sign exp_z >= 0 then
+          make_fixnum_z (Z.pow base_z exp_int)
+        else
+          make_rational Z.one (Z.pow base_z (- exp_int))
+      in
       (match a, b with
-       | (Datum.Rational (n, d)), Datum.Fixnum exp ->
-         if exp >= 0 then
-           let rec pow b e acc = if e = 0 then acc
-             else if e mod 2 = 0 then pow (b * b) (e / 2) acc
-             else pow b (e - 1) (acc * b) in
-           make_rational (pow n exp 1) (pow d exp 1)
+       | (Datum.Rational (n, d)), (Datum.Fixnum _ | Datum.Bignum _ as b) ->
+         let exp_z = as_exact_int "expt" b in
+         let exp_int = Z.to_int exp_z in
+         if exp_int >= 0 then
+           make_rational (Z.pow n exp_int) (Z.pow d exp_int)
          else
-           let exp = -exp in
-           let rec pow b e acc = if e = 0 then acc
-             else if e mod 2 = 0 then pow (b * b) (e / 2) acc
-             else pow b (e - 1) (acc * b) in
-           make_rational (pow d exp 1) (pow n exp 1)
-       | Datum.Fixnum base, Datum.Fixnum exp ->
-         if exp < 0 then
-           make_rational 1 (let rec pow b e acc = if e = 0 then acc
-             else if e mod 2 = 0 then pow (b * b) (e / 2) acc
-             else pow b (e - 1) (acc * b) in pow base (-exp) 1)
-         else
-           let rec pow b e acc =
-             if e = 0 then acc
-             else if e mod 2 = 0 then pow (b * b) (e / 2) acc
-             else pow b (e - 1) (acc * b) in
-           Datum.Fixnum (pow base exp 1)
+           let exp_pos = - exp_int in
+           make_rational (Z.pow d exp_pos) (Z.pow n exp_pos)
+       | (Datum.Fixnum _ | Datum.Bignum _), (Datum.Fixnum _ | Datum.Bignum _) ->
+         let base_z = as_exact_int "expt" a in
+         let exp_z = as_exact_int "expt" b in
+         try_exact_int_exp base_z exp_z
        | _ ->
          Datum.Flonum (Float.pow (as_flonum "expt" a) (as_flonum "expt" b)))
   | _ -> runtime_error (Printf.sprintf "expt: expected 2 arguments, got %d" (List.length args))
@@ -719,19 +769,26 @@ let prim_sqrt args =
       make_complex (Datum.Fixnum 0) (Datum.Fixnum (Float.to_int s))
     else
       make_complex_from_floats 0.0 s
+  | [Datum.Bignum z] when Z.sign z < 0 ->
+    let s = Float.sqrt (Z.to_float (Z.neg z)) in
+    make_complex_from_floats 0.0 s
+  | [Datum.Bignum z] ->
+    let s = Z.sqrt z in
+    if Z.equal (Z.mul s s) z then make_fixnum_z s
+    else Datum.Flonum (Float.sqrt (Z.to_float z))
   | [Datum.Rational (n, d)] ->
-    if n < 0 then
+    if Z.sign n < 0 then
       (* Negative rational → complex *)
-      let f = float_of_int (-n) /. float_of_int d in
+      let f = Z.to_float (Z.neg n) /. Z.to_float d in
       let s = sqrt f in
       make_complex_from_floats 0.0 s
     else
-      let sn = Float.sqrt (float_of_int n) in
-      let sd = Float.sqrt (float_of_int d) in
-      if Float.is_integer sn && Float.is_integer sd then
-        make_rational (Float.to_int sn) (Float.to_int sd)
+      let sn = Z.sqrt n in
+      let sd = Z.sqrt d in
+      if Z.equal (Z.mul sn sn) n && Z.equal (Z.mul sd sd) d then
+        make_rational sn sd
       else
-        Datum.Flonum (Float.sqrt (float_of_int n /. float_of_int d))
+        Datum.Flonum (Float.sqrt (Z.to_float n /. Z.to_float d))
   | [v] ->
     let f = as_flonum "sqrt" v in
     if f < 0.0 then
@@ -746,11 +803,17 @@ let prim_sqrt args =
 
 let prim_exact_integer_sqrt args =
   match args with
-  | [Datum.Fixnum n] when n >= 0 ->
-    let s = Float.to_int (Float.sqrt (float_of_int n)) in
-    let s = if (s + 1) * (s + 1) <= n then s + 1 else s in
-    Datum.Values [Datum.Fixnum s; Datum.Fixnum (n - s * s)]
+  | [(Datum.Fixnum n)] when n >= 0 ->
+    let z = Z.of_int n in
+    let s = Z.sqrt z in
+    let r = Z.sub z (Z.mul s s) in
+    Datum.Values [make_fixnum_z s; make_fixnum_z r]
   | [Datum.Fixnum _] -> runtime_error "exact-integer-sqrt: expected non-negative integer"
+  | [Datum.Bignum z] when Z.sign z >= 0 ->
+    let s = Z.sqrt z in
+    let r = Z.sub z (Z.mul s s) in
+    Datum.Values [make_fixnum_z s; make_fixnum_z r]
+  | [Datum.Bignum _] -> runtime_error "exact-integer-sqrt: expected non-negative integer"
   | [_] -> runtime_error "exact-integer-sqrt: expected exact non-negative integer"
   | _ -> runtime_error (Printf.sprintf "exact-integer-sqrt: expected 1 argument, got %d" (List.length args))
 
@@ -883,6 +946,7 @@ let prim_atan args =
 let prim_finite args =
   match args with
   | [Datum.Fixnum _] -> Datum.Bool true
+  | [Datum.Bignum _] -> Datum.Bool true
   | [Datum.Rational _] -> Datum.Bool true
   | [Datum.Flonum f] -> Datum.Bool (Float.is_finite f)
   | [Datum.Complex (re, im)] ->
@@ -894,6 +958,7 @@ let prim_finite args =
 let prim_infinite args =
   match args with
   | [Datum.Fixnum _] -> Datum.Bool false
+  | [Datum.Bignum _] -> Datum.Bool false
   | [Datum.Rational _] -> Datum.Bool false
   | [Datum.Flonum f] -> Datum.Bool (Float.is_infinite f)
   | [Datum.Complex (re, im)] ->
@@ -905,6 +970,7 @@ let prim_infinite args =
 let prim_nan args =
   match args with
   | [Datum.Fixnum _] -> Datum.Bool false
+  | [Datum.Bignum _] -> Datum.Bool false
   | [Datum.Rational _] -> Datum.Bool false
   | [Datum.Flonum f] -> Datum.Bool (Float.is_nan f)
   | [Datum.Complex (re, im)] ->
@@ -919,6 +985,7 @@ let prim_real_part args =
   match args with
   | [Datum.Complex (re, _)] -> re
   | [Datum.Fixnum _ as v] -> v
+  | [Datum.Bignum _ as v] -> v
   | [Datum.Rational _ as v] -> v
   | [Datum.Flonum _ as v] -> v
   | [_] -> runtime_error "real-part: expected number"
@@ -928,6 +995,7 @@ let prim_imag_part args =
   match args with
   | [Datum.Complex (_, im)] -> im
   | [Datum.Fixnum _] -> Datum.Fixnum 0
+  | [Datum.Bignum _] -> Datum.Fixnum 0
   | [Datum.Rational _] -> Datum.Fixnum 0
   | [Datum.Flonum _] -> Datum.Flonum 0.0
   | [_] -> runtime_error "imag-part: expected number"
@@ -939,7 +1007,8 @@ let prim_magnitude args =
     let r = as_flonum "magnitude" re and i = as_flonum "magnitude" im in
     Datum.Flonum (sqrt (r *. r +. i *. i))
   | [Datum.Fixnum n] -> Datum.Fixnum (abs n)
-  | [Datum.Rational (n, d)] -> Datum.Rational (abs n, d)
+  | [Datum.Bignum z] -> make_fixnum_z (Z.abs z)
+  | [Datum.Rational (n, d)] -> Datum.Rational (Z.abs n, d)
   | [Datum.Flonum f] -> Datum.Flonum (Float.abs f)
   | [_] -> runtime_error "magnitude: expected number"
   | _ -> runtime_error (Printf.sprintf "magnitude: expected 1 argument, got %d" (List.length args))
@@ -950,7 +1019,8 @@ let prim_angle args =
     let r = as_flonum "angle" re and i = as_flonum "angle" im in
     Datum.Flonum (atan2 i r)
   | [Datum.Fixnum n] -> Datum.Flonum (if n >= 0 then 0.0 else Float.pi)
-  | [Datum.Rational (n, _)] -> Datum.Flonum (if n >= 0 then 0.0 else Float.pi)
+  | [Datum.Bignum z] -> Datum.Flonum (if Z.sign z >= 0 then 0.0 else Float.pi)
+  | [Datum.Rational (n, _)] -> Datum.Flonum (if Z.sign n >= 0 then 0.0 else Float.pi)
   | [Datum.Flonum f] -> Datum.Flonum (if f >= 0.0 then 0.0 else Float.pi)
   | [_] -> runtime_error "angle: expected number"
   | _ -> runtime_error (Printf.sprintf "angle: expected 1 argument, got %d" (List.length args))
@@ -959,8 +1029,8 @@ let prim_make_rectangular args =
   match args with
   | [real; imag] ->
     (match real, imag with
-     | (Datum.Fixnum _ | Datum.Rational _ | Datum.Flonum _),
-       (Datum.Fixnum _ | Datum.Rational _ | Datum.Flonum _) ->
+     | (Datum.Fixnum _ | Datum.Bignum _ | Datum.Rational _ | Datum.Flonum _),
+       (Datum.Fixnum _ | Datum.Bignum _ | Datum.Rational _ | Datum.Flonum _) ->
        make_complex real imag
      | _ -> runtime_error "make-rectangular: expected real numbers")
   | _ -> runtime_error (Printf.sprintf "make-rectangular: expected 2 arguments, got %d" (List.length args))
@@ -978,7 +1048,8 @@ let prim_number_to_string args =
   | [v] ->
     let s = match v with
       | Datum.Fixnum n -> string_of_int n
-      | Datum.Rational (n, d) -> Printf.sprintf "%d/%d" n d
+      | Datum.Bignum z -> Z.to_string z
+      | Datum.Rational (n, d) -> Printf.sprintf "%s/%s" (Z.to_string n) (Z.to_string d)
       | Datum.Flonum f ->
         if Float.is_nan f then "+nan.0"
         else if Float.is_infinite f then (if f > 0.0 then "+inf.0" else "-inf.0")
@@ -987,41 +1058,36 @@ let prim_number_to_string args =
       | _ -> runtime_error "number->string: expected number"
     in
     Datum.Str (Bytes.of_string s)
-  | [v; Datum.Fixnum radix] ->
-    let n = as_fixnum "number->string" v in
+  | [v; radix_v] ->
+    let radix = as_index "number->string" radix_v in
+    let z = as_exact_int "number->string" v in
     let s = match radix with
-      | 2 ->
-        if n = 0 then "0"
-        else
-          let buf = Buffer.create 32 in
-          let neg = n < 0 in
-          let n = abs n in
-          let rec go n = if n > 0 then (go (n / 2); Buffer.add_char buf (if n mod 2 = 0 then '0' else '1')) in
-          go n;
-          if neg then "-" ^ Buffer.contents buf else Buffer.contents buf
-      | 8 -> if n >= 0 then Printf.sprintf "%o" n else "-" ^ Printf.sprintf "%o" (abs n)
-      | 10 -> string_of_int n
-      | 16 -> if n >= 0 then Printf.sprintf "%x" n else "-" ^ Printf.sprintf "%x" (abs n)
+      | 2 -> Z.format "%b" z
+      | 8 -> Z.format "%o" z
+      | 10 -> Z.to_string z
+      | 16 -> Z.format "%x" z
       | _ -> runtime_error "number->string: radix must be 2, 8, 10, or 16"
     in
     Datum.Str (Bytes.of_string s)
   | _ -> runtime_error "number->string: expected 1 or 2 arguments"
 
 let try_parse_real str =
-  try Some (Datum.Fixnum (int_of_string str))
-  with _ ->
+  (try
+    let z = Z.of_string str in
+    Some (make_fixnum_z z)
+   with _ ->
     match String.index_opt str '/' with
     | Some slash when slash > 0 && slash < String.length str - 1 ->
       let num_str = String.sub str 0 slash in
       let den_str = String.sub str (slash + 1) (String.length str - slash - 1) in
       (try
-        let n = int_of_string num_str in
-        let d = int_of_string den_str in
-        if d = 0 then None else Some (make_rational n d)
+        let n = Z.of_string num_str in
+        let d = Z.of_string den_str in
+        if Z.sign d = 0 then None else Some (make_rational n d)
        with _ -> None)
     | _ ->
       try Some (Datum.Flonum (float_of_string str))
-      with _ -> None
+      with _ -> None)
 
 let try_parse_complex str =
   let len = String.length str in
@@ -1080,55 +1146,48 @@ let prim_string_to_number args =
   match args with
   | [Datum.Str s] ->
     let str = Bytes.to_string s in
-    (try Datum.Fixnum (int_of_string str)
-     with _ ->
-       (* Try rational n/d *)
-       match String.index_opt str '/' with
-       | Some slash when slash > 0 && slash < String.length str - 1 ->
-         let num_str = String.sub str 0 slash in
-         let den_str = String.sub str (slash + 1) (String.length str - slash - 1) in
-         (try
-           let n = int_of_string num_str in
-           let d = int_of_string den_str in
-           if d = 0 then Datum.Bool false
-           else make_rational n d
-          with _ -> Datum.Bool false)
-       | _ ->
-         try Datum.Flonum (float_of_string str)
-         with _ ->
-           match try_parse_complex str with
-           | Some v -> v
-           | None -> Datum.Bool false)
-  | [Datum.Str s; Datum.Fixnum radix] ->
+    (match try_parse_real str with
+     | Some v -> v
+     | None ->
+       match try_parse_complex str with
+       | Some v -> v
+       | None -> Datum.Bool false)
+  | [Datum.Str s; radix_v] ->
+    let radix = as_index "string->number" radix_v in
     let str = Bytes.to_string s in
     let prefix = match radix with
       | 2 -> "0b" | 8 -> "0o" | 10 -> "" | 16 -> "0x"
       | _ -> runtime_error "string->number: radix must be 2, 8, 10, or 16"
     in
-    (try Datum.Fixnum (int_of_string (prefix ^ str))
+    (try make_fixnum_z (Z.of_string (prefix ^ str))
      with _ -> Datum.Bool false)
   | _ -> runtime_error "string->number: expected 1 or 2 arguments"
+
+let float_to_exact_rational f =
+  if Float.is_integer f then
+    make_fixnum_z (Z.of_float f)
+  else
+    let (frac, exp) = Float.frexp f in
+    let mantissa_bits = 53 in
+    let n = Z.of_float (Float.ldexp frac mantissa_bits) in
+    let d_exp = mantissa_bits - exp in
+    if d_exp >= 0 then
+      let d = Z.shift_left Z.one d_exp in
+      make_rational n d
+    else
+      make_fixnum_z (Z.shift_left n (- d_exp))
 
 let prim_numerator args =
   match args with
   | [Datum.Fixnum n] -> Datum.Fixnum n
-  | [Datum.Rational (n, _)] -> Datum.Fixnum n
+  | [Datum.Bignum z] -> Datum.Bignum z
+  | [Datum.Rational (n, _)] -> make_fixnum_z n
   | [Datum.Flonum f] ->
-    let exact = if Float.is_integer f then Datum.Fixnum (Float.to_int f)
-      else
-        let (frac, exp) = Float.frexp f in
-        let mantissa_bits = 53 in
-        let n = Float.to_int (Float.ldexp frac mantissa_bits) in
-        let d_exp = mantissa_bits - exp in
-        if d_exp >= 0 && d_exp < Sys.int_size - 1 then
-          let d = 1 lsl d_exp in
-          make_rational n d
-        else if d_exp < 0 then Datum.Fixnum (n * (1 lsl (- d_exp)))
-        else runtime_error (Printf.sprintf "numerator: cannot decompose %s" (string_of_float f))
-    in
+    let exact = float_to_exact_rational f in
     (match exact with
-     | Datum.Rational (n, _) -> Datum.Flonum (float_of_int n)
+     | Datum.Rational (n, _) -> Datum.Flonum (Z.to_float n)
      | Datum.Fixnum n -> Datum.Flonum (float_of_int n)
+     | Datum.Bignum z -> Datum.Flonum (Z.to_float z)
      | _ -> runtime_error "numerator: internal error")
   | [Datum.Complex _] -> runtime_error "numerator: not defined for complex numbers"
   | [_] -> runtime_error "numerator: expected number"
@@ -1137,23 +1196,13 @@ let prim_numerator args =
 let prim_denominator args =
   match args with
   | [Datum.Fixnum _] -> Datum.Fixnum 1
-  | [Datum.Rational (_, d)] -> Datum.Fixnum d
+  | [Datum.Bignum _] -> Datum.Fixnum 1
+  | [Datum.Rational (_, d)] -> make_fixnum_z d
   | [Datum.Flonum f] ->
-    let exact = if Float.is_integer f then Datum.Fixnum (Float.to_int f)
-      else
-        let (frac, exp) = Float.frexp f in
-        let mantissa_bits = 53 in
-        let n = Float.to_int (Float.ldexp frac mantissa_bits) in
-        let d_exp = mantissa_bits - exp in
-        if d_exp >= 0 && d_exp < Sys.int_size - 1 then
-          let d = 1 lsl d_exp in
-          make_rational n d
-        else if d_exp < 0 then Datum.Fixnum (n * (1 lsl (- d_exp)))
-        else runtime_error (Printf.sprintf "denominator: cannot decompose %s" (string_of_float f))
-    in
+    let exact = float_to_exact_rational f in
     (match exact with
-     | Datum.Rational (_, d) -> Datum.Flonum (float_of_int d)
-     | Datum.Fixnum _ -> Datum.Flonum 1.0
+     | Datum.Rational (_, d) -> Datum.Flonum (Z.to_float d)
+     | Datum.Fixnum _ | Datum.Bignum _ -> Datum.Flonum 1.0
      | _ -> runtime_error "denominator: internal error")
   | [Datum.Complex _] -> runtime_error "denominator: not defined for complex numbers"
   | [_] -> runtime_error "denominator: expected number"
@@ -1165,7 +1214,9 @@ let rec scheme_equal a b =
   match (a, b) with
   | Datum.Bool x, Datum.Bool y -> x = y
   | Datum.Fixnum x, Datum.Fixnum y -> x = y
-  | Datum.Rational (n1, d1), Datum.Rational (n2, d2) -> n1 = n2 && d1 = d2
+  | Datum.Bignum x, Datum.Bignum y -> Z.equal x y
+  | Datum.Fixnum x, Datum.Bignum y | Datum.Bignum y, Datum.Fixnum x -> Z.equal (Z.of_int x) y
+  | Datum.Rational (n1, d1), Datum.Rational (n2, d2) -> Z.equal n1 n2 && Z.equal d1 d2
   | Datum.Flonum x, Datum.Flonum y -> Float.equal x y
   | Datum.Complex (r1, i1), Datum.Complex (r2, i2) -> scheme_equal r1 r2 && scheme_equal i1 i2
   | Datum.Char x, Datum.Char y -> Uchar.equal x y
@@ -1277,7 +1328,8 @@ let prim_reverse args =
 
 let prim_list_tail args =
   match args with
-  | [v; Datum.Fixnum k] ->
+  | [v; k_v] ->
+    let k = as_index "list-tail" k_v in
     let rec drop n lst =
       if n <= 0 then lst
       else match lst with
@@ -1290,7 +1342,8 @@ let prim_list_tail args =
 
 let prim_list_ref args =
   match args with
-  | [v; Datum.Fixnum k] ->
+  | [v; k_v] ->
+    let k = as_index "list-ref" k_v in
     let rec nth n lst =
       match lst with
       | Datum.Pair { car; cdr } ->
@@ -1302,7 +1355,8 @@ let prim_list_ref args =
 
 let prim_list_set args =
   match args with
-  | [v; Datum.Fixnum k; obj] ->
+  | [v; k_v; obj] ->
+    let k = as_index "list-set!" k_v in
     let rec nth n lst =
       match lst with
       | Datum.Pair p ->
@@ -1531,8 +1585,11 @@ let as_string name = function
 
 let prim_make_string args =
   match args with
-  | [Datum.Fixnum n] -> Datum.Str (Bytes.make n (Char.chr 0))
-  | [Datum.Fixnum n; Datum.Char c] ->
+  | [n_v] ->
+    let n = as_index "make-string" n_v in
+    Datum.Str (Bytes.make n (Char.chr 0))
+  | [n_v; Datum.Char c] ->
+    let n = as_index "make-string" n_v in
     if Uchar.to_int c < 256 then
       Datum.Str (Bytes.make n (Char.chr (Uchar.to_int c)))
     else runtime_error "make-string: char out of byte range"
@@ -1556,7 +1613,8 @@ let prim_string_length args =
 
 let prim_string_ref args =
   match args with
-  | [Datum.Str s; Datum.Fixnum k] ->
+  | [Datum.Str s; k_v] ->
+    let k = as_index "string-ref" k_v in
     if k >= 0 && k < Bytes.length s then
       Datum.Char (Uchar.of_char (Bytes.get s k))
     else runtime_error "string-ref: index out of range"
@@ -1564,7 +1622,8 @@ let prim_string_ref args =
 
 let prim_string_set args =
   match args with
-  | [Datum.Str s; Datum.Fixnum k; Datum.Char c] ->
+  | [Datum.Str s; k_v; Datum.Char c] ->
+    let k = as_index "string-set!" k_v in
     let n = Uchar.to_int c in
     if k >= 0 && k < Bytes.length s && n < 256 then
       (Bytes.set s k (Char.chr n); Datum.Void)
@@ -1610,7 +1669,9 @@ let prim_string_ci_ge args = str_ci_chain_compare "string-ci>=?" (>=) args
 
 let prim_substring args =
   match args with
-  | [Datum.Str s; Datum.Fixnum start; Datum.Fixnum stop] ->
+  | [Datum.Str s; start_v; stop_v] ->
+    let start = as_index "substring" start_v in
+    let stop = as_index "substring" stop_v in
     if start >= 0 && stop >= start && stop <= Bytes.length s then
       Datum.Str (Bytes.sub s start (stop - start))
     else runtime_error "substring: index out of range"
@@ -1655,11 +1716,17 @@ let prim_string_copy args =
 
 let prim_string_copy_to args =
   match args with
-  | [Datum.Str to_; Datum.Fixnum at; Datum.Str from] ->
+  | [Datum.Str to_; at_v; Datum.Str from] ->
+    let at = as_index "string-copy!" at_v in
     Bytes.blit from 0 to_ at (Bytes.length from); Datum.Void
-  | [Datum.Str to_; Datum.Fixnum at; Datum.Str from; Datum.Fixnum start] ->
+  | [Datum.Str to_; at_v; Datum.Str from; start_v] ->
+    let at = as_index "string-copy!" at_v in
+    let start = as_index "string-copy!" start_v in
     Bytes.blit from start to_ at (Bytes.length from - start); Datum.Void
-  | [Datum.Str to_; Datum.Fixnum at; Datum.Str from; Datum.Fixnum start; Datum.Fixnum stop] ->
+  | [Datum.Str to_; at_v; Datum.Str from; start_v; stop_v] ->
+    let at = as_index "string-copy!" at_v in
+    let start = as_index "string-copy!" start_v in
+    let stop = as_index "string-copy!" stop_v in
     Bytes.blit from start to_ at (stop - start); Datum.Void
   | _ -> runtime_error "string-copy!: expected 3-5 arguments"
 
@@ -1689,8 +1756,12 @@ let prim_string_foldcase args = prim_string_downcase args
 
 let prim_make_vector args =
   match args with
-  | [Datum.Fixnum n] -> Datum.Vector (Array.make n Datum.Void)
-  | [Datum.Fixnum n; fill] -> Datum.Vector (Array.make n fill)
+  | [n_v] ->
+    let n = as_index "make-vector" n_v in
+    Datum.Vector (Array.make n Datum.Void)
+  | [n_v; fill] ->
+    let n = as_index "make-vector" n_v in
+    Datum.Vector (Array.make n fill)
   | _ -> runtime_error "make-vector: expected (make-vector k) or (make-vector k fill)"
 
 let prim_vector args = Datum.Vector (Array.of_list args)
@@ -1703,14 +1774,16 @@ let prim_vector_length args =
 
 let prim_vector_ref args =
   match args with
-  | [Datum.Vector v; Datum.Fixnum k] ->
+  | [Datum.Vector v; k_v] ->
+    let k = as_index "vector-ref" k_v in
     if k >= 0 && k < Array.length v then v.(k)
     else runtime_error "vector-ref: index out of range"
   | _ -> runtime_error "vector-ref: expected 2 arguments (vector k)"
 
 let prim_vector_set args =
   match args with
-  | [Datum.Vector v; Datum.Fixnum k; obj] ->
+  | [Datum.Vector v; k_v; obj] ->
+    let k = as_index "vector-set!" k_v in
     if k >= 0 && k < Array.length v then (v.(k) <- obj; Datum.Void)
     else runtime_error "vector-set!: index out of range"
   | _ -> runtime_error "vector-set!: expected 3 arguments (vector k obj)"
@@ -1739,11 +1812,17 @@ let prim_vector_copy args =
 
 let prim_vector_copy_to args =
   match args with
-  | [Datum.Vector to_; Datum.Fixnum at; Datum.Vector from] ->
+  | [Datum.Vector to_; at_v; Datum.Vector from] ->
+    let at = as_index "vector-copy!" at_v in
     Array.blit from 0 to_ at (Array.length from); Datum.Void
-  | [Datum.Vector to_; Datum.Fixnum at; Datum.Vector from; Datum.Fixnum start] ->
+  | [Datum.Vector to_; at_v; Datum.Vector from; start_v] ->
+    let at = as_index "vector-copy!" at_v in
+    let start = as_index "vector-copy!" start_v in
     Array.blit from start to_ at (Array.length from - start); Datum.Void
-  | [Datum.Vector to_; Datum.Fixnum at; Datum.Vector from; Datum.Fixnum start; Datum.Fixnum stop] ->
+  | [Datum.Vector to_; at_v; Datum.Vector from; start_v; stop_v] ->
+    let at = as_index "vector-copy!" at_v in
+    let start = as_index "vector-copy!" start_v in
+    let stop = as_index "vector-copy!" stop_v in
     Array.blit from start to_ at (stop - start); Datum.Void
   | _ -> runtime_error "vector-copy!: expected 3-5 arguments"
 
@@ -1786,8 +1865,12 @@ let prim_string_to_vector args =
 
 let prim_make_bytevector args =
   match args with
-  | [Datum.Fixnum n] -> Datum.Bytevector (Bytes.make n (Char.chr 0))
-  | [Datum.Fixnum n; Datum.Fixnum byte] ->
+  | [n_v] ->
+    let n = as_index "make-bytevector" n_v in
+    Datum.Bytevector (Bytes.make n (Char.chr 0))
+  | [n_v; byte_v] ->
+    let n = as_index "make-bytevector" n_v in
+    let byte = as_index "make-bytevector" byte_v in
     if byte >= 0 && byte <= 255 then
       Datum.Bytevector (Bytes.make n (Char.chr byte))
     else runtime_error "make-bytevector: byte out of range"
@@ -1796,7 +1879,7 @@ let prim_make_bytevector args =
 let prim_bytevector args =
   let buf = Bytes.create (List.length args) in
   List.iteri (fun i v ->
-    let n = as_fixnum "bytevector" v in
+    let n = as_index "bytevector" v in
     if n >= 0 && n <= 255 then Bytes.set buf i (Char.chr n)
     else runtime_error "bytevector: byte out of range"
   ) args;
@@ -1810,7 +1893,8 @@ let prim_bytevector_length args =
 
 let prim_bytevector_u8_ref args =
   match args with
-  | [Datum.Bytevector bv; Datum.Fixnum k] ->
+  | [Datum.Bytevector bv; k_v] ->
+    let k = as_index "bytevector-u8-ref" k_v in
     if k >= 0 && k < Bytes.length bv then
       Datum.Fixnum (Char.code (Bytes.get bv k))
     else runtime_error "bytevector-u8-ref: index out of range"
@@ -1818,7 +1902,9 @@ let prim_bytevector_u8_ref args =
 
 let prim_bytevector_u8_set args =
   match args with
-  | [Datum.Bytevector bv; Datum.Fixnum k; Datum.Fixnum byte] ->
+  | [Datum.Bytevector bv; k_v; byte_v] ->
+    let k = as_index "bytevector-u8-set!" k_v in
+    let byte = as_index "bytevector-u8-set!" byte_v in
     if k >= 0 && k < Bytes.length bv && byte >= 0 && byte <= 255 then
       (Bytes.set bv k (Char.chr byte); Datum.Void)
     else runtime_error "bytevector-u8-set!: index out of range or byte out of range"
@@ -1831,11 +1917,17 @@ let prim_bytevector_copy args =
 
 let prim_bytevector_copy_to args =
   match args with
-  | [Datum.Bytevector to_; Datum.Fixnum at; Datum.Bytevector from] ->
+  | [Datum.Bytevector to_; at_v; Datum.Bytevector from] ->
+    let at = as_index "bytevector-copy!" at_v in
     Bytes.blit from 0 to_ at (Bytes.length from); Datum.Void
-  | [Datum.Bytevector to_; Datum.Fixnum at; Datum.Bytevector from; Datum.Fixnum start] ->
+  | [Datum.Bytevector to_; at_v; Datum.Bytevector from; start_v] ->
+    let at = as_index "bytevector-copy!" at_v in
+    let start = as_index "bytevector-copy!" start_v in
     Bytes.blit from start to_ at (Bytes.length from - start); Datum.Void
-  | [Datum.Bytevector to_; Datum.Fixnum at; Datum.Bytevector from; Datum.Fixnum start; Datum.Fixnum stop] ->
+  | [Datum.Bytevector to_; at_v; Datum.Bytevector from; start_v; stop_v] ->
+    let at = as_index "bytevector-copy!" at_v in
+    let start = as_index "bytevector-copy!" start_v in
+    let stop = as_index "bytevector-copy!" stop_v in
     Bytes.blit from start to_ at (stop - start); Datum.Void
   | _ -> runtime_error "bytevector-copy!: expected 3-5 arguments"
 
@@ -1883,13 +1975,13 @@ let prim_boolean_eq args =
 
 let prim_number args =
   match args with
-  | [Datum.Fixnum _ | Datum.Rational _ | Datum.Flonum _ | Datum.Complex _] -> Datum.Bool true
+  | [Datum.Fixnum _ | Datum.Bignum _ | Datum.Rational _ | Datum.Flonum _ | Datum.Complex _] -> Datum.Bool true
   | [_] -> Datum.Bool false
   | _ -> runtime_error (Printf.sprintf "number?: expected 1 argument, got %d" (List.length args))
 
 let prim_real args =
   match args with
-  | [Datum.Fixnum _ | Datum.Rational _ | Datum.Flonum _] -> Datum.Bool true
+  | [Datum.Fixnum _ | Datum.Bignum _ | Datum.Rational _ | Datum.Flonum _] -> Datum.Bool true
   | [Datum.Complex _] -> Datum.Bool false
   | [_] -> Datum.Bool false
   | _ -> runtime_error (Printf.sprintf "real?: expected 1 argument, got %d" (List.length args))
@@ -1897,6 +1989,7 @@ let prim_real args =
 let prim_integer args =
   match args with
   | [Datum.Fixnum _] -> Datum.Bool true
+  | [Datum.Bignum _] -> Datum.Bool true
   | [Datum.Rational _] -> Datum.Bool false
   | [Datum.Flonum f] -> Datum.Bool (Float.is_integer f)
   | [Datum.Complex _] -> Datum.Bool false
@@ -1906,6 +1999,7 @@ let prim_integer args =
 let prim_exact args =
   match args with
   | [Datum.Fixnum _] -> Datum.Bool true
+  | [Datum.Bignum _] -> Datum.Bool true
   | [Datum.Rational _] -> Datum.Bool true
   | [Datum.Flonum _] -> Datum.Bool false
   | [Datum.Complex (re, _)] -> Datum.Bool (is_exact_datum re)
@@ -1915,6 +2009,7 @@ let prim_exact args =
 let prim_inexact_pred args =
   match args with
   | [Datum.Fixnum _] -> Datum.Bool false
+  | [Datum.Bignum _] -> Datum.Bool false
   | [Datum.Rational _] -> Datum.Bool false
   | [Datum.Flonum _] -> Datum.Bool true
   | [Datum.Complex (re, _)] -> Datum.Bool (not (is_exact_datum re))
@@ -1924,6 +2019,7 @@ let prim_inexact_pred args =
 let prim_rational args =
   match args with
   | [Datum.Fixnum _] -> Datum.Bool true
+  | [Datum.Bignum _] -> Datum.Bool true
   | [Datum.Rational _] -> Datum.Bool true
   | [Datum.Flonum f] -> Datum.Bool (Float.is_finite f)
   | [Datum.Complex _] -> Datum.Bool false
@@ -1933,6 +2029,7 @@ let prim_rational args =
 let prim_exact_integer args =
   match args with
   | [Datum.Fixnum _] -> Datum.Bool true
+  | [Datum.Bignum _] -> Datum.Bool true
   | [_] -> Datum.Bool false
   | _ -> runtime_error (Printf.sprintf "exact-integer?: expected 1 argument, got %d" (List.length args))
 
@@ -1940,6 +2037,7 @@ let prim_zero args =
   match args with
   | [Datum.Fixnum 0] -> Datum.Bool true
   | [Datum.Fixnum _] -> Datum.Bool false
+  | [Datum.Bignum _] -> Datum.Bool false  (* by invariant, zero is always Fixnum *)
   | [Datum.Rational _] -> Datum.Bool false  (* 0/d normalizes to Fixnum 0 *)
   | [Datum.Flonum f] -> Datum.Bool (f = 0.0)
   | [Datum.Complex (re, im)] -> Datum.Bool (is_datum_zero re && is_datum_zero im)
@@ -1949,7 +2047,8 @@ let prim_zero args =
 let prim_positive args =
   match args with
   | [Datum.Fixnum n] -> Datum.Bool (n > 0)
-  | [Datum.Rational (n, _)] -> Datum.Bool (n > 0)
+  | [Datum.Bignum z] -> Datum.Bool (Z.sign z > 0)
+  | [Datum.Rational (n, _)] -> Datum.Bool (Z.sign n > 0)
   | [Datum.Flonum f] -> Datum.Bool (f > 0.0)
   | [Datum.Complex _] -> runtime_error "positive?: not defined for complex numbers"
   | [_] -> runtime_error "positive?: expected real number"
@@ -1958,7 +2057,8 @@ let prim_positive args =
 let prim_negative args =
   match args with
   | [Datum.Fixnum n] -> Datum.Bool (n < 0)
-  | [Datum.Rational (n, _)] -> Datum.Bool (n < 0)
+  | [Datum.Bignum z] -> Datum.Bool (Z.sign z < 0)
+  | [Datum.Rational (n, _)] -> Datum.Bool (Z.sign n < 0)
   | [Datum.Flonum f] -> Datum.Bool (f < 0.0)
   | [Datum.Complex _] -> runtime_error "negative?: not defined for complex numbers"
   | [_] -> runtime_error "negative?: expected real number"
@@ -1967,12 +2067,14 @@ let prim_negative args =
 let prim_odd args =
   match args with
   | [Datum.Fixnum n] -> Datum.Bool (n mod 2 <> 0)
+  | [Datum.Bignum z] -> Datum.Bool (Z.is_odd z)
   | [_] -> runtime_error "odd?: expected integer"
   | _ -> runtime_error (Printf.sprintf "odd?: expected 1 argument, got %d" (List.length args))
 
 let prim_even args =
   match args with
   | [Datum.Fixnum n] -> Datum.Bool (n mod 2 = 0)
+  | [Datum.Bignum z] -> Datum.Bool (Z.is_even z)
   | [_] -> runtime_error "even?: expected integer"
   | _ -> runtime_error (Printf.sprintf "even?: expected 1 argument, got %d" (List.length args))
 
@@ -3308,135 +3410,162 @@ let create ?(readtable = Readtable.default) () =
     | _ -> runtime_error (Printf.sprintf "force: expected 1 argument, got %d" (List.length args)));
   (* --- SRFI 151 bitwise primitives --- *)
   register_late "bitwise-not" (fun args -> match args with
-    | [Datum.Fixnum n] -> Datum.Fixnum (lnot n)
+    | [v] ->
+      let z = as_exact_int "bitwise-not" v in
+      make_fixnum_z (Z.lognot z)
     | _ -> runtime_error "bitwise-not: expected 1 integer");
   register_late "bitwise-and" (fun args ->
-    let to_int = function Datum.Fixnum n -> n
-      | _ -> runtime_error "bitwise-and: expected integers" in
-    Datum.Fixnum (List.fold_left (fun acc x -> acc land to_int x) (-1) args));
+    make_fixnum_z (List.fold_left (fun acc x -> Z.logand acc (as_exact_int "bitwise-and" x)) Z.minus_one args));
   register_late "bitwise-ior" (fun args ->
-    let to_int = function Datum.Fixnum n -> n
-      | _ -> runtime_error "bitwise-ior: expected integers" in
-    Datum.Fixnum (List.fold_left (fun acc x -> acc lor to_int x) 0 args));
+    make_fixnum_z (List.fold_left (fun acc x -> Z.logor acc (as_exact_int "bitwise-ior" x)) Z.zero args));
   register_late "bitwise-xor" (fun args ->
-    let to_int = function Datum.Fixnum n -> n
-      | _ -> runtime_error "bitwise-xor: expected integers" in
-    Datum.Fixnum (List.fold_left (fun acc x -> acc lxor to_int x) 0 args));
+    make_fixnum_z (List.fold_left (fun acc x -> Z.logxor acc (as_exact_int "bitwise-xor" x)) Z.zero args));
   register_late "arithmetic-shift" (fun args -> match args with
-    | [Datum.Fixnum n; Datum.Fixnum count] ->
-      if count >= 0 then Datum.Fixnum (n lsl count)
-      else Datum.Fixnum (n asr (- count))
+    | [v; cnt] ->
+      let z = as_exact_int "arithmetic-shift" v in
+      let count = as_index "arithmetic-shift" cnt in
+      if count >= 0 then make_fixnum_z (Z.shift_left z count)
+      else make_fixnum_z (Z.shift_right z (- count))
     | _ -> runtime_error "arithmetic-shift: expected 2 integers");
   register_late "bit-count" (fun args -> match args with
-    | [Datum.Fixnum n] ->
-      let n = if n < 0 then lnot n else n in
-      let rec popcount n acc =
-        if n = 0 then acc
-        else popcount (n lsr 1) (acc + (n land 1))
-      in
-      Datum.Fixnum (popcount n 0)
+    | [v] ->
+      let z = as_exact_int "bit-count" v in
+      let z = if Z.sign z < 0 then Z.lognot z else z in
+      Datum.Fixnum (Z.popcount z)
     | _ -> runtime_error "bit-count: expected 1 integer");
   register_late "integer-length" (fun args -> match args with
-    | [Datum.Fixnum n] ->
-      let n = if n < 0 then lnot n else n in
-      let rec ilog n acc =
-        if n = 0 then acc
-        else ilog (n lsr 1) (acc + 1)
-      in
-      Datum.Fixnum (ilog n 0)
+    | [v] ->
+      let z = as_exact_int "integer-length" v in
+      let z = if Z.sign z < 0 then Z.lognot z else z in
+      Datum.Fixnum (Z.numbits z)
     | _ -> runtime_error "integer-length: expected 1 integer");
   register_late "bitwise-if" (fun args -> match args with
-    | [Datum.Fixnum mask; Datum.Fixnum i; Datum.Fixnum j] ->
-      Datum.Fixnum ((mask land i) lor ((lnot mask) land j))
+    | [m; i; j] ->
+      let zm = as_exact_int "bitwise-if" m in
+      let zi = as_exact_int "bitwise-if" i in
+      let zj = as_exact_int "bitwise-if" j in
+      make_fixnum_z (Z.logor (Z.logand zm zi) (Z.logand (Z.lognot zm) zj))
     | _ -> runtime_error "bitwise-if: expected 3 integers");
   register_late "bit-set?" (fun args -> match args with
-    | [Datum.Fixnum k; Datum.Fixnum n] ->
-      Datum.Bool (n land (1 lsl k) <> 0)
+    | [idx; v] ->
+      let k = as_index "bit-set?" idx in
+      let z = as_exact_int "bit-set?" v in
+      Datum.Bool (Z.testbit z k)
     | _ -> runtime_error "bit-set?: expected 2 integers");
   register_late "copy-bit" (fun args -> match args with
-    | [Datum.Fixnum k; Datum.Fixnum n; Datum.Bool bit] ->
-      if bit then Datum.Fixnum (n lor (1 lsl k))
-      else Datum.Fixnum (n land (lnot (1 lsl k)))
+    | [idx; v; Datum.Bool bit] ->
+      let k = as_index "copy-bit" idx in
+      let z = as_exact_int "copy-bit" v in
+      if bit then make_fixnum_z (Z.logor z (Z.shift_left Z.one k))
+      else make_fixnum_z (Z.logand z (Z.lognot (Z.shift_left Z.one k)))
     | _ -> runtime_error "copy-bit: expected index, integer, boolean");
   register_late "bit-swap" (fun args -> match args with
-    | [Datum.Fixnum i; Datum.Fixnum j; Datum.Fixnum n] ->
-      let bi = (n lsr i) land 1 in
-      let bj = (n lsr j) land 1 in
-      if bi = bj then Datum.Fixnum n
-      else Datum.Fixnum (n lxor ((1 lsl i) lor (1 lsl j)))
+    | [a; b; v] ->
+      let i = as_index "bit-swap" a in
+      let j = as_index "bit-swap" b in
+      let z = as_exact_int "bit-swap" v in
+      let bi = Z.testbit z i in
+      let bj = Z.testbit z j in
+      if bi = bj then make_fixnum_z z
+      else make_fixnum_z (Z.logxor z (Z.logor (Z.shift_left Z.one i) (Z.shift_left Z.one j)))
     | _ -> runtime_error "bit-swap: expected 3 integers");
   register_late "any-bit-set?" (fun args -> match args with
-    | [Datum.Fixnum i; Datum.Fixnum j] ->
-      Datum.Bool (i land j <> 0)
+    | [a; b] ->
+      let zi = as_exact_int "any-bit-set?" a in
+      let zj = as_exact_int "any-bit-set?" b in
+      Datum.Bool (not (Z.equal (Z.logand zi zj) Z.zero))
     | _ -> runtime_error "any-bit-set?: expected 2 integers");
   register_late "every-bit-set?" (fun args -> match args with
-    | [Datum.Fixnum i; Datum.Fixnum j] ->
-      Datum.Bool (i land j = j)
+    | [a; b] ->
+      let zi = as_exact_int "every-bit-set?" a in
+      let zj = as_exact_int "every-bit-set?" b in
+      Datum.Bool (Z.equal (Z.logand zi zj) zj)
     | _ -> runtime_error "every-bit-set?: expected 2 integers");
   register_late "first-set-bit" (fun args -> match args with
-    | [Datum.Fixnum n] ->
-      if n = 0 then Datum.Fixnum (-1)
+    | [v] ->
+      let z = as_exact_int "first-set-bit" v in
+      if Z.sign z = 0 then Datum.Fixnum (-1)
       else
-        let rec fsb n k =
-          if n land 1 = 1 then k
-          else fsb (n lsr 1) (k + 1)
-        in
-        Datum.Fixnum (fsb (if n < 0 then lnot n lor 1 else n) 0)
+        let rec fsb k = if Z.testbit z k then k else fsb (k + 1) in
+        Datum.Fixnum (fsb 0)
     | _ -> runtime_error "first-set-bit: expected 1 integer");
   register_late "bit-field" (fun args -> match args with
-    | [Datum.Fixnum n; Datum.Fixnum start; Datum.Fixnum end_] ->
+    | [v; s; e] ->
+      let z = as_exact_int "bit-field" v in
+      let start = as_index "bit-field" s in
+      let end_ = as_index "bit-field" e in
       let width = end_ - start in
-      let mask = (1 lsl width) - 1 in
-      Datum.Fixnum ((n lsr start) land mask)
+      let mask = Z.sub (Z.shift_left Z.one width) Z.one in
+      make_fixnum_z (Z.logand (Z.shift_right z start) mask)
     | _ -> runtime_error "bit-field: expected 3 integers");
   register_late "bit-field-any?" (fun args -> match args with
-    | [Datum.Fixnum n; Datum.Fixnum start; Datum.Fixnum end_] ->
+    | [v; s; e] ->
+      let z = as_exact_int "bit-field-any?" v in
+      let start = as_index "bit-field-any?" s in
+      let end_ = as_index "bit-field-any?" e in
       let width = end_ - start in
-      let mask = (1 lsl width) - 1 in
-      Datum.Bool ((n lsr start) land mask <> 0)
+      let mask = Z.sub (Z.shift_left Z.one width) Z.one in
+      Datum.Bool (not (Z.equal (Z.logand (Z.shift_right z start) mask) Z.zero))
     | _ -> runtime_error "bit-field-any?: expected 3 integers");
   register_late "bit-field-every?" (fun args -> match args with
-    | [Datum.Fixnum n; Datum.Fixnum start; Datum.Fixnum end_] ->
+    | [v; s; e] ->
+      let z = as_exact_int "bit-field-every?" v in
+      let start = as_index "bit-field-every?" s in
+      let end_ = as_index "bit-field-every?" e in
       let width = end_ - start in
-      let mask = (1 lsl width) - 1 in
-      Datum.Bool ((n lsr start) land mask = mask)
+      let mask = Z.sub (Z.shift_left Z.one width) Z.one in
+      Datum.Bool (Z.equal (Z.logand (Z.shift_right z start) mask) mask)
     | _ -> runtime_error "bit-field-every?: expected 3 integers");
   register_late "bit-field-replace" (fun args -> match args with
-    | [Datum.Fixnum n; Datum.Fixnum replacement; Datum.Fixnum start; Datum.Fixnum end_] ->
+    | [v; replacement; s; e] ->
+      let zn = as_exact_int "bit-field-replace" v in
+      let zr = as_exact_int "bit-field-replace" replacement in
+      let start = as_index "bit-field-replace" s in
+      let end_ = as_index "bit-field-replace" e in
       let width = end_ - start in
-      let mask = (1 lsl width) - 1 in
-      let cleared = n land (lnot (mask lsl start)) in
-      Datum.Fixnum (cleared lor ((replacement land mask) lsl start))
+      let mask = Z.sub (Z.shift_left Z.one width) Z.one in
+      let cleared = Z.logand zn (Z.lognot (Z.shift_left mask start)) in
+      make_fixnum_z (Z.logor cleared (Z.shift_left (Z.logand zr mask) start))
     | _ -> runtime_error "bit-field-replace: expected 4 integers");
   register_late "bit-field-rotate" (fun args -> match args with
-    | [Datum.Fixnum n; Datum.Fixnum count; Datum.Fixnum start; Datum.Fixnum end_] ->
+    | [v; c; s; e] ->
+      let zn = as_exact_int "bit-field-rotate" v in
+      let count = as_index "bit-field-rotate" c in
+      let start = as_index "bit-field-rotate" s in
+      let end_ = as_index "bit-field-rotate" e in
       let width = end_ - start in
-      if width = 0 then Datum.Fixnum n
+      if width = 0 then make_fixnum_z zn
       else
-        let mask = (1 lsl width) - 1 in
-        let field = (n lsr start) land mask in
+        let mask = Z.sub (Z.shift_left Z.one width) Z.one in
+        let field = Z.logand (Z.shift_right zn start) mask in
         let count = ((count mod width) + width) mod width in
-        let rotated = ((field lsl count) lor (field lsr (width - count))) land mask in
-        let cleared = n land (lnot (mask lsl start)) in
-        Datum.Fixnum (cleared lor (rotated lsl start))
+        let rotated = Z.logand (Z.logor (Z.shift_left field count) (Z.shift_right field (width - count))) mask in
+        let cleared = Z.logand zn (Z.lognot (Z.shift_left mask start)) in
+        make_fixnum_z (Z.logor cleared (Z.shift_left rotated start))
     | _ -> runtime_error "bit-field-rotate: expected 4 integers");
   register_late "bit-field-reverse" (fun args -> match args with
-    | [Datum.Fixnum n; Datum.Fixnum start; Datum.Fixnum end_] ->
+    | [v; s; e] ->
+      let zn = as_exact_int "bit-field-reverse" v in
+      let start = as_index "bit-field-reverse" s in
+      let end_ = as_index "bit-field-reverse" e in
       let width = end_ - start in
-      let mask = (1 lsl width) - 1 in
-      let field = (n lsr start) land mask in
+      let mask = Z.sub (Z.shift_left Z.one width) Z.one in
+      let field = Z.logand (Z.shift_right zn start) mask in
       let rec rev_bits v w acc =
         if w = 0 then acc
-        else rev_bits (v lsr 1) (w - 1) ((acc lsl 1) lor (v land 1))
+        else rev_bits (Z.shift_right v 1) (w - 1)
+          (Z.logor (Z.shift_left acc 1) (Z.logand v Z.one))
       in
-      let reversed = rev_bits field width 0 in
-      let cleared = n land (lnot (mask lsl start)) in
-      Datum.Fixnum (cleared lor (reversed lsl start))
+      let reversed = rev_bits field width Z.zero in
+      let cleared = Z.logand zn (Z.lognot (Z.shift_left mask start)) in
+      make_fixnum_z (Z.logor cleared (Z.shift_left reversed start))
     | _ -> runtime_error "bit-field-reverse: expected 3 integers");
   (* --- SRFI 69 — Basic Hash Tables --- *)
   let rec datum_hash (d : Datum.t) = match d with
     | Bool b -> Hashtbl.hash b
     | Fixnum n -> Hashtbl.hash n
+    | Bignum z -> Z.hash z
+    | Rational (n, d) -> Z.hash n * 31 + Z.hash d
     | Flonum f -> Hashtbl.hash f
     | Char c -> Uchar.to_int c
     | Str s -> Hashtbl.hash (Bytes.to_string s)
@@ -4240,8 +4369,8 @@ let create ?(readtable = Readtable.default) () =
   in
   let get_start_end name s args =
     let len = Bytes.length s in
-    let start = match args with Datum.Fixnum n :: _ -> n | _ -> 0 in
-    let end_ = match args with _ :: Datum.Fixnum n :: _ -> n | _ :: _ -> len | [] -> len in
+    let start = match args with v :: _ -> as_index name v | _ -> 0 in
+    let end_ = match args with _ :: v :: _ -> as_index name v | _ :: _ -> len | [] -> len in
     if start < 0 || end_ > len || start > end_ then
       runtime_error (Printf.sprintf "%s: invalid range %d..%d for string of length %d" name start end_ len);
     (start, end_)

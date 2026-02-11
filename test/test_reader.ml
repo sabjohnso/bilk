@@ -277,7 +277,6 @@ let test_reader_errors () =
   check_error "surrogate in ident" "|\\xDFFF;|";
   check_error "hex escape too large" "\"\\x110000;\"";
   check_error "digit-leading token" "123abc";
-  check_error "large integer" "99999999999999999999";
   check_error "exact infinity" "#e+inf.0";
   check_error "exact nan" "#e+nan.0"
 
@@ -385,21 +384,21 @@ let test_reader_shebang_vs_directive () =
 
 let test_reader_rationals () =
   (* Simple rationals *)
-  check_datum "1/2" (Datum.Rational (1, 2)) (read_one "1/2");
-  check_datum "-3/4" (Datum.Rational (-3, 4)) (read_one "-3/4");
-  check_datum "+1/2" (Datum.Rational (1, 2)) (read_one "+1/2");
+  check_datum "1/2" (Datum.Rational (Z.of_int 1, Z.of_int 2)) (read_one "1/2");
+  check_datum "-3/4" (Datum.Rational (Z.of_int (-3), Z.of_int 4)) (read_one "-3/4");
+  check_datum "+1/2" (Datum.Rational (Z.of_int 1, Z.of_int 2)) (read_one "+1/2");
   (* Normalization *)
-  check_datum "6/4" (Datum.Rational (3, 2)) (read_one "6/4");
+  check_datum "6/4" (Datum.Rational (Z.of_int 3, Z.of_int 2)) (read_one "6/4");
   check_datum "4/2" (Datum.Fixnum 2) (read_one "4/2");
   check_datum "0/5" (Datum.Fixnum 0) (read_one "0/5");
   (* Negative denominator normalization *)
-  check_datum "1/-2" (Datum.Rational (-1, 2)) (read_one "1/-2");
+  check_datum "1/-2" (Datum.Rational (Z.of_int (-1), Z.of_int 2)) (read_one "1/-2");
   (* Radix prefixes *)
-  check_datum "#b101/10" (Datum.Rational (5, 2)) (read_one "#b101/10");
-  check_datum "#xa/b" (Datum.Rational (10, 11)) (read_one "#xa/b");
+  check_datum "#b101/10" (Datum.Rational (Z.of_int 5, Z.of_int 2)) (read_one "#b101/10");
+  check_datum "#xa/b" (Datum.Rational (Z.of_int 10, Z.of_int 11)) (read_one "#xa/b");
   (* Exactness *)
   check_datum "#i1/2" (Datum.Flonum 0.5) (read_one "#i1/2");
-  check_datum "#e0.5" (Datum.Rational (1, 2)) (read_one "#e0.5");
+  check_datum "#e0.5" (Datum.Rational (Z.of_int 1, Z.of_int 2)) (read_one "#e0.5");
   (* Standalone / is a symbol *)
   check_datum "/" (Datum.Symbol "/") (read_one "/");
   (* 1/0 is an error *)
@@ -407,6 +406,24 @@ let test_reader_rationals () =
     let _ = read_one "1/0" in
     Alcotest.fail "1/0 should raise error"
   with Reader.Read_error _ -> ())
+
+let test_reader_bignums () =
+  (* Large integer parses as Bignum *)
+  let big = Z.of_string "99999999999999999999999999999" in
+  check_datum "large int" (Datum.Bignum big) (read_one "99999999999999999999999999999");
+  check_datum "large neg" (Datum.Bignum (Z.neg big)) (read_one "-99999999999999999999999999999");
+  (* Large rational with bignum components *)
+  check_datum "big rat" (Datum.Rational (Z.one, big))
+    (read_one ("1/" ^ Z.to_string big));
+  (* Exact prefix on large float *)
+  check_datum "#e1e20" (Datum.Bignum (Z.of_string "100000000000000000000"))
+    (read_one "#e1e20");
+  (* Max int + 1 crosses to bignum *)
+  let max_plus_1 = Z.succ (Z.of_int max_int) in
+  check_datum "max+1" (Datum.Bignum max_plus_1)
+    (read_one (Z.to_string max_plus_1));
+  (* Bignum that demotes to fixnum *)
+  check_datum "small parses as fixnum" (Datum.Fixnum 42) (read_one "42")
 
 let () =
   Alcotest.run "Reader"
@@ -421,6 +438,7 @@ let () =
        ; Alcotest.test_case "symbols" `Quick test_reader_symbols
        ; Alcotest.test_case "escaped symbols" `Quick test_reader_symbols_escaped
        ; Alcotest.test_case "rationals" `Quick test_reader_rationals
+       ; Alcotest.test_case "bignums" `Quick test_reader_bignums
        ; Alcotest.test_case "fold-case" `Quick test_reader_fold_case
        ; Alcotest.test_case "characters" `Quick test_reader_characters
        ; Alcotest.test_case "strings" `Quick test_reader_strings
@@ -477,7 +495,7 @@ let () =
              (Datum.Complex (Datum.Flonum Float.infinity, Datum.Flonum Float.infinity))
              (read "+inf.0+inf.0i");
            (* Rational components *)
-           check "1/2+3/4i" (Datum.Complex (Datum.Rational (1, 2), Datum.Rational (3, 4))) (read "1/2+3/4i");
+           check "1/2+3/4i" (Datum.Complex (Datum.Rational (Z.of_int 1, Z.of_int 2), Datum.Rational (Z.of_int 3, Z.of_int 4))) (read "1/2+3/4i");
            (* #e and #i prefixes *)
            check "#e3+4i" (Datum.Complex (Datum.Fixnum 3, Datum.Fixnum 4)) (read "#e3+4i");
            check "#i3+4i" (Datum.Complex (Datum.Flonum 3.0, Datum.Flonum 4.0)) (read "#i3+4i");

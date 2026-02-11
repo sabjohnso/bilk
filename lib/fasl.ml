@@ -1,7 +1,7 @@
 exception Fasl_error of string
 
 let version_major = 1
-let version_minor = 4
+let version_minor = 5
 
 let fasl_error msg = raise (Fasl_error msg)
 
@@ -163,7 +163,8 @@ let rec write_datum buf (d : Datum.t) =
   | Bool false -> write_u8 buf 0
   | Bool true -> write_u8 buf 1
   | Fixnum n -> write_u8 buf 2; write_i64 buf n
-  | Rational (n, d) -> write_u8 buf 13; write_i64 buf n; write_i64 buf d
+  | Bignum z -> write_u8 buf 15; write_str buf (Z.to_string z)
+  | Rational (n, d) -> write_u8 buf 16; write_str buf (Z.to_string n); write_str buf (Z.to_string d)
   | Flonum f -> write_u8 buf 3; write_f64 buf f
   | Complex (re, im) -> write_u8 buf 14; write_datum buf re; write_datum buf im
   | Char c -> write_u8 buf 4; write_u32 buf (Uchar.to_int c)
@@ -224,13 +225,22 @@ let rec read_datum symbols data pos =
   | 11 -> Datum.Eof
   | 12 -> Datum.Void
   | 13 ->
+    (* Old Rational format: two i64 — read and convert to Z.t *)
     let n = read_i64 data pos in
     let d = read_i64 data pos in
-    Datum.Rational (n, d)
+    Datum.Rational (Z.of_int n, Z.of_int d)
   | 14 ->
     let re = read_datum symbols data pos in
     let im = read_datum symbols data pos in
     Datum.Complex (re, im)
+  | 15 ->
+    let s = read_str data pos in
+    let z = Z.of_string s in
+    if Z.fits_int z then Datum.Fixnum (Z.to_int z) else Datum.Bignum z
+  | 16 ->
+    let ns = read_str data pos in
+    let ds = read_str data pos in
+    Datum.Rational (Z.of_string ns, Z.of_string ds)
   | _ -> fasl_error (Printf.sprintf "unknown datum tag: %d" tag)
 
 (* --- Binding encoding --- *)

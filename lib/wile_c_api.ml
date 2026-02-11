@@ -238,6 +238,12 @@ let is_fixnum ih vh =
     | Some (Datum.Fixnum _) -> 1
     | _ -> 0)
 
+let is_integer ih vh =
+  with_instance ih (fun entry ->
+    match resolve_value entry vh with
+    | Some (Datum.Fixnum _ | Datum.Bignum _) -> 1
+    | _ -> 0)
+
 let is_flonum ih vh =
   with_instance ih (fun entry ->
     match resolve_value entry vh with
@@ -288,9 +294,26 @@ let get_fixnum ih vh =
   with_instance ih (fun entry ->
     match resolve_value entry vh with
     | Some (Datum.Fixnum n) -> n
+    | Some (Datum.Bignum z) ->
+      if Z.fits_int z then Z.to_int z
+      else (entry.last_error <- Some "bignum does not fit in fixnum"; 0)
     | _ ->
       entry.last_error <- Some "not a fixnum";
       0)
+
+let get_integer_string ih vh =
+  match Hashtbl.find_opt instances ih with
+  | None ->
+    global_error := Some "invalid instance handle";
+    ""
+  | Some entry ->
+    entry.last_error <- None;
+    (match resolve_value entry vh with
+     | Some (Datum.Fixnum n) -> string_of_int n
+     | Some (Datum.Bignum z) -> Z.to_string z
+     | _ ->
+       entry.last_error <- Some "not an integer";
+       "")
 
 let get_flonum ih vh =
   match Hashtbl.find_opt instances ih with
@@ -455,6 +478,7 @@ let () =
   Callback.register "wile_is_nil" is_nil;
   Callback.register "wile_is_bool" is_bool;
   Callback.register "wile_is_fixnum" is_fixnum;
+  Callback.register "wile_is_integer" is_integer;
   Callback.register "wile_is_flonum" is_flonum;
   Callback.register "wile_is_string" is_string;
   Callback.register "wile_is_symbol" is_symbol;
@@ -463,6 +487,7 @@ let () =
   Callback.register "wile_is_true" is_true;
   Callback.register "wile_get_bool" get_bool;
   Callback.register "wile_get_fixnum" get_fixnum;
+  Callback.register "wile_get_integer_string" get_integer_string;
   Callback.register "wile_get_flonum" get_flonum;
   Callback.register "wile_get_string" get_string;
   Callback.register "wile_get_symbol_name" get_symbol_name;

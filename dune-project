@@ -24,6 +24,7 @@
   dune
   cmdliner
   yojson
+  zarith
   (odoc :with-doc)
   (alcotest :with-test)
   (qcheck-core :with-test)

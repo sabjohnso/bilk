@@ -168,6 +168,9 @@ wile_val_t wile_list(wile_inst_t inst, int len, const wile_val_t *e);
 int wile_is_nil(wile_inst_t inst, wile_val_t v);
 int wile_is_bool(wile_inst_t inst, wile_val_t v);
 int wile_is_fixnum(wile_inst_t inst, wile_val_t v);
+
+/** Returns 1 if the value is an exact integer (fixnum or bignum). */
+int wile_is_integer(wile_inst_t inst, wile_val_t v);
 int wile_is_flonum(wile_inst_t inst, wile_val_t v);
 int wile_is_string(wile_inst_t inst, wile_val_t v);
 int wile_is_symbol(wile_inst_t inst, wile_val_t v);
@@ -183,8 +186,13 @@ int wile_is_true(wile_inst_t inst, wile_val_t v);
     Sets error if not a boolean. */
 int wile_bool_value(wile_inst_t inst, wile_val_t v);
 
-/** Extract fixnum value.  Sets error if not a fixnum. */
+/** Extract fixnum value.  For bignums that fit in a native int, the
+    value is returned.  Sets error if not an integer or too large. */
 long wile_fixnum_value(wile_inst_t inst, wile_val_t v);
+
+/** Extract exact integer as decimal string.  Caller must free() the result.
+    Works for both fixnums and bignums.  Sets error if not an integer. */
+char *wile_integer_string(wile_inst_t inst, wile_val_t v);
 
 /** Extract flonum value.  Sets error if not a flonum. */
 double wile_flonum_value(wile_inst_t inst, wile_val_t v);

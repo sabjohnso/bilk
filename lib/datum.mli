@@ -30,7 +30,8 @@ type error_obj = {
 and t =
   | Bool of bool               (** [#t] / [#f] *)
   | Fixnum of int              (** Exact integer (machine word) *)
-  | Rational of int * int      (** Exact rational (numerator, denominator); invariant: d > 0, gcd(|n|,d) = 1 *)
+  | Bignum of Z.t              (** Exact integer (arbitrary precision); invariant: never stored when [Z.fits_int] *)
+  | Rational of Z.t * Z.t      (** Exact rational (numerator, denominator); invariant: d > 0, gcd(|n|,d) = 1, d ≠ 1 *)
   | Flonum of float            (** Inexact real *)
   | Complex of t * t            (** Complex number (real, imaginary); components are Fixnum/Rational (exact) or Flonum (inexact) *)
   | Char of Uchar.t            (** Unicode character *)

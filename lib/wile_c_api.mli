@@ -107,6 +107,10 @@ val is_bool : int -> int -> int
 val is_fixnum : int -> int -> int
 (** [is_fixnum ih vh] returns [1] if the value is a fixnum, [0] otherwise. *)
 
+val is_integer : int -> int -> int
+(** [is_integer ih vh] returns [1] if the value is an exact integer
+    (fixnum or bignum), [0] otherwise. *)
+
 val is_flonum : int -> int -> int
 (** [is_flonum ih vh] returns [1] if the value is a flonum, [0] otherwise. *)
 
@@ -133,8 +137,14 @@ val get_bool : int -> int -> int
     Returns [0] and sets error if not a boolean. *)
 
 val get_fixnum : int -> int -> int
-(** [get_fixnum ih vh] returns the fixnum value.
-    Returns [0] and sets error if not a fixnum. *)
+(** [get_fixnum ih vh] returns the fixnum value.  For bignums that fit
+    in a native int, the value is returned.  Returns [0] and sets error
+    if not an integer or if the bignum does not fit. *)
+
+val get_integer_string : int -> int -> string
+(** [get_integer_string ih vh] returns the decimal string representation
+    of an exact integer (fixnum or bignum).  Returns [""] and sets error
+    if the value is not an integer. *)
 
 val get_flonum : int -> int -> float
 (** [get_flonum ih vh] returns the flonum value.

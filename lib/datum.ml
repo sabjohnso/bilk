@@ -15,7 +15,8 @@ type error_obj = {
 and t =
   | Bool of bool
   | Fixnum of int
-  | Rational of int * int
+  | Bignum of Z.t
+  | Rational of Z.t * Z.t
   | Flonum of float
   | Complex of t * t
   | Char of Uchar.t
@@ -119,7 +120,9 @@ let rec equal a b =
   match (a, b) with
   | Bool x, Bool y -> x = y
   | Fixnum x, Fixnum y -> x = y
-  | Rational (n1, d1), Rational (n2, d2) -> n1 = n2 && d1 = d2
+  | Bignum x, Bignum y -> Z.equal x y
+  | Fixnum x, Bignum y | Bignum y, Fixnum x -> Z.equal (Z.of_int x) y
+  | Rational (n1, d1), Rational (n2, d2) -> Z.equal n1 n2 && Z.equal d1 d2
   | Flonum x, Flonum y -> Float.equal x y
   | Complex (r1, i1), Complex (r2, i2) -> equal r1 r2 && equal i1 i2
   | Char x, Char y -> Uchar.equal x y
@@ -162,7 +165,8 @@ let rec pp fmt = function
   | Bool true -> Format.fprintf fmt "#t"
   | Bool false -> Format.fprintf fmt "#f"
   | Fixnum n -> Format.fprintf fmt "%d" n
-  | Rational (n, d) -> Format.fprintf fmt "%d/%d" n d
+  | Bignum z -> Format.fprintf fmt "%s" (Z.to_string z)
+  | Rational (n, d) -> Format.fprintf fmt "%s/%s" (Z.to_string n) (Z.to_string d)
   | Flonum f ->
     Format.fprintf fmt "%s" (pp_flonum_part f)
   | Complex (re, im) ->
@@ -178,9 +182,12 @@ let rec pp fmt = function
      | Fixnum n ->
        if n < 0 then Format.fprintf fmt "%di" n
        else Format.fprintf fmt "+%di" n
+     | Bignum z ->
+       if Z.sign z < 0 then Format.fprintf fmt "%si" (Z.to_string z)
+       else Format.fprintf fmt "+%si" (Z.to_string z)
      | Rational (n, d) ->
-       if n < 0 then Format.fprintf fmt "%d/%di" n d
-       else Format.fprintf fmt "+%d/%di" n d
+       if Z.sign n < 0 then Format.fprintf fmt "%s/%si" (Z.to_string n) (Z.to_string d)
+       else Format.fprintf fmt "+%s/%si" (Z.to_string n) (Z.to_string d)
      | _ ->
        Format.fprintf fmt "+";
        pp fmt im;

@@ -76,6 +76,7 @@ static const value *cb_make_list;
 static const value *cb_is_nil;
 static const value *cb_is_bool;
 static const value *cb_is_fixnum;
+static const value *cb_is_integer;
 static const value *cb_is_flonum;
 static const value *cb_is_string;
 static const value *cb_is_symbol;
@@ -84,6 +85,7 @@ static const value *cb_is_vector;
 static const value *cb_is_true;
 static const value *cb_get_bool;
 static const value *cb_get_fixnum;
+static const value *cb_get_integer_string;
 static const value *cb_get_flonum;
 static const value *cb_get_string;
 static const value *cb_get_symbol_name;
@@ -119,6 +121,7 @@ static void ensure_cached(void) {
     cb_is_nil = caml_named_value("wile_is_nil");
     cb_is_bool = caml_named_value("wile_is_bool");
     cb_is_fixnum = caml_named_value("wile_is_fixnum");
+    cb_is_integer = caml_named_value("wile_is_integer");
     cb_is_flonum = caml_named_value("wile_is_flonum");
     cb_is_string = caml_named_value("wile_is_string");
     cb_is_symbol = caml_named_value("wile_is_symbol");
@@ -127,6 +130,7 @@ static void ensure_cached(void) {
     cb_is_true = caml_named_value("wile_is_true");
     cb_get_bool = caml_named_value("wile_get_bool");
     cb_get_fixnum = caml_named_value("wile_get_fixnum");
+    cb_get_integer_string = caml_named_value("wile_get_integer_string");
     cb_get_flonum = caml_named_value("wile_get_flonum");
     cb_get_string = caml_named_value("wile_get_string");
     cb_get_symbol_name = caml_named_value("wile_get_symbol_name");
@@ -330,6 +334,12 @@ int wile_is_fixnum(wile_inst_t inst, wile_val_t v) {
     return Int_val(r);
 }
 
+int wile_is_integer(wile_inst_t inst, wile_val_t v) {
+    ensure_cached();
+    value r = caml_callback2(*cb_is_integer, Val_int(inst), Val_int(v));
+    return Int_val(r);
+}
+
 int wile_is_flonum(wile_inst_t inst, wile_val_t v) {
     ensure_cached();
     value r = caml_callback2(*cb_is_flonum, Val_int(inst), Val_int(v));
@@ -378,6 +388,14 @@ long wile_fixnum_value(wile_inst_t inst, wile_val_t v) {
     ensure_cached();
     value r = caml_callback2(*cb_get_fixnum, Val_int(inst), Val_int(v));
     return (long)Int_val(r);
+}
+
+char *wile_integer_string(wile_inst_t inst, wile_val_t v) {
+    CAMLparam0(); CAMLlocal1(r);
+    ensure_cached();
+    r = caml_callback2(*cb_get_integer_string, Val_int(inst), Val_int(v));
+    char *s = strdup(String_val(r));
+    CAMLreturnT(char *, s);
 }
 
 double wile_flonum_value(wile_inst_t inst, wile_val_t v) {

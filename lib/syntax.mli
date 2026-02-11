@@ -14,7 +14,8 @@ type t = { loc : Loc.t; datum : datum }
 and datum =
   | Bool of bool
   | Fixnum of int
-  | Rational of int * int
+  | Bignum of Z.t
+  | Rational of Z.t * Z.t
   | Flonum of float
   | Complex of t * t
   | Char of Uchar.t

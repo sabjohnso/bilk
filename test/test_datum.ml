@@ -192,17 +192,34 @@ let test_datum_pp () =
     (Datum.to_string (Bytevector (Bytes.of_string "\x01\x02\x03")))
 
 let test_datum_rational () =
-  check_datum "1/2 eq" (Datum.Rational (1, 2)) (Datum.Rational (1, 2));
-  check_datum "-3/4 eq" (Datum.Rational (-3, 4)) (Datum.Rational (-3, 4));
+  check_datum "1/2 eq" (Datum.Rational (Z.of_int 1, Z.of_int 2)) (Datum.Rational (Z.of_int 1, Z.of_int 2));
+  check_datum "-3/4 eq" (Datum.Rational (Z.of_int (-3), Z.of_int 4)) (Datum.Rational (Z.of_int (-3), Z.of_int 4));
   Alcotest.(check bool) "1/2 != 1/3" false
-    (Datum.equal (Datum.Rational (1, 2)) (Datum.Rational (1, 3)));
+    (Datum.equal (Datum.Rational (Z.of_int 1, Z.of_int 2)) (Datum.Rational (Z.of_int 1, Z.of_int 3)));
   Alcotest.(check bool) "1/2 != 2/3" false
-    (Datum.equal (Datum.Rational (1, 2)) (Datum.Rational (2, 3)));
-  Alcotest.(check string) "1/2 pp" "1/2" (Datum.to_string (Datum.Rational (1, 2)));
-  Alcotest.(check string) "-3/4 pp" "-3/4" (Datum.to_string (Datum.Rational (-3, 4)));
+    (Datum.equal (Datum.Rational (Z.of_int 1, Z.of_int 2)) (Datum.Rational (Z.of_int 2, Z.of_int 3)));
+  Alcotest.(check string) "1/2 pp" "1/2" (Datum.to_string (Datum.Rational (Z.of_int 1, Z.of_int 2)));
+  Alcotest.(check string) "-3/4 pp" "-3/4" (Datum.to_string (Datum.Rational (Z.of_int (-3), Z.of_int 4)));
   Alcotest.(check string) "0/1 would be Fixnum" "0" (Datum.to_string (Datum.Fixnum 0));
   Alcotest.(check bool) "rational != fixnum" false
-    (Datum.equal (Datum.Rational (1, 2)) (Datum.Fixnum 1))
+    (Datum.equal (Datum.Rational (Z.of_int 1, Z.of_int 2)) (Datum.Fixnum 1))
+
+let test_datum_bignum () =
+  let big = Z.of_string "99999999999999999999999999999" in
+  check_datum "bignum eq" (Datum.Bignum big) (Datum.Bignum big);
+  Alcotest.(check bool) "bignum != different" false
+    (Datum.equal (Datum.Bignum big) (Datum.Bignum (Z.add big Z.one)));
+  Alcotest.(check string) "bignum pp" "99999999999999999999999999999"
+    (Datum.to_string (Datum.Bignum big));
+  Alcotest.(check string) "neg bignum pp" "-99999999999999999999999999999"
+    (Datum.to_string (Datum.Bignum (Z.neg big)));
+  (* cross-type Fixnum/Bignum equality *)
+  Alcotest.(check bool) "fixnum != bignum" false
+    (Datum.equal (Datum.Fixnum 42) (Datum.Bignum big));
+  Alcotest.(check bool) "fixnum = bignum(42)" true
+    (Datum.equal (Datum.Fixnum 42) (Datum.Bignum (Z.of_int 42)));
+  Alcotest.(check bool) "bignum(42) = fixnum" true
+    (Datum.equal (Datum.Bignum (Z.of_int 42)) (Datum.Fixnum 42))
 
 let test_datum_port () =
   let ip = Port.of_string "x" in
@@ -235,7 +252,7 @@ let test_datum_complex () =
   (* Test pp — exact *)
   Alcotest.(check string) "pp 3+4i" "3+4i" (Datum.to_string (Datum.Complex (Datum.Fixnum 3, Datum.Fixnum 4)));
   Alcotest.(check string) "pp 1-1i" "1-1i" (Datum.to_string (Datum.Complex (Datum.Fixnum 1, Datum.Fixnum (-1))));
-  Alcotest.(check string) "pp 1/2+3i" "1/2+3i" (Datum.to_string (Datum.Complex (Datum.Rational (1, 2), Datum.Fixnum 3)));
+  Alcotest.(check string) "pp 1/2+3i" "1/2+3i" (Datum.to_string (Datum.Complex (Datum.Rational (Z.of_int 1, Z.of_int 2), Datum.Fixnum 3)));
   (* Test pp — inexact *)
   Alcotest.(check string) "pp 3.+4.i" "3.+4.i" (Datum.to_string (Datum.Complex (Datum.Flonum 3.0, Datum.Flonum 4.0)));
   Alcotest.(check string) "pp 1.-1.i" "1.-1.i" (Datum.to_string (Datum.Complex (Datum.Flonum 1.0, Datum.Flonum (-1.0))));
@@ -264,6 +281,7 @@ let () =
        ; Alcotest.test_case "continuation" `Quick test_datum_continuation
        ; Alcotest.test_case "values" `Quick test_datum_values
        ; Alcotest.test_case "rational" `Quick test_datum_rational
+       ; Alcotest.test_case "bignum" `Quick test_datum_bignum
        ; Alcotest.test_case "port" `Quick test_datum_port
        ; Alcotest.test_case "complex" `Quick test_datum_complex
        ])

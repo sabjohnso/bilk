@@ -74,6 +74,7 @@ let parse_lib_name s =
       match p.Syntax.datum with
       | Syntax.Symbol name -> name
       | Syntax.Fixnum n -> string_of_int n
+      | Syntax.Bignum z -> Z.to_string z
       | _ -> error "library name: expected identifier or integer"
     ) parts
 
