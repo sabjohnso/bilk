@@ -23,7 +23,7 @@ Thumbs.db
 # Project notes (local only)
 CLAUDE.md
 PLAN.md
-SRFI.org
+*.org
 r7rs.pdf
 
 # Scheme
