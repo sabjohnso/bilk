@@ -2,7 +2,7 @@
 
     Provides types and functions for reading/writing LSP messages over
     a byte stream using the Content-Length framing protocol (same wire
-    format as DAP, different JSON envelope).  Uses {!Yojson.Safe}. *)
+    format as DAP, different JSON envelope).  Uses [Yojson.Safe]. *)
 
 (** {1 Exceptions} *)
 
