@@ -1,4 +1,0 @@
-#+TITLE: Known Issues — REPL Discoverability
-#+STARTUP: showall
-
-All issues from the initial review have been resolved.
