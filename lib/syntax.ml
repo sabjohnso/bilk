@@ -4,6 +4,7 @@ and datum =
   | Fixnum of int
   | Rational of int * int
   | Flonum of float
+  | Complex of t * t
   | Char of Uchar.t
   | Str of string
   | Symbol of string
@@ -21,6 +22,7 @@ let rec to_datum t =
   | Fixnum n -> Datum.Fixnum n
   | Rational (n, d) -> Datum.Rational (n, d)
   | Flonum f -> Datum.Flonum f
+  | Complex (re, im) -> Datum.Complex (to_datum re, to_datum im)
   | Char c -> Datum.Char c
   | Str s -> Datum.Str (Bytes.of_string s)
   | Symbol s -> Datum.Symbol s
@@ -36,6 +38,7 @@ let rec from_datum loc (d : Datum.t) =
     | Datum.Fixnum n -> Fixnum n
     | Datum.Rational (n, d) -> Rational (n, d)
     | Datum.Flonum f -> Flonum f
+    | Datum.Complex (re, im) -> Complex (from_datum loc re, from_datum loc im)
     | Datum.Char c -> Char c
     | Datum.Str s -> Str (Bytes.to_string s)
     | Datum.Symbol s -> Symbol s
@@ -64,6 +67,7 @@ let rec equal_datum a b =
   | Fixnum x, Fixnum y -> x = y
   | Rational (n1, d1), Rational (n2, d2) -> n1 = n2 && d1 = d2
   | Flonum x, Flonum y -> Float.equal x y
+  | Complex (r1, i1), Complex (r2, i2) -> equal_datum r1 r2 && equal_datum i1 i2
   | Char x, Char y -> Uchar.equal x y
   | Str x, Str y -> String.equal x y
   | Symbol x, Symbol y -> String.equal x y

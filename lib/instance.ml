@@ -46,17 +46,50 @@ let as_flonum name = function
   | Datum.Flonum f -> f
   | Datum.Fixnum n -> Float.of_int n
   | Datum.Rational (n, d) -> Float.of_int n /. Float.of_int d
+  | Datum.Complex _ -> runtime_error (Printf.sprintf "%s: expected real number, got complex" name)
   | v -> runtime_error (Printf.sprintf "%s: expected number, got %s" name (Datum.to_string v))
 
 let is_numeric = function
-  | Datum.Fixnum _ | Datum.Rational _ | Datum.Flonum _ -> true
+  | Datum.Fixnum _ | Datum.Rational _ | Datum.Flonum _ | Datum.Complex _ -> true
   | _ -> false
+
+let has_complex args =
+  List.exists (function Datum.Complex _ -> true | _ -> false) args
 
 let has_flonum args =
   List.exists (function Datum.Flonum _ -> true | _ -> false) args
 
 let has_rational args =
   List.exists (function Datum.Rational _ -> true | _ -> false) args
+
+let is_exact_datum = function
+  | Datum.Fixnum _ | Datum.Rational _ -> true | _ -> false
+
+let is_datum_zero = function
+  | Datum.Fixnum 0 -> true
+  | Datum.Rational (0, _) -> true
+  | Datum.Flonum f -> f = 0.0
+  | _ -> false
+
+let to_inexact_datum = function
+  | Datum.Fixnum n -> Datum.Flonum (float_of_int n)
+  | Datum.Rational (n, d) -> Datum.Flonum (float_of_int n /. float_of_int d)
+  | v -> v
+
+let as_complex name v =
+  match v with
+  | Datum.Complex (re, im) -> (re, im)
+  | Datum.Fixnum _ | Datum.Rational _ | Datum.Flonum _ -> (v, Datum.Fixnum 0)
+  | _ -> runtime_error (Printf.sprintf "%s: expected number, got %s" name (Datum.to_string v))
+
+let make_complex re im =
+  if is_datum_zero im then
+    (if is_exact_datum re && is_exact_datum im then re
+     else to_inexact_datum re)
+  else if is_exact_datum re && is_exact_datum im then
+    Datum.Complex (re, im)
+  else
+    Datum.Complex (to_inexact_datum re, to_inexact_datum im)
 
 let to_rational_pair name = function
   | Datum.Fixnum n -> (n, 1)
@@ -70,6 +103,8 @@ let chain_compare name cmp args =
   match args with
   | [] | [_] -> runtime_error (Printf.sprintf "%s: expected at least 2 arguments" name)
   | _ ->
+    if has_complex args then
+      runtime_error (Printf.sprintf "%s: not defined for complex numbers" name);
     let rec go = function
       | [] | [_] -> Datum.Bool true
       | a :: ((b :: _) as rest) ->
@@ -82,11 +117,14 @@ let chain_compare name cmp args =
 
 (* --- Arithmetic primitives --- *)
 
-let prim_add args =
+let rec prim_add args =
   match args with
   | [] -> Datum.Fixnum 0
   | _ ->
-  if has_flonum args then
+  if has_complex args then
+    let pairs = List.map (as_complex "+") args in
+    make_complex (prim_add (List.map fst pairs)) (prim_add (List.map snd pairs))
+  else if has_flonum args then
     Datum.Flonum (List.fold_left (fun acc x -> acc +. as_flonum "+" x) 0.0 args)
   else if has_rational args then
     List.fold_left (fun acc x ->
@@ -97,15 +135,23 @@ let prim_add args =
   else
     Datum.Fixnum (List.fold_left (fun acc x -> acc + as_fixnum "+" x) 0 args)
 
-let prim_sub args =
+and prim_sub args =
   match args with
   | [] -> runtime_error "-: expected at least 1 argument"
+  | [Datum.Complex (re, im)] -> make_complex (prim_sub [re]) (prim_sub [im])
   | [Datum.Rational (n, d)] -> Datum.Rational (-n, d)
   | [x] ->
     if has_flonum [x] then Datum.Flonum (-. (as_flonum "-" x))
     else Datum.Fixnum (- (as_fixnum "-" x))
   | first :: rest ->
-    if has_flonum args then
+    if has_complex args then
+      let (fr, fi) = as_complex "-" first in
+      let (rr, ri) = List.fold_left (fun (ar, ai) x ->
+        let (br, bi) = as_complex "-" x in
+        (prim_sub [ar; br], prim_sub [ai; bi])
+      ) (fr, fi) rest in
+      make_complex rr ri
+    else if has_flonum args then
       Datum.Flonum (List.fold_left (fun acc x -> acc -. as_flonum "-" x) (as_flonum "-" first) rest)
     else if has_rational args then
       List.fold_left (fun acc x ->
@@ -116,11 +162,18 @@ let prim_sub args =
     else
       Datum.Fixnum (List.fold_left (fun acc x -> acc - as_fixnum "-" x) (as_fixnum "-" first) rest)
 
-let prim_mul args =
+and prim_mul args =
   match args with
   | [] -> Datum.Fixnum 1
   | _ ->
-  if has_flonum args then
+  if has_complex args then
+    let fold (ar, ai) x =
+      let (br, bi) = as_complex "*" x in
+      (prim_sub [prim_mul [ar; br]; prim_mul [ai; bi]],
+       prim_add [prim_mul [ar; bi]; prim_mul [ai; br]]) in
+    let (r, i) = List.fold_left fold (as_complex "*" (List.hd args)) (List.tl args) in
+    make_complex r i
+  else if has_flonum args then
     Datum.Flonum (List.fold_left (fun acc x -> acc *. as_flonum "*" x) 1.0 args)
   else if has_rational args then
     List.fold_left (fun acc x ->
@@ -133,7 +186,31 @@ let prim_mul args =
 
 let prim_lt args = chain_compare "<" (<) args
 
-let prim_num_eq args = chain_compare "=" Float.equal args
+let real_equal a b = match a, b with
+  | Datum.Fixnum x, Datum.Fixnum y -> x = y
+  | Datum.Flonum x, Datum.Flonum y -> Float.equal x y
+  | Datum.Rational (n1, d1), Datum.Rational (n2, d2) -> n1 * d2 = n2 * d1
+  | Datum.Fixnum n, Datum.Flonum f | Datum.Flonum f, Datum.Fixnum n -> Float.equal (float_of_int n) f
+  | Datum.Fixnum n, Datum.Rational (nr, dr) | Datum.Rational (nr, dr), Datum.Fixnum n -> n * dr = nr
+  | Datum.Rational (n, d), Datum.Flonum f | Datum.Flonum f, Datum.Rational (n, d) ->
+    Float.equal (float_of_int n /. float_of_int d) f
+  | _ -> false
+
+let prim_num_eq args =
+  match args with
+  | [] | [_] -> runtime_error "=: expected at least 2 arguments"
+  | _ ->
+    let rec go = function
+      | [] | [_] -> Datum.Bool true
+      | a :: ((b :: _) as rest) ->
+        if is_numeric a && is_numeric b then begin
+          let (ar, ai) = as_complex "=" a in
+          let (br, bi) = as_complex "=" b in
+          if real_equal ar br && real_equal ai bi then go rest
+          else Datum.Bool false
+        end else runtime_error "=: expected numeric arguments"
+    in
+    go args
 
 let prim_gt args = chain_compare ">" (>) args
 
@@ -176,7 +253,7 @@ let prim_not args =
 
 (* --- Equivalence primitives --- *)
 
-let prim_eqv args =
+let rec prim_eqv args =
   match args with
   | [a; b] ->
     let result = match (a, b) with
@@ -184,6 +261,10 @@ let prim_eqv args =
       | Datum.Fixnum x, Datum.Fixnum y -> x = y
       | Datum.Rational (n1, d1), Datum.Rational (n2, d2) -> n1 = n2 && d1 = d2
       | Datum.Flonum x, Datum.Flonum y -> Float.equal x y
+      | Datum.Complex (r1, i1), Datum.Complex (r2, i2) ->
+        (match prim_eqv [r1; r2] with Datum.Bool true ->
+          (match prim_eqv [i1; i2] with Datum.Bool true -> true | _ -> false)
+        | _ -> false)
       | Datum.Char x, Datum.Char y -> Uchar.equal x y
       | Datum.Symbol x, Datum.Symbol y -> String.equal x y
       | Datum.Nil, Datum.Nil -> true
@@ -241,11 +322,16 @@ let prim_values args =
 
 (* --- Numeric primitives --- *)
 
-let prim_div args =
+let rec prim_div args =
   match args with
   | [] -> runtime_error "/: expected at least 1 argument"
   | [x] ->
     (match x with
+     | Datum.Complex (a, b) ->
+       (* 1/(a+bi) = (a-bi)/(a²+b²) *)
+       let denom = prim_add [prim_mul [a; a]; prim_mul [b; b]] in
+       if is_datum_zero denom then runtime_error "/: division by zero";
+       make_complex (prim_div [a; denom]) (prim_div [prim_sub [b]; denom])
      | Datum.Fixnum 0 -> runtime_error "/: division by zero"
      | Datum.Fixnum n -> make_rational 1 n
      | Datum.Rational (n, d) ->
@@ -256,7 +342,17 @@ let prim_div args =
        Datum.Flonum (1.0 /. f)
      | v -> runtime_error (Printf.sprintf "/: expected number, got %s" (Datum.to_string v)))
   | first :: rest ->
-    if has_flonum args then
+    if has_complex args then
+      List.fold_left (fun acc x ->
+        let (ar, ai) = as_complex "/" acc in
+        let (cr, ci) = as_complex "/" x in
+        let denom = prim_add [prim_mul [cr; cr]; prim_mul [ci; ci]] in
+        if is_datum_zero denom then runtime_error "/: division by zero";
+        make_complex
+          (prim_div [prim_add [prim_mul [ar; cr]; prim_mul [ai; ci]]; denom])
+          (prim_div [prim_sub [prim_mul [ai; cr]; prim_mul [ar; ci]]; denom])
+      ) first rest
+    else if has_flonum args then
       let result = List.fold_left (fun acc x ->
         let d = as_flonum "/" x in
         if d = 0.0 then runtime_error "/: division by zero";
@@ -276,12 +372,14 @@ let prim_abs args =
   | [Datum.Fixnum n] -> Datum.Fixnum (abs n)
   | [Datum.Rational (n, d)] -> Datum.Rational (abs n, d)
   | [Datum.Flonum f] -> Datum.Flonum (Float.abs f)
+  | [Datum.Complex _] -> runtime_error "abs: not defined for complex numbers"
   | [_] -> runtime_error "abs: expected number"
   | _ -> runtime_error (Printf.sprintf "abs: expected 1 argument, got %d" (List.length args))
 
 let prim_min args =
   match args with
   | [] -> runtime_error "min: expected at least 1 argument"
+  | _ when has_complex args -> runtime_error "min: not defined for complex numbers"
   | first :: rest ->
     if has_flonum args then
       Datum.Flonum (List.fold_left (fun acc x -> Float.min acc (as_flonum "min" x))
@@ -294,6 +392,7 @@ let prim_min args =
 let prim_max args =
   match args with
   | [] -> runtime_error "max: expected at least 1 argument"
+  | _ when has_complex args -> runtime_error "max: not defined for complex numbers"
   | first :: rest ->
     if has_flonum args then
       Datum.Flonum (List.fold_left (fun acc x -> Float.max acc (as_flonum "max" x))
@@ -341,6 +440,7 @@ let prim_floor args =
     if n >= 0 then Datum.Fixnum (n / d)
     else Datum.Fixnum (- ((-n + d - 1) / d))
   | [Datum.Flonum f] -> Datum.Flonum (floor f)
+  | [Datum.Complex _] -> runtime_error "floor: not defined for complex numbers"
   | [_] -> runtime_error "floor: expected number"
   | _ -> runtime_error (Printf.sprintf "floor: expected 1 argument, got %d" (List.length args))
 
@@ -352,6 +452,7 @@ let prim_ceiling args =
     if n >= 0 then Datum.Fixnum ((n + d - 1) / d)
     else Datum.Fixnum (- ((-n) / d))
   | [Datum.Flonum f] -> Datum.Flonum (ceil f)
+  | [Datum.Complex _] -> runtime_error "ceiling: not defined for complex numbers"
   | [_] -> runtime_error "ceiling: expected number"
   | _ -> runtime_error (Printf.sprintf "ceiling: expected 1 argument, got %d" (List.length args))
 
@@ -362,6 +463,7 @@ let prim_truncate args =
     (* Truncate toward zero *)
     Datum.Fixnum (n / d)
   | [Datum.Flonum f] -> Datum.Flonum (Float.of_int (int_of_float f))
+  | [Datum.Complex _] -> runtime_error "truncate: not defined for complex numbers"
   | [_] -> runtime_error "truncate: expected number"
   | _ -> runtime_error (Printf.sprintf "truncate: expected 1 argument, got %d" (List.length args))
 
@@ -398,6 +500,7 @@ let prim_round args =
       else Float.round f
     in
     Datum.Flonum rounded
+  | [Datum.Complex _] -> runtime_error "round: not defined for complex numbers"
   | [_] -> runtime_error "round: expected number"
   | _ -> runtime_error (Printf.sprintf "round: expected 1 argument, got %d" (List.length args))
 
@@ -483,13 +586,18 @@ let prim_exact_to_inexact args =
   | [Datum.Fixnum n] -> Datum.Flonum (float_of_int n)
   | [Datum.Rational (n, d)] -> Datum.Flonum (float_of_int n /. float_of_int d)
   | [Datum.Flonum f] -> Datum.Flonum f
+  | [Datum.Complex (re, im)] -> make_complex (to_inexact_datum re) (to_inexact_datum im)
   | [_] -> runtime_error "inexact: expected number"
   | _ -> runtime_error (Printf.sprintf "inexact: expected 1 argument, got %d" (List.length args))
 
-let prim_inexact_to_exact args =
+let rec prim_inexact_to_exact args =
   match args with
   | [Datum.Fixnum n] -> Datum.Fixnum n
   | [Datum.Rational _ as v] -> v
+  | [Datum.Complex (re, im)] ->
+    let exact_re = prim_inexact_to_exact [re] in
+    let exact_im = prim_inexact_to_exact [im] in
+    make_complex exact_re exact_im
   | [Datum.Flonum f] ->
     if Float.is_integer f then Datum.Fixnum (Float.to_int f)
     else
@@ -508,11 +616,65 @@ let prim_inexact_to_exact args =
   | [_] -> runtime_error "exact: expected number"
   | _ -> runtime_error (Printf.sprintf "exact: expected 1 argument, got %d" (List.length args))
 
+let complex_exp (r, i) =
+  let er = exp r in
+  (er *. cos i, er *. sin i)
+
+let complex_log (r, i) =
+  let mag = sqrt (r *. r +. i *. i) in
+  let ang = atan2 i r in
+  (log mag, ang)
+
+let complex_mul (ar, ai) (br, bi) =
+  (ar *. br -. ai *. bi, ar *. bi +. ai *. br)
+
+let as_complex_floats name v =
+  match v with
+  | Datum.Complex (re, im) -> (as_flonum name re, as_flonum name im)
+  | _ -> (as_flonum name v, 0.0)
+
+let make_complex_from_floats r i =
+  make_complex (Datum.Flonum r) (Datum.Flonum i)
+
 let prim_expt args =
   match args with
   | [a; b] ->
-    if has_flonum [a; b] then
-      Datum.Flonum (Float.pow (as_flonum "expt" a) (as_flonum "expt" b))
+    if has_complex [a; b] then
+      (* For exact complex base with non-negative integer exponent: use component-wise mul *)
+      (match a, b with
+       | Datum.Complex _, Datum.Fixnum n when n >= 0 ->
+         let (re, im) = as_complex "expt" a in
+         let rec pow_complex (ar, ai) e =
+           if e = 0 then (Datum.Fixnum 1, Datum.Fixnum 0)
+           else if e = 1 then (ar, ai)
+           else
+             let (pr, pi) = pow_complex (ar, ai) (e - 1) in
+             (prim_sub [prim_mul [pr; ar]; prim_mul [pi; ai]],
+              prim_add [prim_mul [pr; ai]; prim_mul [pi; ar]])
+         in
+         let (rr, ri) = pow_complex (re, im) n in
+         make_complex rr ri
+       | _ ->
+         (* z^w = exp(w * ln(z)) *)
+         let z = as_complex_floats "expt" a in
+         let w = as_complex_floats "expt" b in
+         let lnz = complex_log z in
+         let wlnz = complex_mul w lnz in
+         let (r, i) = complex_exp wlnz in
+         make_complex_from_floats r i)
+    else if has_flonum [a; b] then
+      let af = as_flonum "expt" a in
+      let bf = as_flonum "expt" b in
+      if af < 0.0 && not (Float.is_integer bf) then
+        (* Negative base with non-integer exponent → complex *)
+        let z = (af, 0.0) in
+        let w = (bf, 0.0) in
+        let lnz = complex_log z in
+        let wlnz = complex_mul w lnz in
+        let (r, i) = complex_exp wlnz in
+        make_complex_from_floats r i
+      else
+        Datum.Flonum (Float.pow af bf)
     else
       (match a, b with
        | (Datum.Rational (n, d)), Datum.Fixnum exp ->
@@ -544,20 +706,42 @@ let prim_expt args =
 
 let prim_sqrt args =
   match args with
-  | [Datum.Rational (n, d)] ->
-    let sn = Float.sqrt (float_of_int (abs n)) in
-    let sd = Float.sqrt (float_of_int d) in
-    if n >= 0 && Float.is_integer sn && Float.is_integer sd then
-      make_rational (Float.to_int sn) (Float.to_int sd)
+  | [Datum.Complex (re, im)] ->
+    let r = as_flonum "sqrt" re and i = as_flonum "sqrt" im in
+    let mag = sqrt (r *. r +. i *. i) in
+    let ang = atan2 i r in
+    let sm = sqrt mag in
+    let ha = ang /. 2.0 in
+    make_complex_from_floats (sm *. cos ha) (sm *. sin ha)
+  | [Datum.Fixnum n] when n < 0 ->
+    let s = Float.sqrt (float_of_int (-n)) in
+    if Float.is_integer s then
+      make_complex (Datum.Fixnum 0) (Datum.Fixnum (Float.to_int s))
     else
-      Datum.Flonum (Float.sqrt (float_of_int n /. float_of_int d))
+      make_complex_from_floats 0.0 s
+  | [Datum.Rational (n, d)] ->
+    if n < 0 then
+      (* Negative rational → complex *)
+      let f = float_of_int (-n) /. float_of_int d in
+      let s = sqrt f in
+      make_complex_from_floats 0.0 s
+    else
+      let sn = Float.sqrt (float_of_int n) in
+      let sd = Float.sqrt (float_of_int d) in
+      if Float.is_integer sn && Float.is_integer sd then
+        make_rational (Float.to_int sn) (Float.to_int sd)
+      else
+        Datum.Flonum (Float.sqrt (float_of_int n /. float_of_int d))
   | [v] ->
     let f = as_flonum "sqrt" v in
-    let r = Float.sqrt f in
-    (match v with
-     | Datum.Fixnum _ when Float.is_integer r && r *. r = f ->
-       Datum.Fixnum (Float.to_int r)
-     | _ -> Datum.Flonum r)
+    if f < 0.0 then
+      make_complex_from_floats 0.0 (sqrt (Float.abs f))
+    else
+      let r = Float.sqrt f in
+      (match v with
+       | Datum.Fixnum _ when Float.is_integer r && r *. r = f ->
+         Datum.Fixnum (Float.to_int r)
+       | _ -> Datum.Flonum r)
   | _ -> runtime_error (Printf.sprintf "sqrt: expected 1 argument, got %d" (List.length args))
 
 let prim_exact_integer_sqrt args =
@@ -574,43 +758,124 @@ let prim_exact_integer_sqrt args =
 
 let prim_exp args =
   match args with
+  | [Datum.Complex (re, im)] ->
+    let r = as_flonum "exp" re and i = as_flonum "exp" im in
+    let (er, ei) = complex_exp (r, i) in
+    make_complex_from_floats er ei
   | [v] -> Datum.Flonum (Float.exp (as_flonum "exp" v))
   | _ -> runtime_error (Printf.sprintf "exp: expected 1 argument, got %d" (List.length args))
 
 let prim_log args =
   match args with
-  | [v] -> Datum.Flonum (Float.log (as_flonum "log" v))
+  | [Datum.Complex (re, im)] ->
+    let r = as_flonum "log" re and i = as_flonum "log" im in
+    let (lr, li) = complex_log (r, i) in
+    make_complex_from_floats lr li
+  | [v] ->
+    let f = as_flonum "log" v in
+    if f < 0.0 then
+      let (lr, li) = complex_log (f, 0.0) in
+      make_complex_from_floats lr li
+    else
+      Datum.Flonum (Float.log f)
   | [v; base] ->
-    Datum.Flonum (Float.log (as_flonum "log" v) /. Float.log (as_flonum "log" base))
+    let is_real_nonneg x = match x with
+      | Datum.Complex _ -> false
+      | _ -> as_flonum "log" x >= 0.0
+    in
+    if is_real_nonneg v && is_real_nonneg base then
+      Datum.Flonum (Float.log (as_flonum "log" v) /. Float.log (as_flonum "log" base))
+    else
+      let lv = match v with
+        | Datum.Complex (re, im) -> complex_log (as_flonum "log" re, as_flonum "log" im)
+        | _ ->
+          let f = as_flonum "log" v in
+          if f < 0.0 then complex_log (f, 0.0) else (Float.log f, 0.0)
+      in
+      let lb = match base with
+        | Datum.Complex (re, im) -> complex_log (as_flonum "log" re, as_flonum "log" im)
+        | _ ->
+          let f = as_flonum "log" base in
+          if f < 0.0 then complex_log (f, 0.0) else (Float.log f, 0.0)
+      in
+      let denom = fst lb *. fst lb +. snd lb *. snd lb in
+      let r = (fst lv *. fst lb +. snd lv *. snd lb) /. denom in
+      let i = (snd lv *. fst lb -. fst lv *. snd lb) /. denom in
+      make_complex_from_floats r i
   | _ -> runtime_error (Printf.sprintf "log: expected 1 or 2 arguments, got %d" (List.length args))
 
 let prim_sin args =
   match args with
+  | [Datum.Complex (re, im)] ->
+    let a = as_flonum "sin" re and b = as_flonum "sin" im in
+    (* sin(a+bi) = sin(a)cosh(b) + i*cos(a)sinh(b) *)
+    make_complex_from_floats (sin a *. cosh b) (cos a *. sinh b)
   | [v] -> Datum.Flonum (Float.sin (as_flonum "sin" v))
   | _ -> runtime_error (Printf.sprintf "sin: expected 1 argument, got %d" (List.length args))
 
 let prim_cos args =
   match args with
+  | [Datum.Complex (re, im)] ->
+    let a = as_flonum "cos" re and b = as_flonum "cos" im in
+    (* cos(a+bi) = cos(a)cosh(b) - i*sin(a)sinh(b) *)
+    make_complex_from_floats (cos a *. cosh b) (-. (sin a *. sinh b))
   | [v] -> Datum.Flonum (Float.cos (as_flonum "cos" v))
   | _ -> runtime_error (Printf.sprintf "cos: expected 1 argument, got %d" (List.length args))
 
 let prim_tan args =
   match args with
+  | [Datum.Complex _ as z] ->
+    (* tan(z) = sin(z)/cos(z) *)
+    let sz = prim_sin [z] in
+    let cz = prim_cos [z] in
+    prim_div [sz; cz]
   | [v] -> Datum.Flonum (Float.tan (as_flonum "tan" v))
   | _ -> runtime_error (Printf.sprintf "tan: expected 1 argument, got %d" (List.length args))
 
 let prim_asin args =
   match args with
+  | [Datum.Complex (re, im)] ->
+    let r = as_flonum "asin" re and i = as_flonum "asin" im in
+    (* asin(z) = -i * ln(iz + sqrt(1-z^2)) *)
+    let z2 = complex_mul (r, i) (r, i) in
+    let one_minus_z2 = (1.0 -. fst z2, -. (snd z2)) in
+    let sqrt_mag = sqrt (sqrt (fst one_minus_z2 *. fst one_minus_z2 +. snd one_minus_z2 *. snd one_minus_z2)) in
+    let sqrt_ang = atan2 (snd one_minus_z2) (fst one_minus_z2) /. 2.0 in
+    let sqrt_r = sqrt_mag *. cos sqrt_ang in
+    let sqrt_i = sqrt_mag *. sin sqrt_ang in
+    let iz = (-.i, r) in
+    let sum = (fst iz +. sqrt_r, snd iz +. sqrt_i) in
+    let ln_sum = complex_log sum in
+    (* -i * ln_sum *)
+    let (rr, ri) = complex_mul (0.0, -1.0) ln_sum in
+    make_complex_from_floats rr ri
   | [v] -> Datum.Flonum (Float.asin (as_flonum "asin" v))
   | _ -> runtime_error (Printf.sprintf "asin: expected 1 argument, got %d" (List.length args))
 
 let prim_acos args =
   match args with
+  | [Datum.Complex (_, _) as z] ->
+    (* acos(z) = pi/2 - asin(z) *)
+    let asin_z = prim_asin [z] in
+    let (ar, ai) = as_complex_floats "acos" asin_z in
+    make_complex_from_floats (Float.pi /. 2.0 -. ar) (-.ai)
   | [v] -> Datum.Flonum (Float.acos (as_flonum "acos" v))
   | _ -> runtime_error (Printf.sprintf "acos: expected 1 argument, got %d" (List.length args))
 
 let prim_atan args =
   match args with
+  | [Datum.Complex (re, im)] ->
+    let r = as_flonum "atan" re and i = as_flonum "atan" im in
+    (* atan(z) = (ln(1+iz) - ln(1-iz)) / (2i) *)
+    let iz = (-.i, r) in
+    let one_plus_iz = (1.0 +. fst iz, snd iz) in
+    let one_minus_iz = (1.0 -. fst iz, -. (snd iz)) in
+    let ln1 = complex_log one_plus_iz in
+    let ln2 = complex_log one_minus_iz in
+    let diff = (fst ln1 -. fst ln2, snd ln1 -. snd ln2) in
+    (* diff / (2i) = diff * (-i/2) *)
+    let (rr, ri) = complex_mul diff (0.0, -0.5) in
+    make_complex_from_floats rr ri
   | [v] -> Datum.Flonum (Float.atan (as_flonum "atan" v))
   | [y; x] -> Datum.Flonum (Float.atan2 (as_flonum "atan" y) (as_flonum "atan" x))
   | _ -> runtime_error (Printf.sprintf "atan: expected 1 or 2 arguments, got %d" (List.length args))
@@ -620,6 +885,9 @@ let prim_finite args =
   | [Datum.Fixnum _] -> Datum.Bool true
   | [Datum.Rational _] -> Datum.Bool true
   | [Datum.Flonum f] -> Datum.Bool (Float.is_finite f)
+  | [Datum.Complex (re, im)] ->
+    if is_exact_datum re then Datum.Bool true
+    else Datum.Bool (Float.is_finite (as_flonum "finite?" re) && Float.is_finite (as_flonum "finite?" im))
   | [_] -> runtime_error "finite?: expected number"
   | _ -> runtime_error (Printf.sprintf "finite?: expected 1 argument, got %d" (List.length args))
 
@@ -628,6 +896,9 @@ let prim_infinite args =
   | [Datum.Fixnum _] -> Datum.Bool false
   | [Datum.Rational _] -> Datum.Bool false
   | [Datum.Flonum f] -> Datum.Bool (Float.is_infinite f)
+  | [Datum.Complex (re, im)] ->
+    if is_exact_datum re then Datum.Bool false
+    else Datum.Bool (Float.is_infinite (as_flonum "infinite?" re) || Float.is_infinite (as_flonum "infinite?" im))
   | [_] -> runtime_error "infinite?: expected number"
   | _ -> runtime_error (Printf.sprintf "infinite?: expected 1 argument, got %d" (List.length args))
 
@@ -636,13 +907,17 @@ let prim_nan args =
   | [Datum.Fixnum _] -> Datum.Bool false
   | [Datum.Rational _] -> Datum.Bool false
   | [Datum.Flonum f] -> Datum.Bool (Float.is_nan f)
+  | [Datum.Complex (re, im)] ->
+    if is_exact_datum re then Datum.Bool false
+    else Datum.Bool (Float.is_nan (as_flonum "nan?" re) || Float.is_nan (as_flonum "nan?" im))
   | [_] -> runtime_error "nan?: expected number"
   | _ -> runtime_error (Printf.sprintf "nan?: expected 1 argument, got %d" (List.length args))
 
-(* --- Complex stubs (reals only) --- *)
+(* --- Complex number operations --- *)
 
 let prim_real_part args =
   match args with
+  | [Datum.Complex (re, _)] -> re
   | [Datum.Fixnum _ as v] -> v
   | [Datum.Rational _ as v] -> v
   | [Datum.Flonum _ as v] -> v
@@ -651,6 +926,7 @@ let prim_real_part args =
 
 let prim_imag_part args =
   match args with
+  | [Datum.Complex (_, im)] -> im
   | [Datum.Fixnum _] -> Datum.Fixnum 0
   | [Datum.Rational _] -> Datum.Fixnum 0
   | [Datum.Flonum _] -> Datum.Flonum 0.0
@@ -659,6 +935,9 @@ let prim_imag_part args =
 
 let prim_magnitude args =
   match args with
+  | [Datum.Complex (re, im)] ->
+    let r = as_flonum "magnitude" re and i = as_flonum "magnitude" im in
+    Datum.Flonum (sqrt (r *. r +. i *. i))
   | [Datum.Fixnum n] -> Datum.Fixnum (abs n)
   | [Datum.Rational (n, d)] -> Datum.Rational (abs n, d)
   | [Datum.Flonum f] -> Datum.Flonum (Float.abs f)
@@ -667,6 +946,9 @@ let prim_magnitude args =
 
 let prim_angle args =
   match args with
+  | [Datum.Complex (re, im)] ->
+    let r = as_flonum "angle" re and i = as_flonum "angle" im in
+    Datum.Flonum (atan2 i r)
   | [Datum.Fixnum n] -> Datum.Flonum (if n >= 0 then 0.0 else Float.pi)
   | [Datum.Rational (n, _)] -> Datum.Flonum (if n >= 0 then 0.0 else Float.pi)
   | [Datum.Flonum f] -> Datum.Flonum (if f >= 0.0 then 0.0 else Float.pi)
@@ -676,9 +958,11 @@ let prim_angle args =
 let prim_make_rectangular args =
   match args with
   | [real; imag] ->
-    let i = as_flonum "make-rectangular" imag in
-    if i = 0.0 then real
-    else runtime_error "make-rectangular: complex numbers not supported"
+    (match real, imag with
+     | (Datum.Fixnum _ | Datum.Rational _ | Datum.Flonum _),
+       (Datum.Fixnum _ | Datum.Rational _ | Datum.Flonum _) ->
+       make_complex real imag
+     | _ -> runtime_error "make-rectangular: expected real numbers")
   | _ -> runtime_error (Printf.sprintf "make-rectangular: expected 2 arguments, got %d" (List.length args))
 
 let prim_make_polar args =
@@ -686,11 +970,7 @@ let prim_make_polar args =
   | [r; theta] ->
     let rf = as_flonum "make-polar" r in
     let tf = as_flonum "make-polar" theta in
-    let real = rf *. Float.cos tf in
-    let imag = rf *. Float.sin tf in
-    if Float.abs imag < 1e-15 then
-      Datum.Flonum real
-    else runtime_error "make-polar: complex numbers not supported"
+    make_complex_from_floats (rf *. cos tf) (rf *. sin tf)
   | _ -> runtime_error (Printf.sprintf "make-polar: expected 2 arguments, got %d" (List.length args))
 
 let prim_number_to_string args =
@@ -703,6 +983,7 @@ let prim_number_to_string args =
         if Float.is_nan f then "+nan.0"
         else if Float.is_infinite f then (if f > 0.0 then "+inf.0" else "-inf.0")
         else string_of_float f
+      | Datum.Complex _ -> Datum.to_string v
       | _ -> runtime_error "number->string: expected number"
     in
     Datum.Str (Bytes.of_string s)
@@ -726,6 +1007,75 @@ let prim_number_to_string args =
     Datum.Str (Bytes.of_string s)
   | _ -> runtime_error "number->string: expected 1 or 2 arguments"
 
+let try_parse_real str =
+  try Some (Datum.Fixnum (int_of_string str))
+  with _ ->
+    match String.index_opt str '/' with
+    | Some slash when slash > 0 && slash < String.length str - 1 ->
+      let num_str = String.sub str 0 slash in
+      let den_str = String.sub str (slash + 1) (String.length str - slash - 1) in
+      (try
+        let n = int_of_string num_str in
+        let d = int_of_string den_str in
+        if d = 0 then None else Some (make_rational n d)
+       with _ -> None)
+    | _ ->
+      try Some (Datum.Flonum (float_of_string str))
+      with _ -> None
+
+let try_parse_complex str =
+  let len = String.length str in
+  let str_lower = String.lowercase_ascii str in
+  if str_lower = "+i" then Some (make_complex (Datum.Fixnum 0) (Datum.Fixnum 1))
+  else if str_lower = "-i" then Some (make_complex (Datum.Fixnum 0) (Datum.Fixnum (-1)))
+  else if len > 1 && (str.[len - 1] = 'i' || str.[len - 1] = 'I') then begin
+    let body = String.sub str 0 (len - 1) in
+    let body_len = String.length body in
+    let sep_pos = ref (-1) in
+    for j = body_len - 1 downto 1 do
+      if !sep_pos = (-1) then begin
+        let c = body.[j] in
+        if (c = '+' || c = '-') then begin
+          let prev = body.[j - 1] in
+          if prev <> 'e' && prev <> 'E' then
+            sep_pos := j
+        end
+      end
+    done;
+    if !sep_pos > 0 then begin
+      let real_str = String.sub body 0 !sep_pos in
+      let imag_str = String.sub body !sep_pos (body_len - !sep_pos) in
+      let imag_v =
+        if imag_str = "+" then Some (Datum.Fixnum 1)
+        else if imag_str = "-" then Some (Datum.Fixnum (-1))
+        else try_parse_real imag_str
+      in
+      match imag_v with
+      | None -> None
+      | Some im ->
+        (match try_parse_real real_str with
+         | Some re -> Some (make_complex re im)
+         | None -> None)
+    end else begin
+      if body = "+" then Some (make_complex (Datum.Fixnum 0) (Datum.Fixnum 1))
+      else if body = "-" then Some (make_complex (Datum.Fixnum 0) (Datum.Fixnum (-1)))
+      else match try_parse_real body with
+        | Some im -> Some (make_complex (Datum.Fixnum 0) im)
+        | None -> None
+    end
+  end
+  else if String.contains str '@' then begin
+    let at_pos = String.index str '@' in
+    let r_str = String.sub str 0 at_pos in
+    let t_str = String.sub str (at_pos + 1) (len - at_pos - 1) in
+    try
+      let r = float_of_string r_str in
+      let t = float_of_string t_str in
+      Some (make_complex_from_floats (r *. cos t) (r *. sin t))
+    with _ -> None
+  end
+  else None
+
 let prim_string_to_number args =
   match args with
   | [Datum.Str s] ->
@@ -745,7 +1095,10 @@ let prim_string_to_number args =
           with _ -> Datum.Bool false)
        | _ ->
          try Datum.Flonum (float_of_string str)
-         with _ -> Datum.Bool false)
+         with _ ->
+           match try_parse_complex str with
+           | Some v -> v
+           | None -> Datum.Bool false)
   | [Datum.Str s; Datum.Fixnum radix] ->
     let str = Bytes.to_string s in
     let prefix = match radix with
@@ -777,6 +1130,7 @@ let prim_numerator args =
      | Datum.Rational (n, _) -> Datum.Flonum (float_of_int n)
      | Datum.Fixnum n -> Datum.Flonum (float_of_int n)
      | _ -> runtime_error "numerator: internal error")
+  | [Datum.Complex _] -> runtime_error "numerator: not defined for complex numbers"
   | [_] -> runtime_error "numerator: expected number"
   | _ -> runtime_error (Printf.sprintf "numerator: expected 1 argument, got %d" (List.length args))
 
@@ -801,6 +1155,7 @@ let prim_denominator args =
      | Datum.Rational (_, d) -> Datum.Flonum (float_of_int d)
      | Datum.Fixnum _ -> Datum.Flonum 1.0
      | _ -> runtime_error "denominator: internal error")
+  | [Datum.Complex _] -> runtime_error "denominator: not defined for complex numbers"
   | [_] -> runtime_error "denominator: expected number"
   | _ -> runtime_error (Printf.sprintf "denominator: expected 1 argument, got %d" (List.length args))
 
@@ -812,6 +1167,7 @@ let rec scheme_equal a b =
   | Datum.Fixnum x, Datum.Fixnum y -> x = y
   | Datum.Rational (n1, d1), Datum.Rational (n2, d2) -> n1 = n2 && d1 = d2
   | Datum.Flonum x, Datum.Flonum y -> Float.equal x y
+  | Datum.Complex (r1, i1), Datum.Complex (r2, i2) -> scheme_equal r1 r2 && scheme_equal i1 i2
   | Datum.Char x, Datum.Char y -> Uchar.equal x y
   | Datum.Str x, Datum.Str y -> Bytes.equal x y
   | Datum.Symbol x, Datum.Symbol y -> String.equal x y
@@ -1527,15 +1883,23 @@ let prim_boolean_eq args =
 
 let prim_number args =
   match args with
-  | [Datum.Fixnum _ | Datum.Rational _ | Datum.Flonum _] -> Datum.Bool true
+  | [Datum.Fixnum _ | Datum.Rational _ | Datum.Flonum _ | Datum.Complex _] -> Datum.Bool true
   | [_] -> Datum.Bool false
   | _ -> runtime_error (Printf.sprintf "number?: expected 1 argument, got %d" (List.length args))
+
+let prim_real args =
+  match args with
+  | [Datum.Fixnum _ | Datum.Rational _ | Datum.Flonum _] -> Datum.Bool true
+  | [Datum.Complex _] -> Datum.Bool false
+  | [_] -> Datum.Bool false
+  | _ -> runtime_error (Printf.sprintf "real?: expected 1 argument, got %d" (List.length args))
 
 let prim_integer args =
   match args with
   | [Datum.Fixnum _] -> Datum.Bool true
   | [Datum.Rational _] -> Datum.Bool false
   | [Datum.Flonum f] -> Datum.Bool (Float.is_integer f)
+  | [Datum.Complex _] -> Datum.Bool false
   | [_] -> Datum.Bool false
   | _ -> runtime_error (Printf.sprintf "integer?: expected 1 argument, got %d" (List.length args))
 
@@ -1544,6 +1908,7 @@ let prim_exact args =
   | [Datum.Fixnum _] -> Datum.Bool true
   | [Datum.Rational _] -> Datum.Bool true
   | [Datum.Flonum _] -> Datum.Bool false
+  | [Datum.Complex (re, _)] -> Datum.Bool (is_exact_datum re)
   | [_] -> runtime_error "exact?: expected number"
   | _ -> runtime_error (Printf.sprintf "exact?: expected 1 argument, got %d" (List.length args))
 
@@ -1552,6 +1917,7 @@ let prim_inexact_pred args =
   | [Datum.Fixnum _] -> Datum.Bool false
   | [Datum.Rational _] -> Datum.Bool false
   | [Datum.Flonum _] -> Datum.Bool true
+  | [Datum.Complex (re, _)] -> Datum.Bool (not (is_exact_datum re))
   | [_] -> runtime_error "inexact?: expected number"
   | _ -> runtime_error (Printf.sprintf "inexact?: expected 1 argument, got %d" (List.length args))
 
@@ -1560,6 +1926,7 @@ let prim_rational args =
   | [Datum.Fixnum _] -> Datum.Bool true
   | [Datum.Rational _] -> Datum.Bool true
   | [Datum.Flonum f] -> Datum.Bool (Float.is_finite f)
+  | [Datum.Complex _] -> Datum.Bool false
   | [_] -> Datum.Bool false
   | _ -> runtime_error (Printf.sprintf "rational?: expected 1 argument, got %d" (List.length args))
 
@@ -1575,6 +1942,7 @@ let prim_zero args =
   | [Datum.Fixnum _] -> Datum.Bool false
   | [Datum.Rational _] -> Datum.Bool false  (* 0/d normalizes to Fixnum 0 *)
   | [Datum.Flonum f] -> Datum.Bool (f = 0.0)
+  | [Datum.Complex (re, im)] -> Datum.Bool (is_datum_zero re && is_datum_zero im)
   | [_] -> runtime_error "zero?: expected number"
   | _ -> runtime_error (Printf.sprintf "zero?: expected 1 argument, got %d" (List.length args))
 
@@ -1583,7 +1951,8 @@ let prim_positive args =
   | [Datum.Fixnum n] -> Datum.Bool (n > 0)
   | [Datum.Rational (n, _)] -> Datum.Bool (n > 0)
   | [Datum.Flonum f] -> Datum.Bool (f > 0.0)
-  | [_] -> runtime_error "positive?: expected number"
+  | [Datum.Complex _] -> runtime_error "positive?: not defined for complex numbers"
+  | [_] -> runtime_error "positive?: expected real number"
   | _ -> runtime_error (Printf.sprintf "positive?: expected 1 argument, got %d" (List.length args))
 
 let prim_negative args =
@@ -1591,7 +1960,8 @@ let prim_negative args =
   | [Datum.Fixnum n] -> Datum.Bool (n < 0)
   | [Datum.Rational (n, _)] -> Datum.Bool (n < 0)
   | [Datum.Flonum f] -> Datum.Bool (f < 0.0)
-  | [_] -> runtime_error "negative?: expected number"
+  | [Datum.Complex _] -> runtime_error "negative?: not defined for complex numbers"
+  | [_] -> runtime_error "negative?: expected real number"
   | _ -> runtime_error (Printf.sprintf "negative?: expected 1 argument, got %d" (List.length args))
 
 let prim_odd args =
@@ -2027,7 +2397,7 @@ let register_primitives symbols env handlers
   register "boolean=?" prim_boolean_eq;
   register "number?" prim_number;
   register "complex?" prim_number;
-  register "real?" prim_number;
+  register "real?" prim_real;
   register "rational?" prim_rational;
   register "integer?" prim_integer;
   register "exact?" prim_exact;

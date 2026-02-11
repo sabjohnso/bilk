@@ -10,6 +10,12 @@ let eval s =
   let inst = Instance.create () in
   Instance.eval_string inst s
 
+let as_flonum = function
+  | Datum.Flonum f -> f
+  | Datum.Fixnum n -> float_of_int n
+  | Datum.Rational (n, d) -> float_of_int n /. float_of_int d
+  | v -> Alcotest.fail (Printf.sprintf "expected flonum, got %s" (Datum.to_string v))
+
 (* Helper: evaluate multiple strings sequentially in same instance, return last result *)
 let eval_seq strs =
   let inst = Instance.create () in
@@ -3695,6 +3701,137 @@ let () =
        [ Alcotest.test_case "basic" `Quick test_r5rs_basic
        ; Alcotest.test_case "lazy" `Quick test_r5rs_lazy
        ; Alcotest.test_case "map" `Quick test_r5rs_map
+       ])
+    ; ("complex-numbers",
+       [ Alcotest.test_case "literals" `Quick (fun () ->
+           check_datum "3+4i" (Datum.Complex (Datum.Fixnum 3, Datum.Fixnum 4)) (eval "3+4i");
+           check_datum "+i" (Datum.Complex (Datum.Fixnum 0, Datum.Fixnum 1)) (eval "+i");
+           check_datum "-i" (Datum.Complex (Datum.Fixnum 0, Datum.Fixnum (-1))) (eval "-i");
+           check_datum "3+0i" (Datum.Fixnum 3) (eval "3+0i");
+           check_datum "3.0+4.0i" (Datum.Complex (Datum.Flonum 3.0, Datum.Flonum 4.0)) (eval "3.0+4.0i"))
+       ; Alcotest.test_case "arithmetic" `Quick (fun () ->
+           check_datum "+ complex" (Datum.Complex (Datum.Fixnum 4, Datum.Fixnum 6))
+             (eval "(+ 1+2i 3+4i)");
+           check_datum "- complex" (Datum.Complex (Datum.Fixnum (-2), Datum.Fixnum (-2)))
+             (eval "(- 1+2i 3+4i)");
+           check_datum "* i*i = -1" (Datum.Fixnum (-1))
+             (eval "(* 0+1i 0+1i)");
+           (* (3+4i)/(5+10i) = (15+40)/(25+100) + (20-30)/(25+100)i = 55/125 - 10/125i = 11/25 - 2/25i *)
+           check_datum "/ complex" (Datum.Complex (Datum.Rational (11, 25), Datum.Rational (-2, 25)))
+             (eval "(/ 3+4i 5+10i)");
+           check_datum "negate complex" (Datum.Complex (Datum.Fixnum (-3), Datum.Fixnum (-4)))
+             (eval "(- 3+4i)"))
+       ; Alcotest.test_case "mixed arithmetic" `Quick (fun () ->
+           check_datum "int + complex" (Datum.Complex (Datum.Fixnum 4, Datum.Fixnum 4))
+             (eval "(+ 1 3+4i)");
+           check_datum "float + complex" (Datum.Complex (Datum.Flonum 4.5, Datum.Flonum 4.0))
+             (eval "(+ 1.5 3+4i)");
+           check_datum "complex * real" (Datum.Complex (Datum.Fixnum 6, Datum.Fixnum 8))
+             (eval "(* 3+4i 2)"))
+       ; Alcotest.test_case "equality" `Quick (fun () ->
+           check_datum "= complex" (Datum.Bool true)
+             (eval "(= 3+4i 3+4i)");
+           check_datum "= complex diff" (Datum.Bool false)
+             (eval "(= 3+4i 3+5i)");
+           check_datum "= complex real" (Datum.Bool true)
+             (eval "(= 3 3+0i)"))
+       ; Alcotest.test_case "ordering errors" `Quick (fun () ->
+           let raises name expr =
+             try ignore (eval expr); Alcotest.fail (name ^ " should error")
+             with Vm.Runtime_error _ -> () in
+           raises "< complex" "(< 1+2i 3+4i)";
+           raises "> complex" "(> 1+2i 3+4i)";
+           raises "<= complex" "(<= 1+2i 3)";
+           raises ">= complex" "(>= 3 1+2i)")
+       ; Alcotest.test_case "real-part imag-part" `Quick (fun () ->
+           check_datum "real-part" (Datum.Fixnum 3)
+             (eval "(real-part 3+4i)");
+           check_datum "imag-part" (Datum.Fixnum 4)
+             (eval "(imag-part 3+4i)");
+           check_datum "real-part of real" (Datum.Fixnum 5)
+             (eval "(real-part 5)");
+           check_datum "imag-part of real" (Datum.Fixnum 0)
+             (eval "(imag-part 5)"))
+       ; Alcotest.test_case "magnitude angle" `Quick (fun () ->
+           check_datum "magnitude" (Datum.Flonum 5.0)
+             (eval "(magnitude 3+4i)");
+           check_datum "angle +i" (Datum.Flonum (Float.pi /. 2.0))
+             (eval "(angle 0+1i)"))
+       ; Alcotest.test_case "make-rectangular make-polar" `Quick (fun () ->
+           check_datum "make-rectangular exact" (Datum.Complex (Datum.Fixnum 3, Datum.Fixnum 4))
+             (eval "(make-rectangular 3 4)");
+           check_datum "make-rectangular inexact" (Datum.Complex (Datum.Flonum 3.0, Datum.Flonum 4.0))
+             (eval "(make-rectangular 3.0 4)");
+           check_datum "make-rectangular zero imag" (Datum.Fixnum 3)
+             (eval "(make-rectangular 3 0)");
+           check_datum "make-polar zero angle" (Datum.Flonum 5.0)
+             (eval "(make-polar 5 0)"))
+       ; Alcotest.test_case "sqrt" `Quick (fun () ->
+           check_datum "sqrt -1 exact" (Datum.Complex (Datum.Fixnum 0, Datum.Fixnum 1))
+             (eval "(sqrt -1)");
+           check_datum "sqrt -4 exact" (Datum.Complex (Datum.Fixnum 0, Datum.Fixnum 2))
+             (eval "(sqrt -4)");
+           check_datum "sqrt 4" (Datum.Fixnum 2) (eval "(sqrt 4)"))
+       ; Alcotest.test_case "predicates" `Quick (fun () ->
+           check_datum "number?" (Datum.Bool true) (eval "(number? 3+4i)");
+           check_datum "complex?" (Datum.Bool true) (eval "(complex? 3+4i)");
+           check_datum "real?" (Datum.Bool false) (eval "(real? 3+4i)");
+           check_datum "real? of real" (Datum.Bool true) (eval "(real? 42)");
+           check_datum "exact?" (Datum.Bool true) (eval "(exact? 3+4i)");
+           check_datum "inexact?" (Datum.Bool false) (eval "(inexact? 3+4i)");
+           check_datum "exact? inexact" (Datum.Bool false) (eval "(exact? 3.0+4.0i)");
+           check_datum "inexact? inexact" (Datum.Bool true) (eval "(inexact? 3.0+4.0i)");
+           check_datum "zero?" (Datum.Bool true)
+             (eval "(zero? (make-rectangular 0 0))");
+           check_datum "zero? non-zero" (Datum.Bool false) (eval "(zero? 3+4i)");
+           check_datum "integer? complex" (Datum.Bool false) (eval "(integer? 3+4i)");
+           check_datum "rational? complex" (Datum.Bool false) (eval "(rational? 3+4i)"))
+       ; Alcotest.test_case "exp log" `Quick (fun () ->
+           let result = eval "(exp 0+3.14159265358979i)" in
+           let (r, _i) = match result with
+             | Datum.Complex (re, im) -> (as_flonum re, as_flonum im)
+             | Datum.Flonum f -> (f, 0.0)
+             | _ -> Alcotest.fail "expected number" in
+           (* e^(pi*i) ≈ -1 *)
+           Alcotest.(check bool) "exp(pi*i) ≈ -1" true (Float.abs (r +. 1.0) < 1e-10);
+           let log_result = eval "(log -1)" in
+           match log_result with
+           | Datum.Complex (lr, li) ->
+             let lr = as_flonum lr and li = as_flonum li in
+             Alcotest.(check bool) "log(-1) real ≈ 0" true (Float.abs lr < 1e-10);
+             Alcotest.(check bool) "log(-1) imag ≈ pi" true (Float.abs (li -. Float.pi) < 1e-10)
+           | _ -> Alcotest.fail "log(-1) should be complex")
+       ; Alcotest.test_case "number->string string->number" `Quick (fun () ->
+           let s = eval "(number->string 3+4i)" in
+           (match s with
+            | Datum.Str b -> Alcotest.(check string) "number->string" "3+4i" (Bytes.to_string b)
+            | _ -> Alcotest.fail "expected string");
+           check_datum "string->number +i" (Datum.Complex (Datum.Fixnum 0, Datum.Fixnum 1))
+             (eval "(string->number \"+i\")");
+           check_datum "string->number 3+4i" (Datum.Complex (Datum.Fixnum 0, Datum.Fixnum 1))
+             (eval "(string->number \"+i\")");
+           check_datum "string->number 3.0+4.0i" (Datum.Complex (Datum.Flonum 3.0, Datum.Flonum 4.0))
+             (eval "(string->number \"3.0+4.0i\")"))
+       ; Alcotest.test_case "eqv? equal?" `Quick (fun () ->
+           check_datum "eqv? same" (Datum.Bool true) (eval "(eqv? 3+4i 3+4i)");
+           check_datum "eqv? diff" (Datum.Bool false) (eval "(eqv? 3+4i 3+5i)");
+           check_datum "equal? same" (Datum.Bool true) (eval "(equal? 3+4i 3+4i)");
+           check_datum "equal? diff" (Datum.Bool false) (eval "(equal? 3+4i 4+4i)"))
+       ; Alcotest.test_case "finite? infinite? nan?" `Quick (fun () ->
+           check_datum "finite?" (Datum.Bool true) (eval "(finite? 3+4i)");
+           check_datum "infinite?" (Datum.Bool false) (eval "(infinite? 3+4i)");
+           check_datum "nan?" (Datum.Bool false) (eval "(nan? 3+4i)");
+           check_datum "infinite? inf component" (Datum.Bool true)
+             (eval "(infinite? +inf.0+0.0i)");
+           check_datum "nan? nan component" (Datum.Bool true)
+             (eval "(nan? 0.0+nan.0i)"))
+       ; Alcotest.test_case "inexact/exact conversion" `Quick (fun () ->
+           check_datum "inexact of exact complex" (Datum.Complex (Datum.Flonum 3.0, Datum.Flonum 4.0))
+             (eval "(inexact 3+4i)");
+           check_datum "exact of inexact complex" (Datum.Complex (Datum.Fixnum 3, Datum.Fixnum 4))
+             (eval "(exact 3.0+4.0i)");
+           check_datum "exact of zero-imag" (Datum.Fixnum 3)
+             (eval "(exact (make-rectangular 3.0 0.0))"))
        ])
     ; ("vm-hooks",
        [ Alcotest.test_case "default none" `Quick test_hooks_default_none

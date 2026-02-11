@@ -216,6 +216,33 @@ let test_datum_port () =
   Alcotest.(check bool) "ports not equal" false
     (Datum.equal (Datum.Port ip) (Datum.Port ip))
 
+let test_datum_complex () =
+  (* Exact complex *)
+  check_datum "3+4i exact" (Datum.Complex (Datum.Fixnum 3, Datum.Fixnum 4))
+    (Datum.Complex (Datum.Fixnum 3, Datum.Fixnum 4));
+  (* Inexact complex *)
+  check_datum "3.+4.i inexact" (Datum.Complex (Datum.Flonum 3.0, Datum.Flonum 4.0))
+    (Datum.Complex (Datum.Flonum 3.0, Datum.Flonum 4.0));
+  Alcotest.(check bool) "diff imag" false
+    (Datum.equal (Datum.Complex (Datum.Fixnum 3, Datum.Fixnum 4))
+                 (Datum.Complex (Datum.Fixnum 3, Datum.Fixnum 5)));
+  Alcotest.(check bool) "diff real" false
+    (Datum.equal (Datum.Complex (Datum.Fixnum 3, Datum.Fixnum 4))
+                 (Datum.Complex (Datum.Fixnum 2, Datum.Fixnum 4)));
+  Alcotest.(check bool) "exact != inexact complex" false
+    (Datum.equal (Datum.Complex (Datum.Fixnum 3, Datum.Fixnum 4))
+                 (Datum.Complex (Datum.Flonum 3.0, Datum.Flonum 4.0)));
+  (* Test pp — exact *)
+  Alcotest.(check string) "pp 3+4i" "3+4i" (Datum.to_string (Datum.Complex (Datum.Fixnum 3, Datum.Fixnum 4)));
+  Alcotest.(check string) "pp 1-1i" "1-1i" (Datum.to_string (Datum.Complex (Datum.Fixnum 1, Datum.Fixnum (-1))));
+  Alcotest.(check string) "pp 1/2+3i" "1/2+3i" (Datum.to_string (Datum.Complex (Datum.Rational (1, 2), Datum.Fixnum 3)));
+  (* Test pp — inexact *)
+  Alcotest.(check string) "pp 3.+4.i" "3.+4.i" (Datum.to_string (Datum.Complex (Datum.Flonum 3.0, Datum.Flonum 4.0)));
+  Alcotest.(check string) "pp 1.-1.i" "1.-1.i" (Datum.to_string (Datum.Complex (Datum.Flonum 1.0, Datum.Flonum (-1.0))));
+  Alcotest.(check string) "pp 0.+1.i" "0.+1.i" (Datum.to_string (Datum.Complex (Datum.Flonum 0.0, Datum.Flonum 1.0)));
+  Alcotest.(check string) "pp inf+nan.i" "+inf.0+nan.0i"
+    (Datum.to_string (Datum.Complex (Datum.Flonum Float.infinity, Datum.Flonum Float.nan)))
+
 let () =
   Alcotest.run "Datum"
     [ ("Datum",
@@ -238,6 +265,7 @@ let () =
        ; Alcotest.test_case "values" `Quick test_datum_values
        ; Alcotest.test_case "rational" `Quick test_datum_rational
        ; Alcotest.test_case "port" `Quick test_datum_port
+       ; Alcotest.test_case "complex" `Quick test_datum_complex
        ])
     ; ("Helpers",
        [ Alcotest.test_case "is_true" `Quick test_is_true

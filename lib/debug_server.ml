@@ -177,6 +177,7 @@ let datum_type d =
   | Datum.Fixnum _ -> "integer"
   | Datum.Rational _ -> "rational"
   | Datum.Flonum _ -> "float"
+  | Datum.Complex _ -> "complex"
   | Datum.Bool _ -> "boolean"
   | Datum.Char _ -> "char"
   | Datum.Str _ -> "string"

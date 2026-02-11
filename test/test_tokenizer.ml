@@ -201,4 +201,16 @@ let () =
     "keywords", [
       Alcotest.test_case "is_keyword" `Quick test_is_keyword;
     ];
+    "complex-numbers", [
+      Alcotest.test_case "complex literals" `Quick (fun () ->
+        let rt = Readtable.default in
+        let tok s = List.hd (Tokenizer.tokenize rt s) in
+        Alcotest.(check string) "3+4i" "Number_lit" (match (tok "3+4i").kind with Number_lit -> "Number_lit" | _ -> "other");
+        Alcotest.(check string) "+i" "Number_lit" (match (tok "+i").kind with Number_lit -> "Number_lit" | _ -> "other");
+        Alcotest.(check string) "-i" "Number_lit" (match (tok "-i").kind with Number_lit -> "Number_lit" | _ -> "other");
+        Alcotest.(check string) "1@0.5" "Number_lit" (match (tok "1@0.5").kind with Number_lit -> "Number_lit" | _ -> "other");
+        Alcotest.(check string) "+3i" "Number_lit" (match (tok "+3i").kind with Number_lit -> "Number_lit" | _ -> "other");
+        Alcotest.(check string) "3-4i" "Number_lit" (match (tok "3-4i").kind with Number_lit -> "Number_lit" | _ -> "other");
+      );
+    ];
   ]

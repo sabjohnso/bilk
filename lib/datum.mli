@@ -32,6 +32,7 @@ and t =
   | Fixnum of int              (** Exact integer (machine word) *)
   | Rational of int * int      (** Exact rational (numerator, denominator); invariant: d > 0, gcd(|n|,d) = 1 *)
   | Flonum of float            (** Inexact real *)
+  | Complex of t * t            (** Complex number (real, imaginary); components are Fixnum/Rational (exact) or Flonum (inexact) *)
   | Char of Uchar.t            (** Unicode character *)
   | Str of bytes               (** Mutable string (bytes) *)
   | Symbol of string           (** Symbol (uninterned at this level) *)

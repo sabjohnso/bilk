@@ -448,6 +448,42 @@ let () =
     ; ("Labels",
        [ Alcotest.test_case "datum labels" `Quick test_reader_datum_labels
        ])
+    ; ("Complex",
+       [ Alcotest.test_case "complex literals" `Quick (fun () ->
+           let read s =
+             let rt = Readtable.default in
+             let p = Port.of_string ~file:"test" s in
+             let sx = Reader.read_syntax rt p in
+             Syntax.to_datum sx
+           in
+           let datum_testable = Alcotest.testable Datum.pp Datum.equal in
+           let check = Alcotest.check datum_testable in
+           (* Exact by default *)
+           check "3+4i" (Datum.Complex (Datum.Fixnum 3, Datum.Fixnum 4)) (read "3+4i");
+           check "3-4i" (Datum.Complex (Datum.Fixnum 3, Datum.Fixnum (-4))) (read "3-4i");
+           check "+i" (Datum.Complex (Datum.Fixnum 0, Datum.Fixnum 1)) (read "+i");
+           check "-i" (Datum.Complex (Datum.Fixnum 0, Datum.Fixnum (-1))) (read "-i");
+           check "+3i" (Datum.Complex (Datum.Fixnum 0, Datum.Fixnum 3)) (read "+3i");
+           check "3+i" (Datum.Complex (Datum.Fixnum 3, Datum.Fixnum 1)) (read "3+i");
+           check "3-i" (Datum.Complex (Datum.Fixnum 3, Datum.Fixnum (-1))) (read "3-i");
+           check "3+0i" (Datum.Fixnum 3) (read "3+0i");
+           (* Inexact components → inexact complex *)
+           check "-3.5i" (Datum.Complex (Datum.Flonum 0.0, Datum.Flonum (-3.5))) (read "-3.5i");
+           check "3.0+4.0i" (Datum.Complex (Datum.Flonum 3.0, Datum.Flonum 4.0)) (read "3.0+4.0i");
+           (* Polar form (always inexact) *)
+           check "1@0" (Datum.Flonum 1.0) (read "1@0");
+           (* Inf/NaN components *)
+           check "+inf.0+inf.0i"
+             (Datum.Complex (Datum.Flonum Float.infinity, Datum.Flonum Float.infinity))
+             (read "+inf.0+inf.0i");
+           (* Rational components *)
+           check "1/2+3/4i" (Datum.Complex (Datum.Rational (1, 2), Datum.Rational (3, 4))) (read "1/2+3/4i");
+           (* #e and #i prefixes *)
+           check "#e3+4i" (Datum.Complex (Datum.Fixnum 3, Datum.Fixnum 4)) (read "#e3+4i");
+           check "#i3+4i" (Datum.Complex (Datum.Flonum 3.0, Datum.Flonum 4.0)) (read "#i3+4i");
+           check "#e3.0+4.0i" (Datum.Complex (Datum.Fixnum 3, Datum.Fixnum 4)) (read "#e3.0+4.0i");
+         )
+       ])
     ; ("Errors",
        [ Alcotest.test_case "error cases" `Quick test_reader_errors
        ])

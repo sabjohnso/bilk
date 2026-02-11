@@ -17,6 +17,7 @@ and t =
   | Fixnum of int
   | Rational of int * int
   | Flonum of float
+  | Complex of t * t
   | Char of Uchar.t
   | Str of bytes
   | Symbol of string
@@ -120,6 +121,7 @@ let rec equal a b =
   | Fixnum x, Fixnum y -> x = y
   | Rational (n1, d1), Rational (n2, d2) -> n1 = n2 && d1 = d2
   | Flonum x, Flonum y -> Float.equal x y
+  | Complex (r1, i1), Complex (r2, i2) -> equal r1 r2 && equal i1 i2
   | Char x, Char y -> Uchar.equal x y
   | Str x, Str y -> Bytes.equal x y
   | Symbol x, Symbol y -> String.equal x y
@@ -149,19 +151,40 @@ let rec equal a b =
   | Regexp _, Regexp _ -> false
   | _ -> false
 
+let pp_flonum_part f =
+  if Float.is_nan f then "+nan.0"
+  else if Float.is_infinite f then
+    if f > 0.0 then "+inf.0"
+    else "-inf.0"
+  else string_of_float f
+
 let rec pp fmt = function
   | Bool true -> Format.fprintf fmt "#t"
   | Bool false -> Format.fprintf fmt "#f"
   | Fixnum n -> Format.fprintf fmt "%d" n
   | Rational (n, d) -> Format.fprintf fmt "%d/%d" n d
   | Flonum f ->
-    if Float.is_nan f then Format.fprintf fmt "+nan.0"
-    else if Float.is_infinite f then
-      if f > 0.0 then Format.fprintf fmt "+inf.0"
-      else Format.fprintf fmt "-inf.0"
-    else
-      let s = string_of_float f in
-      Format.fprintf fmt "%s" s
+    Format.fprintf fmt "%s" (pp_flonum_part f)
+  | Complex (re, im) ->
+    pp fmt re;
+    (match im with
+     | Flonum f ->
+       (* pp_flonum_part handles sign for special values *)
+       let s = pp_flonum_part f in
+       if String.length s > 0 && s.[0] <> '+' && s.[0] <> '-' then
+         Format.fprintf fmt "+%si" s
+       else
+         Format.fprintf fmt "%si" s
+     | Fixnum n ->
+       if n < 0 then Format.fprintf fmt "%di" n
+       else Format.fprintf fmt "+%di" n
+     | Rational (n, d) ->
+       if n < 0 then Format.fprintf fmt "%d/%di" n d
+       else Format.fprintf fmt "+%d/%di" n d
+     | _ ->
+       Format.fprintf fmt "+";
+       pp fmt im;
+       Format.fprintf fmt "i")
   | Char c -> Format.fprintf fmt "#\\x%04X" (Uchar.to_int c)
   | Str s -> Format.fprintf fmt "%S" (Bytes.to_string s)
   | Symbol s -> Format.fprintf fmt "%s" s

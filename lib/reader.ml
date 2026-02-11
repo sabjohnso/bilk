@@ -420,11 +420,154 @@ let parse_number prefix token =
         | None -> None
     end
 
+(* Helper: wrap a Syntax.datum as a Syntax.t with no location *)
+let syn_wrap d = Syntax.make Loc.none d
+
+(* Is a Syntax.datum an exact type? *)
+let is_exact_syntax = function
+  | Syntax.Fixnum _ | Syntax.Rational _ -> true | _ -> false
+
+(* Convert Syntax.datum to inexact *)
+let to_inexact_syntax = function
+  | Syntax.Fixnum n -> Syntax.Flonum (float_of_int n)
+  | Syntax.Rational (n, d) -> Syntax.Flonum (float_of_int n /. float_of_int d)
+  | d -> d
+
+(* Is a Syntax.datum zero? *)
+let is_zero_syntax = function
+  | Syntax.Fixnum 0 -> true
+  | Syntax.Rational (0, _) -> true
+  | Syntax.Flonum f -> f = 0.0
+  | _ -> false
+
+(* Normalize complex: if imag = 0 collapse, else build Complex with same exactness *)
+let make_complex_syntax re im =
+  if is_zero_syntax im then
+    (if is_exact_syntax re && is_exact_syntax im then re
+     else to_inexact_syntax re)
+  else if is_exact_syntax re && is_exact_syntax im then
+    Syntax.Complex (syn_wrap re, syn_wrap im)
+  else
+    Syntax.Complex (syn_wrap (to_inexact_syntax re), syn_wrap (to_inexact_syntax im))
+
+(* Parse a token as a complex number, or fall back to parse_number *)
+let parse_complex state prefix token =
+  let len = String.length token in
+  let token_lower = String.lowercase_ascii token in
+  (* Pure imaginary shortcuts: +i, -i *)
+  if token_lower = "+i" then begin
+    match prefix.exact with
+    | Some false ->
+      Some (make_complex_syntax (Syntax.Flonum 0.0) (Syntax.Flonum 1.0))
+    | _ ->
+      Some (make_complex_syntax (Syntax.Fixnum 0) (Syntax.Fixnum 1))
+  end
+  else if token_lower = "-i" then begin
+    match prefix.exact with
+    | Some false ->
+      Some (make_complex_syntax (Syntax.Flonum 0.0) (Syntax.Flonum (-1.0)))
+    | _ ->
+      Some (make_complex_syntax (Syntax.Fixnum 0) (Syntax.Fixnum (-1)))
+  end
+  (* Polar form: contains '@' *)
+  else if String.contains token '@' then begin
+    let at_pos = String.index token '@' in
+    let r_str = String.sub token 0 at_pos in
+    let t_str = String.sub token (at_pos + 1) (len - at_pos - 1) in
+    (* Polar always computes with floats *)
+    let no_exact_prefix = { radix = prefix.radix; exact = None } in
+    match parse_number no_exact_prefix r_str, parse_number no_exact_prefix t_str with
+    | Some r_datum, Some t_datum ->
+      let r = (match r_datum with
+        | Syntax.Flonum f -> f
+        | Syntax.Fixnum n -> float_of_int n
+        | Syntax.Rational (n, d) -> float_of_int n /. float_of_int d
+        | _ -> error state (Printf.sprintf "invalid polar magnitude: %s" r_str)) in
+      let t = (match t_datum with
+        | Syntax.Flonum f -> f
+        | Syntax.Fixnum n -> float_of_int n
+        | Syntax.Rational (n, d) -> float_of_int n /. float_of_int d
+        | _ -> error state (Printf.sprintf "invalid polar angle: %s" t_str)) in
+      let re_f = r *. cos t and im_f = r *. sin t in
+      (match prefix.exact with
+       | Some true ->
+         (* #e polar: convert result to exact *)
+         let re_d = if Float.is_integer re_f then Syntax.Fixnum (Float.to_int re_f)
+                    else Syntax.Flonum re_f in
+         let im_d = if Float.is_integer im_f then Syntax.Fixnum (Float.to_int im_f)
+                    else Syntax.Flonum im_f in
+         Some (make_complex_syntax re_d im_d)
+       | _ ->
+         Some (make_complex_syntax (Syntax.Flonum re_f) (Syntax.Flonum im_f)))
+    | _ -> None
+  end
+  (* Rectangular form: ends with 'i' and body starts looking numeric *)
+  else if len > 1 && (token.[len - 1] = 'i' || token.[len - 1] = 'I')
+          && (let c = token.[0] in
+              c >= '0' && c <= '9' || c = '+' || c = '-' || c = '.'
+              || c = '#') then begin
+    let body = String.sub token 0 (len - 1) in
+    let body_len = String.length body in
+    (* Find the separator between real and imaginary parts.
+       Scan right-to-left for + or - that is NOT preceded by e/E (exponent sign). *)
+    let sep_pos = ref (-1) in
+    for j = body_len - 1 downto 1 do
+      if !sep_pos = (-1) then begin
+        let c = body.[j] in
+        if (c = '+' || c = '-') then begin
+          let prev = body.[j - 1] in
+          if prev <> 'e' && prev <> 'E' &&
+             prev <> 's' && prev <> 'S' &&
+             prev <> 'f' && prev <> 'F' &&
+             prev <> 'd' && prev <> 'D' &&
+             prev <> 'l' && prev <> 'L' then
+            sep_pos := j
+        end
+      end
+    done;
+    let comp_prefix = { radix = prefix.radix; exact = prefix.exact } in
+    if !sep_pos > 0 then begin
+      (* Has both real and imaginary parts *)
+      let real_str = String.sub body 0 !sep_pos in
+      let imag_str = String.sub body !sep_pos (body_len - !sep_pos) in
+      (* Handle "+"/"-" alone as ±1 *)
+      let imag_d =
+        if imag_str = "+" then
+          (match prefix.exact with Some false -> Syntax.Flonum 1.0 | _ -> Syntax.Fixnum 1)
+        else if imag_str = "-" then
+          (match prefix.exact with Some false -> Syntax.Flonum (-1.0) | _ -> Syntax.Fixnum (-1))
+        else match parse_number comp_prefix imag_str with
+          | Some d -> d
+          | None -> error state (Printf.sprintf "invalid imaginary part: %s" imag_str)
+      in
+      match parse_number comp_prefix real_str with
+      | Some re_d -> Some (make_complex_syntax re_d imag_d)
+      | None -> None
+    end else begin
+      (* No separator found: pure imaginary (+3i, -3.5i, etc.) *)
+      (* The body is the imaginary coefficient *)
+      let imag_d =
+        if body = "+" then
+          (match prefix.exact with Some false -> Syntax.Flonum 1.0 | _ -> Syntax.Fixnum 1)
+        else if body = "-" then
+          (match prefix.exact with Some false -> Syntax.Flonum (-1.0) | _ -> Syntax.Fixnum (-1))
+        else match parse_number comp_prefix body with
+          | Some d -> d
+          | None -> error state (Printf.sprintf "invalid imaginary part: %s" body)
+      in
+      let zero = if is_exact_syntax imag_d then Syntax.Fixnum 0 else Syntax.Flonum 0.0 in
+      Some (make_complex_syntax zero imag_d)
+    end
+  end
+  else
+    (* Not complex — fall through to regular number parsing *)
+    parse_number prefix token
+
 (* Parse a token as either number or symbol *)
 let parse_atom state prefix token =
   if String.length token = 0 then
     error state "unexpected empty token";
-  match parse_number prefix token with
+  match parse_complex state prefix token with
   | Some datum -> datum
   | None ->
     (* Must be a symbol *)

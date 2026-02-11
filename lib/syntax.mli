@@ -16,6 +16,7 @@ and datum =
   | Fixnum of int
   | Rational of int * int
   | Flonum of float
+  | Complex of t * t
   | Char of Uchar.t
   | Str of string
   | Symbol of string

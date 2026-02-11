@@ -4,7 +4,7 @@ open Wile
 
 let test_version_constants () =
   Alcotest.(check int) "major" 1 Fasl.version_major;
-  Alcotest.(check int) "minor" 3 Fasl.version_minor
+  Alcotest.(check int) "minor" 4 Fasl.version_minor
 
 let test_fasl_error_catchable () =
   Alcotest.check_raises "fasl error"
@@ -846,6 +846,38 @@ let () =
        ; Alcotest.test_case "macro roundtrip" `Quick test_binding_macro_roundtrip
        ; Alcotest.test_case "lib_fasl with syntax" `Quick test_lib_fasl_with_syntax_bindings
        ; Alcotest.test_case "cache integration" `Quick test_syntax_export_cache_integration
+       ])
+    ; ("complex",
+       [ Alcotest.test_case "inexact complex roundtrip" `Quick (fun () ->
+           let code = { Datum.instructions = [| Opcode.Const 0; Opcode.Halt |];
+                        source_map = [| Loc.none; Loc.none |];
+                        constants = [| Datum.Complex (Datum.Flonum 3.0, Datum.Flonum 4.0) |];
+                        symbols = [||]; children = [||];
+                        params = [||]; variadic = false; name = "<test>" } in
+           let tbl = Symbol.create_table () in
+           let data = Fasl.write_code code in
+           let code' = Fasl.read_code tbl data in
+           let d = code'.constants.(0) in
+           match d with
+           | Datum.Complex (Datum.Flonum r, Datum.Flonum i) ->
+             Alcotest.(check (float 0.0)) "real part" 3.0 r;
+             Alcotest.(check (float 0.0)) "imag part" 4.0 i
+           | _ -> Alcotest.fail (Printf.sprintf "expected Complex, got %s" (Datum.to_string d)))
+       ; Alcotest.test_case "exact complex roundtrip" `Quick (fun () ->
+           let code = { Datum.instructions = [| Opcode.Const 0; Opcode.Halt |];
+                        source_map = [| Loc.none; Loc.none |];
+                        constants = [| Datum.Complex (Datum.Fixnum 3, Datum.Fixnum 4) |];
+                        symbols = [||]; children = [||];
+                        params = [||]; variadic = false; name = "<test>" } in
+           let tbl = Symbol.create_table () in
+           let data = Fasl.write_code code in
+           let code' = Fasl.read_code tbl data in
+           let d = code'.constants.(0) in
+           match d with
+           | Datum.Complex (Datum.Fixnum r, Datum.Fixnum i) ->
+             Alcotest.(check int) "real part" 3 r;
+             Alcotest.(check int) "imag part" 4 i
+           | _ -> Alcotest.fail (Printf.sprintf "expected exact Complex, got %s" (Datum.to_string d)))
        ])
     ; ("source-map",
        [ Alcotest.test_case "Loc.none roundtrip" `Quick test_source_map_none_roundtrip

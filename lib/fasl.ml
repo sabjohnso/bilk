@@ -1,7 +1,7 @@
 exception Fasl_error of string
 
 let version_major = 1
-let version_minor = 3
+let version_minor = 4
 
 let fasl_error msg = raise (Fasl_error msg)
 
@@ -165,6 +165,7 @@ let rec write_datum buf (d : Datum.t) =
   | Fixnum n -> write_u8 buf 2; write_i64 buf n
   | Rational (n, d) -> write_u8 buf 13; write_i64 buf n; write_i64 buf d
   | Flonum f -> write_u8 buf 3; write_f64 buf f
+  | Complex (re, im) -> write_u8 buf 14; write_datum buf re; write_datum buf im
   | Char c -> write_u8 buf 4; write_u32 buf (Uchar.to_int c)
   | Str s -> write_u8 buf 5; write_bytes_data buf s
   | Symbol name -> write_u8 buf 6; write_str buf name
@@ -226,6 +227,10 @@ let rec read_datum symbols data pos =
     let n = read_i64 data pos in
     let d = read_i64 data pos in
     Datum.Rational (n, d)
+  | 14 ->
+    let re = read_datum symbols data pos in
+    let im = read_datum symbols data pos in
+    Datum.Complex (re, im)
   | _ -> fasl_error (Printf.sprintf "unknown datum tag: %d" tag)
 
 (* --- Binding encoding --- *)

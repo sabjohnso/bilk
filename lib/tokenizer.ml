@@ -107,6 +107,9 @@ let is_number_like s =
   let len = String.length s in
   if len = 0 then false
   else
+    (* Pure imaginary shortcuts: +i, -i *)
+    if (s = "+i" || s = "-i") then true
+    else
     let start = ref 0 in
     (* Skip sign *)
     if s.[0] = '+' || s.[0] = '-' then begin
@@ -127,7 +130,13 @@ let is_number_like s =
        (* inf/nan *)
        (len >= !start + 5 &&
         let sub = String.sub s !start (min 5 (len - !start)) in
-        sub = "+inf." || sub = "-inf." || sub = "+nan." || sub = "-nan."))
+        sub = "+inf." || sub = "-inf." || sub = "+nan." || sub = "-nan.") ||
+       (* Complex: ends with 'i' and starts with digit/dot/sign *)
+       (len > 1 && s.[len - 1] = 'i' &&
+        (c >= '0' && c <= '9' || c = '.' || c = '+' || c = '-')) ||
+       (* Polar: contains '@' *)
+       (String.contains s '@' &&
+        (c >= '0' && c <= '9' || c = '.' || c = '+' || c = '-')))
 
 let scan_constituent st =
   let start = st.pos in
