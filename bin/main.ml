@@ -106,6 +106,7 @@ let handle_errors f =
   | Language_server.Lsp_server_error msg -> format_error msg; 1
   | Profiler.Profiler_error msg -> format_error msg; 1
   | Repository.Repository_error msg -> format_error msg; 1
+  | Lockfile.Lockfile_error msg -> format_error msg; 1
   | Sys_error msg -> format_error msg; 1
   | Failure msg -> format_error msg; 1
 
@@ -865,10 +866,49 @@ let pkg_install path =
       | None -> Sys.getcwd ()
     in
     let registry_root = Pkg_manager.default_registry_root () in
-    Pkg_manager.install ~registry_root ~src_dir;
-    let pkg = Package.parse Readtable.default
-      (Filename.concat src_dir "package.scm") in
-    Printf.printf "Installed %s %s\n%!" pkg.name (Semver.to_string pkg.version))
+    let lockpath = Lockfile.lockfile_path src_dir in
+    if Sys.file_exists lockpath then begin
+      let lock = Lockfile.parse Readtable.default lockpath in
+      let mismatches = Lockfile.verify ~registry_root lock in
+      if mismatches = [] then
+        Printf.printf "Lockfile verified: %d packages OK\n%!"
+          (List.length lock.packages)
+      else begin
+        List.iter (fun m ->
+          match m with
+          | Lockfile.Hash_mismatch { name; expected; actual } ->
+            Printf.eprintf "Hash mismatch: %s (expected %s, got %s)\n%!"
+              name expected actual
+          | Lockfile.Not_installed { name; version } ->
+            Printf.eprintf "Not installed: %s %s\n%!" name version
+        ) mismatches;
+        raise (Lockfile.Lockfile_error
+          (Printf.sprintf "%d integrity check(s) failed"
+             (List.length mismatches)))
+      end
+    end else begin
+      Pkg_manager.install ~registry_root ~src_dir;
+      let pkg = Package.parse Readtable.default
+        (Filename.concat src_dir "package.scm") in
+      Printf.printf "Installed %s %s\n%!" pkg.name
+        (Semver.to_string pkg.version)
+    end)
+
+let pkg_lock () =
+  handle_errors (fun () ->
+    let cwd = Sys.getcwd () in
+    let pkg_file = match Package.find_package_file cwd with
+      | Some p -> p
+      | None -> raise (Lockfile.Lockfile_error "no package.scm found")
+    in
+    let project_dir = Filename.dirname pkg_file in
+    let pkg = Package.parse Readtable.default pkg_file in
+    let registry_root = Pkg_manager.default_registry_root () in
+    let lock = Lockfile.create ~registry_root pkg.depends in
+    let path = Lockfile.lockfile_path project_dir in
+    Lockfile.write path lock;
+    Printf.printf "Wrote %s (%d packages)\n%!" path
+      (List.length lock.packages))
 
 let pkg_list () =
   handle_errors (fun () ->
@@ -935,6 +975,16 @@ let make_pkg_install_cmd () =
   let info =
     Cmd.info "install" ~version
       ~doc:"Install a package from a local directory"
+  in
+  Cmd.v info term
+
+let make_pkg_lock_cmd () =
+  let open Cmdliner in
+  let cmd () = exit (pkg_lock ()) in
+  let term = Term.(const cmd $ const ()) in
+  let info =
+    Cmd.info "lock" ~version
+      ~doc:"Resolve dependencies and write wile.lock"
   in
   Cmd.v info term
 
@@ -1231,12 +1281,14 @@ let make_pkg_cmd () =
       ~doc:"Package management commands"
       ~man:[`S "DESCRIPTION";
             `P "Manage packages. Use $(b,wile pkg install), \
-                $(b,wile pkg list), $(b,wile pkg remove), \
-                $(b,wile pkg info), $(b,wile pkg fetch), \
-                $(b,wile pkg search), or $(b,wile pkg repo)."]
+                $(b,wile pkg lock), $(b,wile pkg list), \
+                $(b,wile pkg remove), $(b,wile pkg info), \
+                $(b,wile pkg fetch), $(b,wile pkg search), \
+                or $(b,wile pkg repo)."]
   in
   Cmd.group info [
     make_pkg_install_cmd ();
+    make_pkg_lock_cmd ();
     make_pkg_list_cmd ();
     make_pkg_remove_cmd ();
     make_pkg_info_cmd ();
