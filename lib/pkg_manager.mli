@@ -56,13 +56,23 @@ val resolve :
   registry_root:string -> Package.dependency list ->
   (string * Semver.t) list
 (** [resolve ~registry_root deps] resolves a dependency list to concrete
-    package versions.  Uses a greedy algorithm: for each dependency, picks
-    the latest installed version satisfying the constraints, then
-    transitively resolves its dependencies.
+    package versions.  Uses a backtracking DFS solver that tries versions
+    from newest to oldest and backtracks when a conflict is detected.
+    Prefers the latest compatible version when no conflict exists.
 
     Returns a list of [(name, version)] pairs for all resolved packages.
-    @raise Pkg_error on version conflicts, missing packages, or circular
-    dependencies. *)
+    @raise Pkg_error on version conflicts (with diagnostic messages naming
+    the conflicting requesters), missing packages, circular dependencies,
+    or if the backtrack limit is exceeded. *)
+
+(** {1 Dependency explanation} *)
+
+val why :
+  registry_root:string -> Package.dependency list -> string ->
+  string list
+(** [why ~registry_root deps target] resolves [deps] and returns
+    human-readable explanations of why [target] is in the dependency tree.
+    Returns an empty list if [target] is not in the resolved set. *)
 
 (** {1 Search paths} *)
 

@@ -45,6 +45,18 @@ let make_package dir name version ?(description="A package") ?(license="MIT")
 
 let v major minor patch : Semver.t = { major; minor; patch }
 
+let contains haystack needle =
+  let nlen = String.length needle in
+  let hlen = String.length haystack in
+  if nlen > hlen then false
+  else
+    let rec check i =
+      if i > hlen - nlen then false
+      else if String.sub haystack i nlen = needle then true
+      else check (i + 1)
+    in
+    check 0
+
 let semver_testable : Semver.t Alcotest.testable =
   Alcotest.testable
     (fun fmt v -> Format.pp_print_string fmt (Semver.to_string v))
@@ -329,10 +341,13 @@ let test_resolve_conflict () =
     let deps : Package.dependency list =
       [{ dep_name = "left-c"; dep_constraints = [] };
        { dep_name = "right-c"; dep_constraints = [] }] in
-    Alcotest.check_raises "conflict"
-      (Pkg_manager.Pkg_error
-         "version conflict for dep-c: 2.0.0 does not satisfy new constraints")
-      (fun () -> ignore (Pkg_manager.resolve ~registry_root:registry deps)))
+    let raised = ref false in
+    (try ignore (Pkg_manager.resolve ~registry_root:registry deps)
+     with Pkg_manager.Pkg_error msg ->
+       raised := true;
+       Alcotest.(check bool) "mentions dep-c"
+         true (contains msg "dep-c"));
+    Alcotest.(check bool) "raised" true !raised)
 
 let test_resolve_circular () =
   with_temp_dir (fun dir ->
@@ -372,9 +387,398 @@ let test_resolve_no_satisfying_version () =
     let deps : Package.dependency list =
       [{ dep_name = "old";
          dep_constraints = [(Semver.Ge, v 5 0 0)] }] in
-    Alcotest.check_raises "no satisfying"
-      (Pkg_manager.Pkg_error "no installed version of old satisfies constraints")
-      (fun () -> ignore (Pkg_manager.resolve ~registry_root:registry deps)))
+    (try ignore (Pkg_manager.resolve ~registry_root:registry deps);
+         Alcotest.fail "expected Pkg_error"
+     with Pkg_manager.Pkg_error msg ->
+       Alcotest.(check bool) "mentions old"
+         true (contains msg "old");
+       Alcotest.(check bool) "mentions available"
+         true (contains msg "available")))
+
+(* --- Conflict diagnostic tests --- *)
+
+let test_conflict_names_both_requesters () =
+  with_temp_dir (fun dir ->
+    let registry = Filename.concat dir "reg" in
+    (* dep-c v1 and v2 *)
+    let src1 = Filename.concat dir "src1" in
+    Sys.mkdir src1 0o755;
+    make_package src1 "dep-c" "1.0.0" ();
+    Pkg_manager.install ~registry_root:registry ~src_dir:src1;
+    let src2 = Filename.concat dir "src2" in
+    Sys.mkdir src2 0o755;
+    make_package src2 "dep-c" "2.0.0" ();
+    Pkg_manager.install ~registry_root:registry ~src_dir:src2;
+    (* left requires dep-c >= 2.0.0 *)
+    let src_l = Filename.concat dir "srcl" in
+    Sys.mkdir src_l 0o755;
+    make_package src_l "left-c" "1.0.0"
+      ~depends:{|(dep-c (>= "2.0.0"))|} ();
+    Pkg_manager.install ~registry_root:registry ~src_dir:src_l;
+    (* right requires dep-c < 2.0.0 *)
+    let src_r = Filename.concat dir "srcr" in
+    Sys.mkdir src_r 0o755;
+    make_package src_r "right-c" "1.0.0"
+      ~depends:{|(dep-c (< "2.0.0"))|} ();
+    Pkg_manager.install ~registry_root:registry ~src_dir:src_r;
+    let deps : Package.dependency list =
+      [{ dep_name = "left-c"; dep_constraints = [] };
+       { dep_name = "right-c"; dep_constraints = [] }] in
+    (try ignore (Pkg_manager.resolve ~registry_root:registry deps);
+         Alcotest.fail "expected Pkg_error"
+     with Pkg_manager.Pkg_error msg ->
+       Alcotest.(check bool) "mentions left-c"
+         true (contains msg "left-c");
+       Alcotest.(check bool) "mentions right-c"
+         true (contains msg "right-c")))
+
+let test_conflict_lists_available_versions () =
+  with_temp_dir (fun dir ->
+    let registry = Filename.concat dir "reg" in
+    (* dep-c v1 and v2 *)
+    let src1 = Filename.concat dir "src1" in
+    Sys.mkdir src1 0o755;
+    make_package src1 "dep-c" "1.0.0" ();
+    Pkg_manager.install ~registry_root:registry ~src_dir:src1;
+    let src2 = Filename.concat dir "src2" in
+    Sys.mkdir src2 0o755;
+    make_package src2 "dep-c" "2.0.0" ();
+    Pkg_manager.install ~registry_root:registry ~src_dir:src2;
+    (* left requires dep-c >= 2.0.0 *)
+    let src_l = Filename.concat dir "srcl" in
+    Sys.mkdir src_l 0o755;
+    make_package src_l "left-c" "1.0.0"
+      ~depends:{|(dep-c (>= "2.0.0"))|} ();
+    Pkg_manager.install ~registry_root:registry ~src_dir:src_l;
+    (* right requires dep-c < 2.0.0 *)
+    let src_r = Filename.concat dir "srcr" in
+    Sys.mkdir src_r 0o755;
+    make_package src_r "right-c" "1.0.0"
+      ~depends:{|(dep-c (< "2.0.0"))|} ();
+    Pkg_manager.install ~registry_root:registry ~src_dir:src_r;
+    let deps : Package.dependency list =
+      [{ dep_name = "left-c"; dep_constraints = [] };
+       { dep_name = "right-c"; dep_constraints = [] }] in
+    (try ignore (Pkg_manager.resolve ~registry_root:registry deps);
+         Alcotest.fail "expected Pkg_error"
+     with Pkg_manager.Pkg_error msg ->
+       Alcotest.(check bool) "lists 1.0.0"
+         true (contains msg "1.0.0");
+       Alcotest.(check bool) "lists 2.0.0"
+         true (contains msg "2.0.0")))
+
+let test_deep_conflict_diagnostic () =
+  with_temp_dir (fun dir ->
+    let registry = Filename.concat dir "reg" in
+    (* dep-z v1 only *)
+    let src_z = Filename.concat dir "srcz" in
+    Sys.mkdir src_z 0o755;
+    make_package src_z "dep-z" "1.0.0" ();
+    Pkg_manager.install ~registry_root:registry ~src_dir:src_z;
+    (* mid depends on dep-z >= 2.0.0 (unsatisfiable) *)
+    let src_m = Filename.concat dir "srcm" in
+    Sys.mkdir src_m 0o755;
+    make_package src_m "mid" "1.0.0"
+      ~depends:{|(dep-z (>= "2.0.0"))|} ();
+    Pkg_manager.install ~registry_root:registry ~src_dir:src_m;
+    (* top depends on mid *)
+    let src_t = Filename.concat dir "srct" in
+    Sys.mkdir src_t 0o755;
+    make_package src_t "top" "1.0.0" ~depends:"(mid)" ();
+    Pkg_manager.install ~registry_root:registry ~src_dir:src_t;
+    let deps : Package.dependency list =
+      [{ dep_name = "top"; dep_constraints = [] }] in
+    (try ignore (Pkg_manager.resolve ~registry_root:registry deps);
+         Alcotest.fail "expected Pkg_error"
+     with Pkg_manager.Pkg_error msg ->
+       (* Error should mention mid as the requester *)
+       Alcotest.(check bool) "mentions mid"
+         true (contains msg "mid")))
+
+(* --- Backtracking solver tests --- *)
+
+let test_backtrack_resolves_conflict () =
+  (* left-c 1.0.0 requires dep-c >= 2.0.0
+     right-c 1.0.0 requires dep-c < 2.0.0
+     right-c 2.0.0 requires dep-c >= 1.0.0  (relaxed)
+     Solver should backtrack and pick right-c 2.0.0 *)
+  with_temp_dir (fun dir ->
+    let registry = Filename.concat dir "reg" in
+    (* dep-c v1 and v2 *)
+    let src = Filename.concat dir "src_c1" in
+    Sys.mkdir src 0o755;
+    make_package src "dep-c" "1.0.0" ();
+    Pkg_manager.install ~registry_root:registry ~src_dir:src;
+    let src = Filename.concat dir "src_c2" in
+    Sys.mkdir src 0o755;
+    make_package src "dep-c" "2.0.0" ();
+    Pkg_manager.install ~registry_root:registry ~src_dir:src;
+    (* left-c 1.0.0 requires dep-c >= 2.0.0 *)
+    let src = Filename.concat dir "srcl" in
+    Sys.mkdir src 0o755;
+    make_package src "left-c" "1.0.0"
+      ~depends:{|(dep-c (>= "2.0.0"))|} ();
+    Pkg_manager.install ~registry_root:registry ~src_dir:src;
+    (* right-c 1.0.0 requires dep-c < 2.0.0 (conflicts with left-c) *)
+    let src = Filename.concat dir "srcr1" in
+    Sys.mkdir src 0o755;
+    make_package src "right-c" "1.0.0"
+      ~depends:{|(dep-c (< "2.0.0"))|} ();
+    Pkg_manager.install ~registry_root:registry ~src_dir:src;
+    (* right-c 2.0.0 requires dep-c >= 1.0.0 (compatible with left-c) *)
+    let src = Filename.concat dir "srcr2" in
+    Sys.mkdir src 0o755;
+    make_package src "right-c" "2.0.0"
+      ~depends:{|(dep-c (>= "1.0.0"))|} ();
+    Pkg_manager.install ~registry_root:registry ~src_dir:src;
+    let deps : Package.dependency list =
+      [{ dep_name = "left-c"; dep_constraints = [] };
+       { dep_name = "right-c"; dep_constraints = [] }] in
+    let resolved = Pkg_manager.resolve ~registry_root:registry deps in
+    (* Should pick right-c 2.0.0 and dep-c 2.0.0 *)
+    let right_ver = List.assoc "right-c" resolved in
+    Alcotest.check semver_testable "right-c 2.0.0" (v 2 0 0) right_ver;
+    let dep_ver = List.assoc "dep-c" resolved in
+    Alcotest.check semver_testable "dep-c 2.0.0" (v 2 0 0) dep_ver)
+
+let test_backtrack_multiple_levels () =
+  (* A depends on B, B v2 depends on C v2 (not installed),
+     B v1 depends on C v1 (installed) → solver backtracks to B v1 *)
+  with_temp_dir (fun dir ->
+    let registry = Filename.concat dir "reg" in
+    (* C v1 only *)
+    let src = Filename.concat dir "src_c" in
+    Sys.mkdir src 0o755;
+    make_package src "pkg-c" "1.0.0" ();
+    Pkg_manager.install ~registry_root:registry ~src_dir:src;
+    (* B v1 depends on C (any) *)
+    let src = Filename.concat dir "src_b1" in
+    Sys.mkdir src 0o755;
+    make_package src "pkg-b" "1.0.0" ~depends:"(pkg-c)" ();
+    Pkg_manager.install ~registry_root:registry ~src_dir:src;
+    (* B v2 depends on C >= 2.0.0 (impossible) *)
+    let src = Filename.concat dir "src_b2" in
+    Sys.mkdir src 0o755;
+    make_package src "pkg-b" "2.0.0"
+      ~depends:{|(pkg-c (>= "2.0.0"))|} ();
+    Pkg_manager.install ~registry_root:registry ~src_dir:src;
+    (* A depends on B *)
+    let src = Filename.concat dir "src_a" in
+    Sys.mkdir src 0o755;
+    make_package src "pkg-a" "1.0.0" ~depends:"(pkg-b)" ();
+    Pkg_manager.install ~registry_root:registry ~src_dir:src;
+    let deps : Package.dependency list =
+      [{ dep_name = "pkg-a"; dep_constraints = [] }] in
+    let resolved = Pkg_manager.resolve ~registry_root:registry deps in
+    (* Should backtrack to B v1 *)
+    let b_ver = List.assoc "pkg-b" resolved in
+    Alcotest.check semver_testable "pkg-b 1.0.0" (v 1 0 0) b_ver;
+    let c_ver = List.assoc "pkg-c" resolved in
+    Alcotest.check semver_testable "pkg-c 1.0.0" (v 1 0 0) c_ver)
+
+let test_backtrack_no_solution () =
+  (* All version combinations lead to conflict *)
+  with_temp_dir (fun dir ->
+    let registry = Filename.concat dir "reg" in
+    (* dep-x v1 only *)
+    let src = Filename.concat dir "src_x" in
+    Sys.mkdir src 0o755;
+    make_package src "dep-x" "1.0.0" ();
+    Pkg_manager.install ~registry_root:registry ~src_dir:src;
+    (* alpha requires dep-x >= 2.0.0 (impossible) *)
+    let src = Filename.concat dir "src_a" in
+    Sys.mkdir src 0o755;
+    make_package src "alpha" "1.0.0"
+      ~depends:{|(dep-x (>= "2.0.0"))|} ();
+    Pkg_manager.install ~registry_root:registry ~src_dir:src;
+    let deps : Package.dependency list =
+      [{ dep_name = "alpha"; dep_constraints = [] }] in
+    (try ignore (Pkg_manager.resolve ~registry_root:registry deps);
+         Alcotest.fail "expected Pkg_error"
+     with Pkg_manager.Pkg_error _ -> ()))
+
+let test_backtrack_greedy_preferred () =
+  (* When no conflict, latest version is still picked *)
+  with_temp_dir (fun dir ->
+    let registry = Filename.concat dir "reg" in
+    let src1 = Filename.concat dir "src1" in
+    Sys.mkdir src1 0o755;
+    make_package src1 "greedy" "1.0.0" ();
+    Pkg_manager.install ~registry_root:registry ~src_dir:src1;
+    let src2 = Filename.concat dir "src2" in
+    Sys.mkdir src2 0o755;
+    make_package src2 "greedy" "2.0.0" ();
+    Pkg_manager.install ~registry_root:registry ~src_dir:src2;
+    let src3 = Filename.concat dir "src3" in
+    Sys.mkdir src3 0o755;
+    make_package src3 "greedy" "3.0.0" ();
+    Pkg_manager.install ~registry_root:registry ~src_dir:src3;
+    let deps : Package.dependency list =
+      [{ dep_name = "greedy"; dep_constraints = [] }] in
+    let resolved = Pkg_manager.resolve ~registry_root:registry deps in
+    Alcotest.(check (list pair_testable)) "picks latest"
+      [("greedy", v 3 0 0)] resolved)
+
+let test_backtrack_depth_limit () =
+  (* Create a combinatorial structure that forces > 1000 backtracks.
+     12 packages each with 3 versions, each depending on the next,
+     gives 3^12 = 531441 combinations. All paths fail because the
+     leaf depends on an impossible constraint, ensuring we hit the limit. *)
+  with_temp_dir (fun dir ->
+    let registry = Filename.concat dir "reg" in
+    let n_packages = 12 in
+    let n_versions = 3 in
+    for i = 1 to n_packages do
+      let name = Printf.sprintf "dl-%d" i in
+      for j = 1 to n_versions do
+        let src = Filename.concat dir
+            (Printf.sprintf "src_%d_%d" i j) in
+        Sys.mkdir src 0o755;
+        let dep =
+          if i < n_packages then
+            Printf.sprintf "(dl-%d)" (i + 1)
+          else
+            {|(dl-leaf (>= "99.0.0"))|}
+        in
+        make_package src name (Printf.sprintf "%d.0.0" j)
+          ~depends:dep ();
+        Pkg_manager.install ~registry_root:registry ~src_dir:src;
+      done
+    done;
+    let src = Filename.concat dir "src_leaf" in
+    Sys.mkdir src 0o755;
+    make_package src "dl-leaf" "1.0.0" ();
+    Pkg_manager.install ~registry_root:registry ~src_dir:src;
+    let deps : Package.dependency list =
+      [{ dep_name = "dl-1"; dep_constraints = [] }] in
+    (try ignore (Pkg_manager.resolve ~registry_root:registry deps);
+         Alcotest.fail "expected Pkg_error"
+     with Pkg_manager.Pkg_error msg ->
+       Alcotest.(check bool) "mentions backtrack limit"
+         true (contains msg "backtrack")))
+
+let test_backtrack_diamond () =
+  (* Diamond dependency where one path constrains, solver backtracks on the other.
+     top depends on left and right.
+     left v2 depends on shared >= 2.0.0
+     left v1 depends on shared (any)
+     right depends on shared < 2.0.0
+     shared v1 and v2 installed.
+     Solver should backtrack left to v1, pick shared v1. *)
+  with_temp_dir (fun dir ->
+    let registry = Filename.concat dir "reg" in
+    (* shared v1 and v2 *)
+    let src = Filename.concat dir "src_s1" in
+    Sys.mkdir src 0o755;
+    make_package src "shared" "1.0.0" ();
+    Pkg_manager.install ~registry_root:registry ~src_dir:src;
+    let src = Filename.concat dir "src_s2" in
+    Sys.mkdir src 0o755;
+    make_package src "shared" "2.0.0" ();
+    Pkg_manager.install ~registry_root:registry ~src_dir:src;
+    (* left v1: depends on shared (any) *)
+    let src = Filename.concat dir "src_l1" in
+    Sys.mkdir src 0o755;
+    make_package src "left" "1.0.0" ~depends:"(shared)" ();
+    Pkg_manager.install ~registry_root:registry ~src_dir:src;
+    (* left v2: depends on shared >= 2.0.0 *)
+    let src = Filename.concat dir "src_l2" in
+    Sys.mkdir src 0o755;
+    make_package src "left" "2.0.0"
+      ~depends:{|(shared (>= "2.0.0"))|} ();
+    Pkg_manager.install ~registry_root:registry ~src_dir:src;
+    (* right v1: depends on shared < 2.0.0 *)
+    let src = Filename.concat dir "src_r" in
+    Sys.mkdir src 0o755;
+    make_package src "right" "1.0.0"
+      ~depends:{|(shared (< "2.0.0"))|} ();
+    Pkg_manager.install ~registry_root:registry ~src_dir:src;
+    let deps : Package.dependency list =
+      [{ dep_name = "left"; dep_constraints = [] };
+       { dep_name = "right"; dep_constraints = [] }] in
+    let resolved = Pkg_manager.resolve ~registry_root:registry deps in
+    (* Should backtrack left to v1, pick shared v1 *)
+    let left_ver = List.assoc "left" resolved in
+    Alcotest.check semver_testable "left 1.0.0" (v 1 0 0) left_ver;
+    let shared_ver = List.assoc "shared" resolved in
+    Alcotest.check semver_testable "shared 1.0.0" (v 1 0 0) shared_ver)
+
+(* --- Why tests --- *)
+
+let test_why_direct_dependency () =
+  with_temp_dir (fun dir ->
+    let registry = Filename.concat dir "reg" in
+    let src = Filename.concat dir "src" in
+    Sys.mkdir src 0o755;
+    make_package src "dep-a" "1.0.0" ();
+    Pkg_manager.install ~registry_root:registry ~src_dir:src;
+    let deps : Package.dependency list =
+      [{ dep_name = "dep-a"; dep_constraints = [] }] in
+    let reasons = Pkg_manager.why ~registry_root:registry deps "dep-a" in
+    Alcotest.(check int) "one reason" 1 (List.length reasons);
+    Alcotest.(check bool) "mentions direct"
+      true (contains (List.hd reasons) "direct dependency"))
+
+let test_why_transitive_dependency () =
+  with_temp_dir (fun dir ->
+    let registry = Filename.concat dir "reg" in
+    (* dep-b has no deps *)
+    let src_b = Filename.concat dir "srcb" in
+    Sys.mkdir src_b 0o755;
+    make_package src_b "dep-b" "1.0.0" ();
+    Pkg_manager.install ~registry_root:registry ~src_dir:src_b;
+    (* dep-a depends on dep-b *)
+    let src_a = Filename.concat dir "srca" in
+    Sys.mkdir src_a 0o755;
+    make_package src_a "dep-a" "1.0.0" ~depends:"(dep-b)" ();
+    Pkg_manager.install ~registry_root:registry ~src_dir:src_a;
+    let deps : Package.dependency list =
+      [{ dep_name = "dep-a"; dep_constraints = [] }] in
+    let reasons = Pkg_manager.why ~registry_root:registry deps "dep-b" in
+    Alcotest.(check int) "one reason" 1 (List.length reasons);
+    Alcotest.(check bool) "mentions dep-a"
+      true (contains (List.hd reasons) "dep-a"))
+
+let test_why_diamond_paths () =
+  with_temp_dir (fun dir ->
+    let registry = Filename.concat dir "reg" in
+    (* shared: no deps *)
+    let src_s = Filename.concat dir "srcs" in
+    Sys.mkdir src_s 0o755;
+    make_package src_s "shared" "1.0.0" ();
+    Pkg_manager.install ~registry_root:registry ~src_dir:src_s;
+    (* left depends on shared *)
+    let src_l = Filename.concat dir "srcl" in
+    Sys.mkdir src_l 0o755;
+    make_package src_l "left" "1.0.0" ~depends:"(shared)" ();
+    Pkg_manager.install ~registry_root:registry ~src_dir:src_l;
+    (* right depends on shared *)
+    let src_r = Filename.concat dir "srcr" in
+    Sys.mkdir src_r 0o755;
+    make_package src_r "right" "1.0.0" ~depends:"(shared)" ();
+    Pkg_manager.install ~registry_root:registry ~src_dir:src_r;
+    let deps : Package.dependency list =
+      [{ dep_name = "left"; dep_constraints = [] };
+       { dep_name = "right"; dep_constraints = [] }] in
+    let reasons = Pkg_manager.why ~registry_root:registry deps "shared" in
+    Alcotest.(check int) "two reasons" 2 (List.length reasons);
+    let combined = String.concat " " reasons in
+    Alcotest.(check bool) "mentions left"
+      true (contains combined "left");
+    Alcotest.(check bool) "mentions right"
+      true (contains combined "right"))
+
+let test_why_not_in_tree () =
+  with_temp_dir (fun dir ->
+    let registry = Filename.concat dir "reg" in
+    let src = Filename.concat dir "src" in
+    Sys.mkdir src 0o755;
+    make_package src "dep-a" "1.0.0" ();
+    Pkg_manager.install ~registry_root:registry ~src_dir:src;
+    let deps : Package.dependency list =
+      [{ dep_name = "dep-a"; dep_constraints = [] }] in
+    let reasons = Pkg_manager.why ~registry_root:registry deps "unknown" in
+    Alcotest.(check (list string)) "empty" [] reasons)
 
 (* --- Search paths tests --- *)
 
@@ -464,6 +868,25 @@ let () =
       Alcotest.test_case "missing package" `Quick test_resolve_missing_package;
       Alcotest.test_case "no satisfying version" `Quick test_resolve_no_satisfying_version;
       Alcotest.test_case "dedup" `Quick test_resolve_dedup;
+    ];
+    "conflict diagnostics", [
+      Alcotest.test_case "names both requesters" `Quick test_conflict_names_both_requesters;
+      Alcotest.test_case "lists available versions" `Quick test_conflict_lists_available_versions;
+      Alcotest.test_case "deep conflict" `Quick test_deep_conflict_diagnostic;
+    ];
+    "backtracking", [
+      Alcotest.test_case "resolves conflict" `Quick test_backtrack_resolves_conflict;
+      Alcotest.test_case "multiple levels" `Quick test_backtrack_multiple_levels;
+      Alcotest.test_case "no solution" `Quick test_backtrack_no_solution;
+      Alcotest.test_case "greedy preferred" `Quick test_backtrack_greedy_preferred;
+      Alcotest.test_case "depth limit" `Quick test_backtrack_depth_limit;
+      Alcotest.test_case "diamond" `Quick test_backtrack_diamond;
+    ];
+    "why", [
+      Alcotest.test_case "direct dependency" `Quick test_why_direct_dependency;
+      Alcotest.test_case "transitive dependency" `Quick test_why_transitive_dependency;
+      Alcotest.test_case "diamond paths" `Quick test_why_diamond_paths;
+      Alcotest.test_case "not in tree" `Quick test_why_not_in_tree;
     ];
     "search_paths", [
       Alcotest.test_case "basic" `Quick test_search_paths_basic;

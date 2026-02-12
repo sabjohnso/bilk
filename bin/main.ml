@@ -1034,6 +1034,39 @@ let make_pkg_info_cmd () =
   in
   Cmd.v info term
 
+let pkg_why name =
+  handle_errors (fun () ->
+    let cwd = Sys.getcwd () in
+    let pkg_file = match Package.find_package_file cwd with
+      | Some p -> p
+      | None ->
+        Printf.eprintf "Error: no package.scm found\n%!";
+        exit 1
+    in
+    let pkg = Package.parse Readtable.default pkg_file in
+    let registry_root = Pkg_manager.default_registry_root () in
+    let reasons = Pkg_manager.why ~registry_root pkg.depends name in
+    if reasons = [] then
+      Printf.printf "%s is not in the dependency tree\n%!" name
+    else
+      List.iter (fun reason ->
+        Printf.printf "%s\n%!" reason
+      ) reasons)
+
+let make_pkg_why_cmd () =
+  let open Cmdliner in
+  let name_arg =
+    Arg.(required & pos 0 (some string) None &
+         info [] ~docv:"NAME" ~doc:"Package name to explain.")
+  in
+  let cmd name = exit (pkg_why name) in
+  let term = Term.(const cmd $ name_arg) in
+  let info =
+    Cmd.info "why" ~version
+      ~doc:"Explain why a package is in the dependency tree"
+  in
+  Cmd.v info term
+
 (* --- Venv subcommand --- *)
 
 let make_venv_cmd () =
@@ -1283,8 +1316,8 @@ let make_pkg_cmd () =
             `P "Manage packages. Use $(b,wile pkg install), \
                 $(b,wile pkg lock), $(b,wile pkg list), \
                 $(b,wile pkg remove), $(b,wile pkg info), \
-                $(b,wile pkg fetch), $(b,wile pkg search), \
-                or $(b,wile pkg repo)."]
+                $(b,wile pkg why), $(b,wile pkg fetch), \
+                $(b,wile pkg search), or $(b,wile pkg repo)."]
   in
   Cmd.group info [
     make_pkg_install_cmd ();
@@ -1292,6 +1325,7 @@ let make_pkg_cmd () =
     make_pkg_list_cmd ();
     make_pkg_remove_cmd ();
     make_pkg_info_cmd ();
+    make_pkg_why_cmd ();
     make_pkg_fetch_cmd ();
     make_pkg_search_cmd ();
     make_repo_cmd ();
