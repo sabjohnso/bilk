@@ -86,6 +86,19 @@ let handle_errors f =
   | Package.Package_error msg -> format_error msg; 1
   | Pkg_manager.Pkg_error msg -> format_error msg; 1
   | Venv.Venv_error msg -> format_error msg; 1
+  | Build.Build_error (name, msg) ->
+    format_error (Printf.sprintf "building %s: %s"
+                    (Library.name_to_string name) msg); 1
+  | Dep_graph.Cycle_error cycles ->
+    let cycle_strs = List.map (fun cycle ->
+      String.concat " -> "
+        (List.map Library.name_to_string cycle)
+    ) cycles in
+    format_error ("circular dependencies:\n  " ^
+                  String.concat "\n  " cycle_strs); 1
+  | Dep_graph.Resolve_error (name, msg) ->
+    format_error (Printf.sprintf "resolving %s: %s"
+                    (Library.name_to_string name) msg); 1
   | Extension.Extension_error msg -> format_error msg; 1
   | Debug_server.Debug_error msg -> format_error msg; 1
   | Dap.Dap_error msg -> format_error msg; 1
@@ -1091,6 +1104,103 @@ let make_lsp_cmd () =
   in
   Cmd.v info term
 
+(* --- Build subcommand --- *)
+
+let run_build ~graph ~clean_flag ~dry_run ~verbose target =
+  handle_errors (fun () ->
+    let search_paths = Search_path.resolve ~base_dirs:[Sys.getcwd ()] in
+    let inst = Instance.create () in
+    let builtins = Build.builtin_library_names inst in
+    let roots = match target with
+      | Some name_str ->
+        let parts = String.split_on_char ' ' name_str in
+        [parts]
+      | None ->
+        Instance.discover_available_libraries search_paths
+    in
+    let rt = Readtable.default in
+    let nodes = Dep_graph.build_graph ~builtins ~search_paths rt roots in
+    if graph then
+      print_string (Dep_graph.to_dot nodes)
+    else if clean_flag then begin
+      let count = Build.clean nodes in
+      Printf.printf "Cleaned %d .fasl file%s.\n" count
+        (if count = 1 then "" else "s")
+    end else begin
+      let actions = Build.plan nodes in
+      if dry_run then begin
+        if actions = [] then
+          Printf.printf "Everything is up to date.\n"
+        else begin
+          Printf.printf "Would compile %d librar%s:\n"
+            (List.length actions)
+            (if List.length actions = 1 then "y" else "ies");
+          List.iter (fun (a : Build.build_action) ->
+            let reason_str = match a.reason with
+              | Build.No_fasl -> "no cache"
+              | Build.Source_newer -> "source changed"
+              | Build.Dep_newer dep ->
+                Printf.sprintf "dependency %s changed"
+                  (Library.name_to_string dep)
+            in
+            Printf.printf "  %s  (%s)\n"
+              (Library.name_to_string a.node.name) reason_str
+          ) actions
+        end
+      end else begin
+        if actions = [] then
+          Printf.printf "Everything is up to date.\n"
+        else begin
+          let t0 = Unix.gettimeofday () in
+          let results = Build.execute ~verbose ~search_paths actions in
+          let t1 = Unix.gettimeofday () in
+          Printf.printf "Compiled %d librar%s in %.2fs.\n"
+            (List.length results)
+            (if List.length results = 1 then "y" else "ies")
+            (t1 -. t0)
+        end
+      end
+    end)
+
+let make_build_cmd () =
+  let open Cmdliner in
+  let graph_flag =
+    Arg.(value & flag &
+         info ["graph"] ~doc:"Print the dependency graph in Graphviz DOT format.")
+  in
+  let clean_flag =
+    Arg.(value & flag &
+         info ["clean"] ~doc:"Remove all .fasl cache files.")
+  in
+  let dry_run_flag =
+    Arg.(value & flag &
+         info ["dry-run"] ~doc:"Show what would be compiled without compiling.")
+  in
+  let verbose_flag =
+    Arg.(value & flag &
+         info ["verbose"; "v"] ~doc:"Print each library as it is compiled.")
+  in
+  let target_arg =
+    Arg.(value & pos 0 (some string) None &
+         info [] ~docv:"LIBRARY" ~doc:"Library name to build (e.g. \"srfi 1\"). \
+           If omitted, discovers and builds all project libraries.")
+  in
+  let cmd graph clean_flag dry_run verbose target =
+    exit (run_build ~graph ~clean_flag ~dry_run ~verbose target)
+  in
+  let term = Term.(const cmd $ graph_flag $ clean_flag $ dry_run_flag
+                   $ verbose_flag $ target_arg) in
+  let info =
+    Cmd.info "build" ~version
+      ~doc:"Incrementally compile project libraries to FASL cache"
+      ~man:[`S "DESCRIPTION";
+            `P "Discovers project libraries (or takes a specific library name), \
+                computes the dependency graph, and compiles only those libraries \
+                whose source or dependencies have changed. Compiled code is \
+                cached as .fasl files next to the .sld source files."]
+  in
+  Cmd.v info term
+
 (* --- Profile subcommand --- *)
 
 let run_profile path format_str =
@@ -1154,6 +1264,12 @@ let () =
   let argc = Array.length Sys.argv in
   if argc >= 2 then begin
     match Sys.argv.(1) with
+    | "build" ->
+      let argv = Array.concat [
+        [| Sys.argv.(0) |];
+        Array.sub Sys.argv 2 (argc - 2)
+      ] in
+      exit (Cmd.eval ~argv (make_build_cmd ()))
     | "compile" ->
       let argv = Array.concat [
         [| Sys.argv.(0) |];

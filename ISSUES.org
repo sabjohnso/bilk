@@ -1,0 +1,103 @@
+#+TITLE: Wile — Open Issues
+#+STARTUP: showall
+
+* Known Issues
+
+** TODO Issue 4: =imports_of_scm= already implemented — Phase 3 plan is stale
+:PROPERTIES:
+:PRIORITY: C
+:END:
+
+[[file:PLAN.org][PLAN.org]] Phase 3 lists "Parse top-level =(import ...)= forms from =.scm=
+files" as a task, but [[file:lib/dep_graph.ml::let imports_of_scm][=Dep_graph.imports_of_scm=]] was already implemented
+during Phase 1. The plan should be updated to mark this task as complete and
+remove it from Phase 3's scope.
+
+** TODO Issue 5: =syntax_to_proper_list= duplicated across modules
+:PROPERTIES:
+:PRIORITY: B
+:END:
+
+[[file:lib/dep_graph.ml::let rec syntax_to_proper_list][=Dep_graph.syntax_to_proper_list=]] duplicates
+[[file:lib/library.ml][=Library.syntax_to_proper_list=]] (which is not exported in the =.mli=).
+
+Options:
+- Export it from =Library.mli= and use it in =Dep_graph=.
+- Extract it to a shared =Syntax_util= module.
+
+The duplication is harmless today but will become a maintenance burden if the
+=Syntax.t= representation changes.
+
+** TODO Issue 6: Duplicate imports produce duplicate DOT edges
+:PROPERTIES:
+:PRIORITY: C
+:END:
+
+If a =.sld= file imports the same library more than once (e.g. via separate
+=(import ...)= declarations), [[file:lib/dep_graph.ml::let to_dot][=Dep_graph.to_dot=]] emits duplicate edges in the
+Graphviz output. This is cosmetically ugly and can confuse layout algorithms.
+
+Fix: deduplicate =node.imports= when building the graph, or deduplicate
+edges in =to_dot=.
+
+** TODO Issue 7: =is_stale= dep lookup is O(n) per import
+:PROPERTIES:
+:PRIORITY: C
+:END:
+
+[[file:lib/build.ml::let is_stale][=Build.is_stale=]] uses =List.find_opt= to resolve each import name to a
+node, making it O(imports × nodes). Since =plan= calls =is_stale= for every
+node, the overall complexity is O(nodes × imports × nodes). Fine for dozens
+of libraries, but will become quadratic at scale.
+
+Fix: build a =Hashtbl= from =name -> node= once in =plan= and pass it to
+=is_stale= (or a private helper) instead of the raw list.
+
+** TODO Issue 8: =is_stale= double-stats the FASL file
+:PROPERTIES:
+:PRIORITY: C
+:END:
+
+[[file:lib/build.ml::let is_stale][=Build.is_stale=]] calls =Fasl.is_cache_valid= (which stats both the =.sld=
+and =.fasl=), then immediately stats the =.fasl= again to read
+=this_mtime= for the dep-newer check.
+
+Fix: inline the mtime comparison or capture the stat result from a single
+call and reuse it.
+
+** TODO Issue 9: =test_execute_error= relies on runtime error, not compile error
+:PROPERTIES:
+:PRIORITY: C
+:END:
+
+[[file:test/test_build.ml::let test_execute_error][=test_execute_error=]] uses =(/ 1 "bad")= which is a runtime type error.
+The library body happens to run at load time, so it surfaces during
+=ensure_library=, but this is fragile — if the compiler ever constant-folded
+or the VM deferred execution, the test might stop raising.
+
+Fix: use a syntax error (e.g. unbalanced parens) or an unresolved import to
+guarantee a compile-time failure.
+
+** TODO Issue 10: Property tests use fixed inputs instead of generators
+:PROPERTIES:
+:PRIORITY: B
+:END:
+
+[[file:test/test_build.ml::let test_execute_makes_fresh][=test_execute_makes_fresh=]] and [[file:test/test_build.ml::let test_plan_preserves_topo_order][=test_plan_preserves_topo_order=]] use
+=QCheck2.Gen.return ()= with =~count:5=, running the same fixed 2- or 3-node
+graph five times. These are effectively example tests.
+
+Fix: generate random graph structures (varying chain length, diamond width,
+which nodes start stale), following the pattern in [[file:test/test_dep_graph.ml::let test_topological_order_property][=test_dep_graph.ml=]]
+which uses =QCheck2.Gen.int_range= to vary structure.
+
+** TODO Issue 11: CLI pluralization calls =List.length= twice
+:PROPERTIES:
+:PRIORITY: C
+:END:
+
+In [[file:bin/main.ml::let run_build][=run_build=]], the dry-run and build output both compute
+=List.length actions= (or =results=) twice — once for the count and once for
+the pluralization conditional.
+
+Fix: bind =let n = List.length actions in= and reuse.
