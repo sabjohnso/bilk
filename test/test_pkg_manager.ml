@@ -780,6 +780,85 @@ let test_why_not_in_tree () =
     let reasons = Pkg_manager.why ~registry_root:registry deps "unknown" in
     Alcotest.(check (list string)) "empty" [] reasons)
 
+(* --- Local registry root tests --- *)
+
+let test_local_registry_root () =
+  let result = Pkg_manager.local_registry_root "/foo/bar" in
+  Alcotest.(check string) "path" "/foo/bar/_packages" result
+
+let test_effective_in_project_with_local () =
+  with_temp_dir (fun dir ->
+    write_file (Filename.concat dir "package.scm")
+      {|(define-package (name test) (version "1.0.0")
+        (description "") (license "MIT"))|};
+    let pkg_dir = Filename.concat dir "_packages" in
+    Sys.mkdir pkg_dir 0o755;
+    let result = Pkg_manager.effective_registry_root dir in
+    Alcotest.(check string) "local" pkg_dir result)
+
+let test_effective_in_project_without_local () =
+  with_temp_dir (fun dir ->
+    write_file (Filename.concat dir "package.scm")
+      {|(define-package (name test) (version "1.0.0")
+        (description "") (license "MIT"))|};
+    let result = Pkg_manager.effective_registry_root dir in
+    Alcotest.(check string) "global"
+      (Pkg_manager.default_registry_root ()) result)
+
+let test_effective_no_project () =
+  with_temp_dir (fun dir ->
+    let result = Pkg_manager.effective_registry_root dir in
+    Alcotest.(check string) "global"
+      (Pkg_manager.default_registry_root ()) result)
+
+(* --- Init project tests --- *)
+
+let test_init_creates_package_scm () =
+  with_temp_dir (fun dir ->
+    Pkg_manager.init_project ~dir ~name:"hello";
+    let pkg_file = Filename.concat dir "package.scm" in
+    Alcotest.(check bool) "exists" true (Sys.file_exists pkg_file);
+    let content =
+      let ic = open_in pkg_file in
+      Fun.protect ~finally:(fun () -> close_in ic) (fun () ->
+        let n = in_channel_length ic in
+        really_input_string ic n)
+    in
+    Alcotest.(check bool) "has name" true (contains content "(name hello)");
+    Alcotest.(check bool) "has version" true (contains content {|(version "0.1.0")|}))
+
+let test_init_creates_packages_dir () =
+  with_temp_dir (fun dir ->
+    Pkg_manager.init_project ~dir ~name:"hello";
+    let pkg_dir = Filename.concat dir "_packages" in
+    Alcotest.(check bool) "exists" true (Sys.file_exists pkg_dir);
+    Alcotest.(check bool) "is dir" true (Sys.is_directory pkg_dir))
+
+let test_init_fails_if_package_exists () =
+  with_temp_dir (fun dir ->
+    write_file (Filename.concat dir "package.scm") "(define-package)";
+    let raised = ref false in
+    (try Pkg_manager.init_project ~dir ~name:"hello"
+     with Pkg_manager.Pkg_error msg ->
+       raised := true;
+       Alcotest.(check bool) "mentions exists"
+         true (contains msg "already exists"));
+    Alcotest.(check bool) "raised" true !raised)
+
+let test_init_gitignore () =
+  with_temp_dir (fun dir ->
+    Sys.mkdir (Filename.concat dir ".git") 0o755;
+    Pkg_manager.init_project ~dir ~name:"hello";
+    let gitignore = Filename.concat dir ".gitignore" in
+    Alcotest.(check bool) "gitignore exists" true (Sys.file_exists gitignore);
+    let content =
+      let ic = open_in gitignore in
+      Fun.protect ~finally:(fun () -> close_in ic) (fun () ->
+        let n = in_channel_length ic in
+        really_input_string ic n)
+    in
+    Alcotest.(check bool) "has _packages/" true (contains content "_packages/"))
+
 (* --- Search paths tests --- *)
 
 let test_search_paths_basic () =
@@ -891,5 +970,17 @@ let () =
     "search_paths", [
       Alcotest.test_case "basic" `Quick test_search_paths_basic;
       Alcotest.test_case "empty" `Quick test_search_paths_empty;
+    ];
+    "local registry", [
+      Alcotest.test_case "local_registry_root" `Quick test_local_registry_root;
+      Alcotest.test_case "effective with local" `Quick test_effective_in_project_with_local;
+      Alcotest.test_case "effective without local" `Quick test_effective_in_project_without_local;
+      Alcotest.test_case "effective no project" `Quick test_effective_no_project;
+    ];
+    "init", [
+      Alcotest.test_case "creates package.scm" `Quick test_init_creates_package_scm;
+      Alcotest.test_case "creates _packages dir" `Quick test_init_creates_packages_dir;
+      Alcotest.test_case "fails if package exists" `Quick test_init_fails_if_package_exists;
+      Alcotest.test_case "gitignore" `Quick test_init_gitignore;
     ];
   ]

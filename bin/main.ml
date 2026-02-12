@@ -132,6 +132,13 @@ let chop_extension path =
 
 (* --- Package auto-detection --- *)
 
+(** Registry root for install/fetch: always local when in a project. *)
+let install_registry_root () =
+  match Package.find_package_file (Sys.getcwd ()) with
+  | Some pkg_path ->
+    Pkg_manager.local_registry_root (Filename.dirname pkg_path)
+  | None -> Pkg_manager.default_registry_root ()
+
 let setup_package inst start_dir =
   match Package.find_package_file start_dir with
   | None -> None
@@ -139,7 +146,7 @@ let setup_package inst start_dir =
     let pkg = Package.parse inst.Instance.readtable pkg_path in
     let pkg_dir = Filename.dirname pkg_path in
     let pkg_src = Filename.concat pkg_dir "src" in
-    let registry_root = Pkg_manager.default_registry_root () in
+    let registry_root = Pkg_manager.effective_registry_root start_dir in
     Instance.setup_package_paths inst ~registry_root pkg;
     (* Prepend the package's own src/ directory *)
     if Sys.file_exists pkg_src && Sys.is_directory pkg_src then
@@ -865,7 +872,7 @@ let pkg_install path =
       | Some p -> p
       | None -> Sys.getcwd ()
     in
-    let registry_root = Pkg_manager.default_registry_root () in
+    let registry_root = install_registry_root () in
     let lockpath = Lockfile.lockfile_path src_dir in
     if Sys.file_exists lockpath then begin
       let lock = Lockfile.parse Readtable.default lockpath in
@@ -903,7 +910,7 @@ let pkg_lock () =
     in
     let project_dir = Filename.dirname pkg_file in
     let pkg = Package.parse Readtable.default pkg_file in
-    let registry_root = Pkg_manager.default_registry_root () in
+    let registry_root = Pkg_manager.effective_registry_root cwd in
     let lock = Lockfile.create ~registry_root pkg.depends in
     let path = Lockfile.lockfile_path project_dir in
     Lockfile.write path lock;
@@ -912,7 +919,7 @@ let pkg_lock () =
 
 let pkg_list () =
   handle_errors (fun () ->
-    let registry_root = Pkg_manager.default_registry_root () in
+    let registry_root = Pkg_manager.effective_registry_root (Sys.getcwd ()) in
     let pkgs = Pkg_manager.list_packages ~registry_root in
     if pkgs = [] then
       print_endline "No packages installed."
@@ -924,13 +931,13 @@ let pkg_list () =
 
 let pkg_remove name ver =
   handle_errors (fun () ->
-    let registry_root = Pkg_manager.default_registry_root () in
+    let registry_root = Pkg_manager.effective_registry_root (Sys.getcwd ()) in
     Pkg_manager.remove ~registry_root ~name ~version:ver;
     Printf.printf "Removed %s %s\n%!" name ver)
 
 let pkg_info name version =
   handle_errors (fun () ->
-    let registry_root = Pkg_manager.default_registry_root () in
+    let registry_root = Pkg_manager.effective_registry_root (Sys.getcwd ()) in
     match version with
     | Some ver ->
       let pkg = Pkg_manager.package_info ~registry_root ~name ~version:ver in
@@ -1044,7 +1051,7 @@ let pkg_why name =
         exit 1
     in
     let pkg = Package.parse Readtable.default pkg_file in
-    let registry_root = Pkg_manager.default_registry_root () in
+    let registry_root = Pkg_manager.effective_registry_root cwd in
     let reasons = Pkg_manager.why ~registry_root pkg.depends name in
     if reasons = [] then
       Printf.printf "%s is not in the dependency tree\n%!" name
@@ -1064,6 +1071,31 @@ let make_pkg_why_cmd () =
   let info =
     Cmd.info "why" ~version
       ~doc:"Explain why a package is in the dependency tree"
+  in
+  Cmd.v info term
+
+let pkg_init name =
+  handle_errors (fun () ->
+    let dir = Sys.getcwd () in
+    let name = match name with
+      | Some n -> n
+      | None -> Filename.basename dir
+    in
+    Pkg_manager.init_project ~dir ~name;
+    Printf.printf "Created package.scm and _packages/ in %s\n%!" dir)
+
+let make_pkg_init_cmd () =
+  let open Cmdliner in
+  let name_arg =
+    Arg.(value & pos 0 (some string) None &
+         info [] ~docv:"NAME"
+           ~doc:"Package name (default: current directory name).")
+  in
+  let cmd name = exit (pkg_init name) in
+  let term = Term.(const cmd $ name_arg) in
+  let info =
+    Cmd.info "init" ~version
+      ~doc:"Initialize a new project with package.scm and _packages/"
   in
   Cmd.v info term
 
@@ -1108,7 +1140,7 @@ let wile_home () =
 let pkg_fetch name version =
   handle_errors (fun () ->
     let wile_home = wile_home () in
-    let registry_root = Pkg_manager.default_registry_root () in
+    let registry_root = install_registry_root () in
     let repos = Repository.load_repos wile_home in
     if repos = [] then
       raise (Repository.Repository_error "no repositories configured; use 'wile pkg repo add'");
@@ -1313,13 +1345,15 @@ let make_pkg_cmd () =
     Cmd.info "pkg" ~version
       ~doc:"Package management commands"
       ~man:[`S "DESCRIPTION";
-            `P "Manage packages. Use $(b,wile pkg install), \
+            `P "Manage packages. Use $(b,wile pkg init), \
+                $(b,wile pkg install), \
                 $(b,wile pkg lock), $(b,wile pkg list), \
                 $(b,wile pkg remove), $(b,wile pkg info), \
                 $(b,wile pkg why), $(b,wile pkg fetch), \
                 $(b,wile pkg search), or $(b,wile pkg repo)."]
   in
   Cmd.group info [
+    make_pkg_init_cmd ();
     make_pkg_install_cmd ();
     make_pkg_lock_cmd ();
     make_pkg_list_cmd ();
@@ -1726,7 +1760,7 @@ let run_build ~graph ~clean_flag ~dry_run ~verbose ~watch target =
          | Some pkg_path ->
            let pkg = Package.parse rt pkg_path in
            let pkg_dir = Filename.dirname pkg_path in
-           let registry_root = Pkg_manager.default_registry_root () in
+           let registry_root = Pkg_manager.effective_registry_root (Sys.getcwd ()) in
            Instance.setup_package_paths inst ~registry_root pkg;
            let pkg_src = Filename.concat pkg_dir "src" in
            if Sys.file_exists pkg_src && Sys.is_directory pkg_src then

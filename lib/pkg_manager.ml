@@ -8,6 +8,59 @@ let default_registry_root () =
   | Some home -> Filename.concat (Filename.concat home ".wile") "packages"
   | None -> error "HOME environment variable not set"
 
+let local_registry_root project_dir =
+  Filename.concat project_dir "_packages"
+
+let effective_registry_root cwd =
+  match Package.find_package_file cwd with
+  | Some pkg_path ->
+    let project_dir = Filename.dirname pkg_path in
+    let local = local_registry_root project_dir in
+    if Sys.file_exists local && Sys.is_directory local
+    then local
+    else default_registry_root ()
+  | None -> default_registry_root ()
+
+(* --- Project initialization --- *)
+
+let init_project ~dir ~name =
+  let pkg_file = Filename.concat dir "package.scm" in
+  if Sys.file_exists pkg_file then
+    errorf "package.scm already exists in %s" dir;
+  if not (Sys.file_exists dir) then
+    Sys.mkdir dir 0o755;
+  let oc = open_out pkg_file in
+  Fun.protect ~finally:(fun () -> close_out oc) (fun () ->
+    Printf.fprintf oc "(define-package\n";
+    Printf.fprintf oc "  (name %s)\n" name;
+    Printf.fprintf oc "  (version \"0.1.0\")\n";
+    Printf.fprintf oc "  (description \"\")\n";
+    Printf.fprintf oc "  (license \"MIT\"))\n");
+  let pkg_dir = local_registry_root dir in
+  if not (Sys.file_exists pkg_dir) then
+    Sys.mkdir pkg_dir 0o755;
+  let git_dir = Filename.concat dir ".git" in
+  if Sys.file_exists git_dir && Sys.is_directory git_dir then begin
+    let gitignore = Filename.concat dir ".gitignore" in
+    let entry = "_packages/" in
+    let already =
+      if Sys.file_exists gitignore then begin
+        let ic = open_in gitignore in
+        let content = Fun.protect ~finally:(fun () -> close_in ic) (fun () ->
+          let n = in_channel_length ic in
+          really_input_string ic n) in
+        let lines = String.split_on_char '\n' content in
+        List.exists (fun l -> String.trim l = entry) lines
+      end else
+        false
+    in
+    if not already then begin
+      let oc = open_out_gen [Open_append; Open_creat] 0o644 gitignore in
+      Fun.protect ~finally:(fun () -> close_out oc) (fun () ->
+        Printf.fprintf oc "%s\n" entry)
+    end
+  end
+
 (* --- Filesystem helpers --- *)
 
 let mkdir_p path =

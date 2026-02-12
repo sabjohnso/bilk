@@ -25,6 +25,23 @@ exception Pkg_error of string
 val default_registry_root : unit -> string
 (** [default_registry_root ()] returns [~/.wile/packages/]. *)
 
+val local_registry_root : string -> string
+(** [local_registry_root project_dir] returns [project_dir/_packages]. *)
+
+val effective_registry_root : string -> string
+(** [effective_registry_root cwd] walks up from [cwd] looking for
+    [package.scm].  If found and a [_packages/] directory exists in the
+    project root, returns [project_dir/_packages].  Otherwise returns
+    [default_registry_root ()]. *)
+
+(** {1 Project initialization} *)
+
+val init_project : dir:string -> name:string -> unit
+(** [init_project ~dir ~name] creates a new project in [dir] with a
+    [package.scm] skeleton and [_packages/] directory.  If [dir] contains
+    [.git/], appends [_packages/] to [.gitignore].
+    @raise Pkg_error if [package.scm] already exists. *)
+
 (** {1 Registry operations} *)
 
 val install : registry_root:string -> src_dir:string -> unit
