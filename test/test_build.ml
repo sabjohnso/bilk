@@ -612,6 +612,57 @@ let test_plan_preserves_topo_order =
             in
             is_subsequence plan_names node_names))
 
+(* --- stdlib validation tests --- *)
+
+let test_stdlib_graph () =
+  let stdlib = Wile_config.stdlib_source_dir in
+  let inst = Instance.create () in
+  let builtins = Build.builtin_library_names inst in
+  let search_paths = [stdlib] in
+  let rt = Readtable.default in
+  let roots = Instance.discover_available_libraries search_paths in
+  (* 32 libraries: 31 SRFIs + (srfi 41 primitive) *)
+  Alcotest.(check bool) "found 32+ roots" true (List.length roots >= 32);
+  let nodes = Dep_graph.build_graph ~builtins ~search_paths rt roots in
+  Alcotest.(check bool) "graph has 32+ nodes" true (List.length nodes >= 32);
+  (* Sub-library (srfi 41 primitive) is included *)
+  Alcotest.(check bool) "(srfi 41 primitive) in graph" true
+    (List.exists (fun (n : Dep_graph.node) ->
+       n.name = ["srfi"; "41"; "primitive"]) nodes);
+  (* Topological order: every in-graph import appears before its dependent *)
+  let pos = Hashtbl.create 64 in
+  List.iteri (fun i (n : Dep_graph.node) ->
+    Hashtbl.replace pos (String.concat "\x00" n.name) i) nodes;
+  List.iter (fun (n : Dep_graph.node) ->
+    let my_pos = Hashtbl.find pos (String.concat "\x00" n.name) in
+    List.iter (fun imp ->
+      let key = String.concat "\x00" imp in
+      match Hashtbl.find_opt pos key with
+      | Some dep_pos ->
+        Alcotest.(check bool)
+          (Printf.sprintf "%s before %s"
+             (Library.name_to_string imp) (Library.name_to_string n.name))
+          true (dep_pos < my_pos)
+      | None -> ()  (* builtin, not in graph *)
+    ) n.imports
+  ) nodes
+
+let test_stdlib_auto_build () =
+  let stdlib = Wile_config.stdlib_source_dir in
+  let inst = Instance.create () in
+  let builtins = Build.builtin_library_names inst in
+  let search_paths = [stdlib] in
+  let rt = Readtable.default in
+  let roots = Instance.discover_available_libraries search_paths in
+  (* Should complete without exceptions *)
+  let _result = Build.auto_build ~search_paths ~builtins ~readtable:rt roots in
+  (* All libraries should now be fresh *)
+  let nodes = Dep_graph.build_graph ~builtins ~search_paths rt roots in
+  let stale = List.filter (fun node ->
+    Build.is_stale nodes node <> None
+  ) nodes in
+  Alcotest.(check int) "all fresh after build" 0 (List.length stale)
+
 (* --- Test runner --- *)
 
 let () =
@@ -654,5 +705,9 @@ let () =
       QCheck_alcotest.to_alcotest test_execute_makes_fresh;
       QCheck_alcotest.to_alcotest test_plan_preserves_topo_order;
       QCheck_alcotest.to_alcotest test_auto_build_idempotent;
+    ];
+    "stdlib", [
+      Alcotest.test_case "graph" `Quick test_stdlib_graph;
+      Alcotest.test_case "auto_build" `Slow test_stdlib_auto_build;
     ];
   ]

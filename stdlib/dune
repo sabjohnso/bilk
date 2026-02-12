@@ -11,7 +11,7 @@
    (glob_files *.sld)
    (glob_files 41/*.sld))
   (action
-   (run %{exe:../../tools/precompile_stdlib.exe} ..))))
+   (chdir .. (run %{exe:../../bin/main.exe} build)))))
 
 (subdir srfi/41
  (rule
@@ -20,7 +20,7 @@
    primitive.sld
    (glob_files ../*.sld))
   (action
-   (run %{exe:../../../tools/precompile_stdlib.exe} ../..))))
+   (chdir ../.. (run %{exe:../../../bin/main.exe} build "srfi 41 primitive")))))
 
 (install
  (section share)
