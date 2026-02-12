@@ -1282,6 +1282,114 @@ let make_lsp_cmd () =
   in
   Cmd.v info term
 
+(* --- Test subcommand --- *)
+
+let discover_test_files pkg_dir =
+  let test_dir = Filename.concat pkg_dir "test" in
+  if not (Sys.file_exists test_dir && Sys.is_directory test_dir) then []
+  else
+    let entries = Sys.readdir test_dir in
+    let matches name =
+      Filename.check_suffix name ".scm"
+      && (let base = Filename.chop_suffix name ".scm" in
+          (String.length base > 5 && String.sub base 0 5 = "test-")
+          || (String.length base > 5
+              && String.sub base (String.length base - 5) 5 = "-test"))
+    in
+    Array.to_list entries
+    |> List.filter matches
+    |> List.sort String.compare
+    |> List.map (Filename.concat test_dir)
+
+let run_test_file ~verbose path =
+  if verbose then Printf.printf "Running %s ...\n%!" path;
+  let dev_null = Unix.openfile "/dev/null" [Unix.O_RDONLY] 0 in
+  let pid =
+    Fun.protect ~finally:(fun () -> Unix.close dev_null) (fun () ->
+      Unix.create_process
+        Sys.executable_name
+        [| Sys.executable_name; path |]
+        dev_null Unix.stdout Unix.stderr)
+  in
+  let _, status = Unix.waitpid [] pid in
+  match status with
+  | Unix.WEXITED code -> code
+  | Unix.WSIGNALED _ -> 128
+  | Unix.WSTOPPED _ -> 128
+
+let run_test ~verbose file =
+  let inst = make_instance () in
+  let cwd = Sys.getcwd () in
+  inst.search_paths := Search_path.resolve ~base_dirs:[cwd];
+  let pkg_info = setup_package inst cwd in
+  let build_code = handle_errors (fun () ->
+    auto_build_from_package inst pkg_info)
+  in
+  if build_code <> 0 then build_code
+  else
+    let (files, pkg_dir) = match file with
+      | Some path -> ([path], cwd)
+      | None ->
+        let pkg_dir = match pkg_info with
+          | Some (_, dir) -> dir
+          | None -> cwd
+        in
+        (discover_test_files pkg_dir, pkg_dir)
+    in
+    if files = [] then begin
+      Printf.printf "No test files found.\n%!";
+      Printf.printf "Place test files in test/ matching test-*.scm or *-test.scm.\n%!";
+      0
+    end else begin
+      let t0 = Unix.gettimeofday () in
+      let results = List.map (fun path ->
+        let file_t0 = Unix.gettimeofday () in
+        let code = run_test_file ~verbose path in
+        let elapsed = Unix.gettimeofday () -. file_t0 in
+        let rel_path =
+          let prefix = pkg_dir ^ Filename.dir_sep in
+          let plen = String.length prefix in
+          if String.length path >= plen
+             && String.sub path 0 plen = prefix then
+            String.sub path plen (String.length path - plen)
+          else path
+        in
+        let status_str = if code = 0 then "PASS" else "FAIL" in
+        Printf.printf "%s ... %s  (%.2fs)\n%!" rel_path status_str elapsed;
+        code
+      ) files in
+      let total = Unix.gettimeofday () -. t0 in
+      let passed = List.length (List.filter (fun c -> c = 0) results) in
+      let failed = List.length results - passed in
+      Printf.printf "\n%d passed, %d failed (%.2fs)\n%!" passed failed total;
+      if failed > 0 then 1 else 0
+    end
+
+let make_test_cmd () =
+  let open Cmdliner in
+  let verbose_flag =
+    Arg.(value & flag &
+         info ["verbose"; "v"] ~doc:"Print each test file name before running.")
+  in
+  let file_arg =
+    Arg.(value & pos 0 (some string) None &
+         info [] ~docv:"FILE" ~doc:"Run only this test file instead of discovering all.")
+  in
+  let cmd verbose file =
+    exit (run_test ~verbose file)
+  in
+  let term = Term.(const cmd $ verbose_flag $ file_arg) in
+  let info =
+    Cmd.info "test" ~version
+      ~doc:"Run Scheme test files"
+      ~man:[`S "DESCRIPTION";
+            `P "Discovers test files in the $(b,test/) directory (matching \
+                $(b,test-*.scm) or $(b,*-test.scm)), auto-builds project \
+                libraries, then runs each test as a subprocess. Exit code \
+                is 0 if all tests pass, 1 if any fail."]
+  in
+  Cmd.v info term
+
 (* --- Build subcommand --- *)
 
 let do_build ~verbose ~search_paths ~builtins ~rt roots =
@@ -1491,6 +1599,12 @@ let () =
   let argc = Array.length Sys.argv in
   if argc >= 2 then begin
     match Sys.argv.(1) with
+    | "test" ->
+      let argv = Array.concat [
+        [| Sys.argv.(0) |];
+        Array.sub Sys.argv 2 (argc - 2)
+      ] in
+      exit (Cmd.eval ~argv (make_test_cmd ()))
     | "build" ->
       let argv = Array.concat [
         [| Sys.argv.(0) |];

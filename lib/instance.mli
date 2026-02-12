@@ -184,7 +184,7 @@ val reload_library : t -> Library.library_name -> unit
 (** [reload_library inst name] recompiles a library from source and
     replaces it in the registry.  Re-imports its bindings into the
     global environment.
-    @raise Failure if the library's .sld file cannot be found. *)
+    Raises [Failure] if the library's .sld file cannot be found. *)
 
 val discover_available_libraries : string list -> Library.library_name list
 (** [discover_available_libraries search_dirs] scans directories for [.sld]

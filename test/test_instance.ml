@@ -256,6 +256,7 @@ let test_setup_package_paths_basic () =
       depends = [{ dep_name = "dep-lib"; dep_constraints = [] }];
       libraries = [];
       programs = [];
+      test_depends = [];
     } in
     Instance.setup_package_paths inst ~registry_root:registry pkg;
     (* Should be able to import from the dependency *)
@@ -273,6 +274,7 @@ let test_setup_package_paths_empty_deps () =
       description = "No deps"; license = "MIT";
       depends = []; libraries = [];
       programs = [];
+      test_depends = [];
     } in
     Instance.setup_package_paths inst ~registry_root:registry pkg;
     (* search_paths should be unchanged (empty + whatever was there) *)
@@ -288,6 +290,7 @@ let test_setup_package_paths_preserves_existing () =
       description = "Test"; license = "MIT";
       depends = []; libraries = [];
       programs = [];
+      test_depends = [];
     } in
     Instance.setup_package_paths inst ~registry_root:registry pkg;
     Alcotest.(check bool) "preserves existing"

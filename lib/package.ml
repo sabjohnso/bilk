@@ -11,6 +11,7 @@ type t = {
   depends : dependency list;
   libraries : Library.library_name list;
   programs : string list;
+  test_depends : dependency list;
 }
 
 exception Package_error of string
@@ -96,6 +97,7 @@ let parse readtable path =
     let depends = ref None in
     let libraries = ref None in
     let programs = ref None in
+    let test_depends = ref None in
     List.iter (fun clause ->
       match syntax_to_proper_list clause with
       | Some ({ datum = Syntax.Symbol key; _ } :: vals) ->
@@ -130,6 +132,8 @@ let parse readtable path =
              | Syntax.Str v -> v
              | _ -> error "programs: expected identifier or string"
            ) vals)
+         | "test-depends" ->
+           test_depends := Some (List.map parse_dependency vals)
          | _ -> error (Printf.sprintf "unknown clause: %s" key))
       | _ -> error "clause: expected (key value ...)"
     ) clauses;
@@ -144,7 +148,8 @@ let parse readtable path =
       license = get "license" license;
       depends = (match !depends with Some d -> d | None -> []);
       libraries = (match !libraries with Some l -> l | None -> []);
-      programs = (match !programs with Some p -> p | None -> []) }
+      programs = (match !programs with Some p -> p | None -> []);
+      test_depends = (match !test_depends with Some d -> d | None -> []) }
   | _ -> error (Printf.sprintf "%s: expected (define-package ...)" path)
 
 let find_package_file dir =

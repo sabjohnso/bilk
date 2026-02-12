@@ -304,6 +304,58 @@ let test_parse_no_programs () =
     let pkg = Package.parse rt path in
     Alcotest.(check (list string)) "no programs" [] pkg.programs)
 
+(* --- test-depends tests --- *)
+
+let test_parse_test_depends () =
+  with_temp_dir (fun dir ->
+    let path = Filename.concat dir "package.scm" in
+    write_file path
+      {|(define-package
+          (name my-pkg)
+          (version "1.0.0")
+          (description "X")
+          (license "MIT")
+          (test-depends
+            (some-test-lib)))|};
+    let pkg = Package.parse rt path in
+    Alcotest.(check int) "test_depends count" 1 (List.length pkg.test_depends);
+    let d = List.hd pkg.test_depends in
+    Alcotest.(check string) "dep name" "some-test-lib" d.dep_name;
+    Alcotest.(check int) "no constraints" 0 (List.length d.dep_constraints))
+
+let test_parse_test_depends_empty () =
+  with_temp_dir (fun dir ->
+    let path = Filename.concat dir "package.scm" in
+    write_file path
+      {|(define-package
+          (name my-pkg)
+          (version "1.0.0")
+          (description "X")
+          (license "MIT"))|};
+    let pkg = Package.parse rt path in
+    Alcotest.(check int) "test_depends empty" 0 (List.length pkg.test_depends))
+
+let test_parse_test_depends_with_constraints () =
+  with_temp_dir (fun dir ->
+    let path = Filename.concat dir "package.scm" in
+    write_file path
+      {|(define-package
+          (name my-pkg)
+          (version "1.0.0")
+          (description "X")
+          (license "MIT")
+          (test-depends
+            (test-lib (>= "1.0.0") (< "2.0.0"))
+            (another-lib (= "3.0.0"))))|};
+    let pkg = Package.parse rt path in
+    Alcotest.(check int) "test_depends count" 2 (List.length pkg.test_depends);
+    let d0 = List.nth pkg.test_depends 0 in
+    Alcotest.(check string) "dep0 name" "test-lib" d0.dep_name;
+    Alcotest.(check int) "dep0 constraints" 2 (List.length d0.dep_constraints);
+    let d1 = List.nth pkg.test_depends 1 in
+    Alcotest.(check string) "dep1 name" "another-lib" d1.dep_name;
+    Alcotest.(check int) "dep1 constraints" 1 (List.length d1.dep_constraints))
+
 (* --- Test suite --- *)
 
 let () =
@@ -331,5 +383,10 @@ let () =
       Alcotest.test_case "direct" `Quick test_find_package_file_direct;
       Alcotest.test_case "parent" `Quick test_find_package_file_parent;
       Alcotest.test_case "not found" `Quick test_find_package_file_not_found;
+    ];
+    "test-depends", [
+      Alcotest.test_case "with deps" `Quick test_parse_test_depends;
+      Alcotest.test_case "empty (no clause)" `Quick test_parse_test_depends_empty;
+      Alcotest.test_case "with constraints" `Quick test_parse_test_depends_with_constraints;
     ];
   ]

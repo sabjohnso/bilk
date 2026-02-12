@@ -48,6 +48,8 @@ type t = {
   (** R7RS libraries provided by this package. *)
   programs : string list;
   (** Relative [.scm] file paths for program entry points. *)
+  test_depends : dependency list;
+  (** Dependencies needed only during testing. *)
 }
 
 (** {1 Exceptions} *)

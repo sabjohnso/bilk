@@ -3,6 +3,10 @@
  (libraries wile alcotest qcheck-core qcheck-alcotest yojson zarith))
 
 (test
+ (name test_test_cmd)
+ (libraries wile alcotest str))
+
+(test
  (name test_language_server)
  (libraries wile alcotest yojson threads.posix))
 
