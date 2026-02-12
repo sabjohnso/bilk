@@ -644,6 +644,53 @@ let run_repl theme_name =
         let display = Completion.format_columns ~width matches in
         Line_editor.Multiple (new_text, new_cursor, display)
   in
+  let on_idle = match pkg_info with
+    | None -> None
+    | Some _ ->
+      let w = Watch.create () in
+      at_exit (fun () -> Watch.destroy w);
+      List.iter (Watch.add_directory w) !(inst.search_paths);
+      let rt = inst.Instance.readtable in
+      let builtins = Build.builtin_library_names inst in
+      Some (fun () ->
+        let events = Watch.poll w in
+        if events <> [] then begin
+          let search_paths = !(inst.search_paths) in
+          let roots = match pkg_info with
+            | Some (pkg, pkg_dir) ->
+              Build.collect_roots ~readtable:rt ~pkg_dir pkg
+            | None -> []
+          in
+          (try
+             let result = Build.auto_build ~search_paths ~builtins
+                 ~readtable:rt roots in
+             let rebuilt = result.Build.actions_taken in
+             if rebuilt <> [] then begin
+               (* Reload any rebuilt libraries that are currently loaded *)
+               let loaded = Library.list_all inst.Instance.libraries in
+               let loaded_names = List.map (fun (l : Library.t) -> l.name) loaded in
+               let reloaded = ref 0 in
+               List.iter (fun (br : Build.build_result) ->
+                 if List.mem br.name loaded_names then begin
+                   (try
+                      Instance.reload_library inst br.name;
+                      incr reloaded
+                    with exn ->
+                      Printf.eprintf "\r\x1b[K[watch] Reload error in %s: %s\n%!"
+                        (Library.name_to_string br.name)
+                        (Printexc.to_string exn))
+                 end
+               ) rebuilt;
+               Printf.eprintf "\r\x1b[K[watch] Rebuilt %d librar%s, reloaded %d.\n%!"
+                 (List.length rebuilt)
+                 (if List.length rebuilt = 1 then "y" else "ies")
+                 !reloaded
+             end
+           with exn ->
+             Printf.eprintf "\r\x1b[K[watch] Build error: %s\n%!"
+               (Printexc.to_string exn))
+        end)
+  in
   let editor = Line_editor.create {
     prompt = "\x1b[1mwile>\x1b[0m ";
     continuation_prompt = "  ... ";
@@ -654,6 +701,7 @@ let run_repl theme_name =
     paredit = Some paredit_ref;
     readtable = Some inst.readtable;
     complete = Some complete_fn;
+    on_idle;
   } in
   at_exit (fun () -> Line_editor.destroy editor);
   let print_result v =
@@ -1236,7 +1284,24 @@ let make_lsp_cmd () =
 
 (* --- Build subcommand --- *)
 
-let run_build ~graph ~clean_flag ~dry_run ~verbose target =
+let do_build ~verbose ~search_paths ~builtins ~rt roots =
+  let nodes = Dep_graph.build_graph ~builtins ~search_paths rt roots in
+  let actions = Build.plan nodes in
+  if actions = [] then begin
+    Printf.printf "Everything is up to date.\n%!";
+    0
+  end else begin
+    let t0 = Unix.gettimeofday () in
+    let results = Build.execute ~verbose ~search_paths actions in
+    let t1 = Unix.gettimeofday () in
+    Printf.printf "Compiled %d librar%s in %.2fs.\n%!"
+      (List.length results)
+      (if List.length results = 1 then "y" else "ies")
+      (t1 -. t0);
+    List.length results
+  end
+
+let run_build ~graph ~clean_flag ~dry_run ~verbose ~watch target =
   handle_errors (fun () ->
     let base_search_paths = Search_path.resolve ~base_dirs:[Sys.getcwd ()] in
     let inst = Instance.create () in
@@ -1263,16 +1328,16 @@ let run_build ~graph ~clean_flag ~dry_run ~verbose target =
            (base_search_paths,
             Instance.discover_available_libraries base_search_paths))
     in
-    let nodes = Dep_graph.build_graph ~builtins ~search_paths rt roots in
-    if graph then
-      print_string (Dep_graph.to_dot nodes)
-    else if clean_flag then begin
-      let count = Build.clean nodes in
-      Printf.printf "Cleaned %d .fasl file%s.\n" count
-        (if count = 1 then "" else "s")
-    end else begin
-      let actions = Build.plan nodes in
-      if dry_run then begin
+    if graph || clean_flag || dry_run then begin
+      let nodes = Dep_graph.build_graph ~builtins ~search_paths rt roots in
+      if graph then
+        print_string (Dep_graph.to_dot nodes)
+      else if clean_flag then begin
+        let count = Build.clean nodes in
+        Printf.printf "Cleaned %d .fasl file%s.\n" count
+          (if count = 1 then "" else "s")
+      end else begin
+        let actions = Build.plan nodes in
         if actions = [] then
           Printf.printf "Everything is up to date.\n"
         else begin
@@ -1291,18 +1356,32 @@ let run_build ~graph ~clean_flag ~dry_run ~verbose target =
               (Library.name_to_string a.node.name) reason_str
           ) actions
         end
-      end else begin
-        if actions = [] then
-          Printf.printf "Everything is up to date.\n"
-        else begin
-          let t0 = Unix.gettimeofday () in
-          let results = Build.execute ~verbose ~search_paths actions in
-          let t1 = Unix.gettimeofday () in
-          Printf.printf "Compiled %d librar%s in %.2fs.\n"
-            (List.length results)
-            (if List.length results = 1 then "y" else "ies")
-            (t1 -. t0)
-        end
+      end
+    end else begin
+      ignore (do_build ~verbose ~search_paths ~builtins ~rt roots);
+      if watch then begin
+        Printf.printf "[watch] Watching for changes... (Ctrl-C to stop)\n%!";
+        let w = Watch.create () in
+        Fun.protect ~finally:(fun () -> Watch.destroy w) (fun () ->
+          List.iter (Watch.add_directory w) search_paths;
+          let rec watch_loop () =
+            let _events = Watch.wait w in
+            Printf.printf "\x1b[2J\x1b[H%!";  (* clear screen *)
+            (try
+               ignore (do_build ~verbose ~search_paths ~builtins ~rt roots)
+             with
+             | Build.Build_error (name, msg) ->
+               Printf.eprintf "[watch] Build error in %s: %s\n%!"
+                 (Library.name_to_string name) msg
+             | Dep_graph.Resolve_error (name, msg) ->
+               Printf.eprintf "[watch] Resolve error for %s: %s\n%!"
+                 (Library.name_to_string name) msg
+             | exn ->
+               Printf.eprintf "[watch] Error: %s\n%!" (Printexc.to_string exn));
+            Printf.printf "[watch] Watching for changes... (Ctrl-C to stop)\n%!";
+            watch_loop ()
+          in
+          watch_loop ())
       end
     end)
 
@@ -1324,16 +1403,20 @@ let make_build_cmd () =
     Arg.(value & flag &
          info ["verbose"; "v"] ~doc:"Print each library as it is compiled.")
   in
+  let watch_flag =
+    Arg.(value & flag &
+         info ["watch"; "w"] ~doc:"Watch for file changes and rebuild automatically.")
+  in
   let target_arg =
     Arg.(value & pos 0 (some string) None &
          info [] ~docv:"LIBRARY" ~doc:"Library name to build (e.g. \"srfi 1\"). \
            If omitted, discovers and builds all project libraries.")
   in
-  let cmd graph clean_flag dry_run verbose target =
-    exit (run_build ~graph ~clean_flag ~dry_run ~verbose target)
+  let cmd graph clean_flag dry_run verbose watch target =
+    exit (run_build ~graph ~clean_flag ~dry_run ~verbose ~watch target)
   in
   let term = Term.(const cmd $ graph_flag $ clean_flag $ dry_run_flag
-                   $ verbose_flag $ target_arg) in
+                   $ verbose_flag $ watch_flag $ target_arg) in
   let info =
     Cmd.info "build" ~version
       ~doc:"Incrementally compile project libraries to FASL cache"

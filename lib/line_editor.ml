@@ -15,6 +15,7 @@ type config = {
   paredit : bool ref option;
   readtable : Readtable.t option;
   complete : (string -> int -> width:int -> completion_result) option;
+  on_idle : (unit -> unit) option;
 }
 
 type input_result =
@@ -394,8 +395,13 @@ let read_input t =
   } in
   History.reset_nav t.history;
   render t st;
+  let read_key () =
+    match t.config.on_idle with
+    | Some idle -> Terminal.read_key_with_idle t.term ~idle
+    | None -> Terminal.read_key t.term
+  in
   let rec loop () =
-    let key = Terminal.read_key t.term in
+    let key = read_key () in
     match key with
     | Terminal.Enter ->
       let text = content_string st in

@@ -216,6 +216,20 @@ let read_key t =
     parse_key_bytes buf 1
   end
 
+let read_key_with_idle t ~idle =
+  let rec wait_for_data () =
+    let ready =
+      try
+        let r, _, _ = Unix.select [t.fd] [] [] 0.1 in
+        r
+      with Unix.Unix_error (Unix.EINTR, _, _) -> []
+    in
+    match ready with
+    | [] -> idle (); wait_for_data ()
+    | _ -> read_key t
+  in
+  wait_for_data ()
+
 (* Output helpers *)
 
 let write_string t s =

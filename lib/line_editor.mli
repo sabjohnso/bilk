@@ -61,6 +61,10 @@ type config = {
   complete : (string -> int -> width:int -> completion_result) option;
   (** When [Some f], Tab calls [f text cursor ~width] to compute completions.
       When [None], Tab is ignored. *)
+
+  on_idle : (unit -> unit) option;
+  (** Called approximately every 100ms while waiting for input.
+      Must return quickly.  When [None], no idle callback. *)
 }
 
 (** Result of a {!read_input} call. *)

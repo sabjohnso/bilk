@@ -146,3 +146,125 @@ This pattern is correct but increasingly hard to maintain.
 Fix: refactor to a command table (name, arity, handler) and a generic
 dispatcher.  Not urgent — the current code is functional — but will become
 necessary as more commands are added.
+
+* Phase 6 (Watch Mode) — Minor Issues
+
+** TODO Issue 15: Missing =caml_enter_blocking_section= in inotify C stubs
+:PROPERTIES:
+:PRIORITY: C
+:END:
+
+The =read= call in [[file:lib/inotify_stubs.c::wile_inotify_read][=wile_inotify_read=]] and =inotify_add_watch=
+in [[file:lib/inotify_stubs.c::wile_inotify_add_watch][=wile_inotify_add_watch=]] should release the OCaml runtime lock
+via =caml_enter_blocking_section= / =caml_leave_blocking_section=.
+This follows the pattern used by OCaml's own =unix_read= stub.  In
+practice the fd is =IN_NONBLOCK= so =read= returns immediately, but
+=inotify_add_watch= can block on directory stat.
+
+** TODO Issue 16: Document fixed-size offsets array in =wile_inotify_read=
+:PROPERTIES:
+:PRIORITY: C
+:END:
+
+[[file:lib/inotify_stubs.c::64][Line 64]]: =int offsets[256]= — each =inotify_event= is at least 16
+bytes, so a 4096-byte buffer can hold at most 256 minimum-size events.
+The math works out but the assumption is implicit.  Add a comment
+documenting why 256 is sufficient.
+
+** TODO Issue 17: C-side mask constant functions allocate boxed =int64= per call
+:PROPERTIES:
+:PRIORITY: C
+:END:
+
+The mask constant C functions ([[file:lib/inotify_stubs.c::95][=wile_in_modify= etc.]]) call
+=caml_copy_int64= which heap-allocates a boxed value on every call.
+Now that the OCaml side caches them at module init this is only called
+once, but if someone calls the externals directly they pay allocation
+each time.
+
+** TODO Issue 18: =poll_dirs= uses =ref= while other mutable fields use =mutable=
+:PROPERTIES:
+:PRIORITY: C
+:END:
+
+Style inconsistency in [[file:lib/watch.ml::51][=watch.ml=]]: =inotify_fd= is =mutable= but
+=poll_dirs= is a =string list ref=.  Both should use the same mutation
+style — prefer =mutable poll_dirs : string list= for consistency with
+the rest of the record.
+
+** TODO Issue 19: =scan_mtimes= re-walks =list_dirs_recursive= on every poll
+:PROPERTIES:
+:PRIORITY: C
+:END:
+
+[[file:lib/watch.ml::72][=scan_mtimes=]] calls =list_dirs_recursive= on every poll.
+=add_directory_polling= already called it for the initial snapshot.
+For large trees this is wasteful.  Acceptable since polling is the
+slow path, but caching the directory list and only re-scanning when
+new directories appear would improve performance.
+
+** TODO Issue 20: =add_directory_inotify= silences all =Unix_error=, not just =ENOSPC=
+:PROPERTIES:
+:PRIORITY: C
+:END:
+
+[[file:lib/watch.ml::127][=add_directory_inotify=]]: the =try ... with Unix.Unix_error _ -> -1=
+catches all Unix errors including genuine failures like =EACCES=.  The
+comment says "wd = -1 means ENOSPC" but the catch-all silences other
+errors too.  Should at least log =EACCES= and similar permission
+errors to stderr.
+
+** TODO Issue 21: =builtins= captured once at REPL start in watch callback
+:PROPERTIES:
+:PRIORITY: C
+:END:
+
+[[file:bin/main.ml::654][=Build.builtin_library_names inst=]] is computed once when the
+=on_idle= closure is created.  If the instance's built-in set could
+change (unlikely but possible with extensions), this would go stale.
+
+** TODO Issue 22: Watch message can confuse multi-line editor cursor position
+:PROPERTIES:
+:PRIORITY: C
+:END:
+
+The =\r\x1b[K= before the =[watch]= message ([[file:bin/main.ml::681][line 681]]) clears the
+current line before printing.  But if the user is mid-typing a
+multi-line expression, this writes to the terminal without the line
+editor knowing — the next render will be confused about cursor
+position.  This is an inherent limitation of the "idle callback writes
+to stderr" approach and would require deeper editor integration to
+solve.
+
+** TODO Issue 23: =do_build= rebuilds dep graph on every watch iteration
+:PROPERTIES:
+:PRIORITY: C
+:END:
+
+[[file:bin/main.ml::1284][=do_build=]] calls =Dep_graph.build_graph= every time, which re-scans
+the filesystem for =.sld= files.  This is correct and intentional (new
+files may appear between iterations), but could be optimized by only
+re-scanning on =Created= or =Deleted= events and reusing the cached
+graph for =Modified=-only batches.
+
+** TODO Issue 24: =make_polling_watcher= doesn't guarantee polling backend in tests
+:PROPERTIES:
+:PRIORITY: C
+:END:
+
+[[file:test/test_watch.ml::29][=make_polling_watcher=]] calls =Watch.create= which uses inotify on
+Linux.  The "polling" test group actually exercises the inotify backend
+on Linux.  To truly test the polling backend in isolation,
+=Watch.create= would need a =~backend= parameter or a separate
+constructor.
+
+** TODO Issue 25: Timing-dependent tests in =test_watch.ml=
+:PROPERTIES:
+:PRIORITY: C
+:END:
+
+Several tests in [[file:test/test_watch.ml][=test_watch.ml=]] use =Unix.sleepf 0.05= to ensure
+mtime changes.  On a heavily-loaded system or a filesystem with
+1-second mtime granularity (e.g. older ext3, FAT), this could be
+flaky.  Acceptable for a modern Linux dev machine with sub-second
+resolution.

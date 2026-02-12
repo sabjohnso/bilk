@@ -63,6 +63,11 @@ val leave_raw : t -> unit
     the decoded key. Handles multi-byte ANSI escape sequences. *)
 val read_key : t -> key
 
+(** [read_key_with_idle t ~idle] is like {!read_key} but calls [idle ()]
+    approximately every 100ms while waiting for a keystroke.  The [idle]
+    callback must return quickly. *)
+val read_key_with_idle : t -> idle:(unit -> unit) -> key
+
 (** {1 Key parsing (pure)} *)
 
 (** [parse_key_bytes bytes len] decodes a byte sequence of length [len] into
