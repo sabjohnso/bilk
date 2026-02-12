@@ -75,6 +75,38 @@ val clean : Dep_graph.node list -> int
 (** [clean nodes] removes [.fasl] files for all nodes.
     Returns the number of files actually deleted. *)
 
+(** {1 High-level build} *)
+
+type auto_build_result = {
+  actions_taken : build_result list;
+  (** Results for each library that was actually compiled. *)
+}
+
+val auto_build :
+  ?verbose:bool ->
+  ?on_compile:(Library.library_name -> unit) ->
+  search_paths:string list ->
+  builtins:Library.library_name list ->
+  readtable:Readtable.t ->
+  Library.library_name list ->
+  auto_build_result
+(** [auto_build ~search_paths ~builtins ~readtable roots] builds the
+    dependency graph for [roots], plans the stale subset, and executes
+    the build.  Combines {!Dep_graph.build_graph}, {!plan}, and
+    {!execute} into a single call. *)
+
+(** {1 Package roots} *)
+
+val collect_roots :
+  readtable:Readtable.t ->
+  pkg_dir:string ->
+  Package.t ->
+  Library.library_name list
+(** [collect_roots ~readtable ~pkg_dir pkg] returns the union of [pkg]'s
+    declared libraries and the imports extracted from each of [pkg]'s
+    declared programs.  Missing program files are silently skipped.
+    The result is deduplicated. *)
+
 (** {1 Utilities} *)
 
 val builtin_library_names : Instance.t -> Library.library_name list

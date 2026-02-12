@@ -248,6 +248,62 @@ let test_parse_empty_libraries () =
     let pkg = Package.parse rt path in
     Alcotest.(check int) "empty libraries" 0 (List.length pkg.libraries))
 
+(* --- Programs tests --- *)
+
+let test_parse_programs () =
+  with_temp_dir (fun dir ->
+    let path = Filename.concat dir "package.scm" in
+    write_file path
+      {|(define-package
+          (name my-app)
+          (version "1.0.0")
+          (description "An app")
+          (license "MIT")
+          (libraries (my-app core))
+          (programs main.scm tools/helper.scm))|};
+    let pkg = Package.parse rt path in
+    Alcotest.(check (list string)) "programs"
+      ["main.scm"; "tools/helper.scm"] pkg.programs)
+
+let test_parse_programs_string_syntax () =
+  with_temp_dir (fun dir ->
+    let path = Filename.concat dir "package.scm" in
+    write_file path
+      {|(define-package
+          (name my-app)
+          (version "1.0.0")
+          (description "An app")
+          (license "MIT")
+          (programs "src/main.scm"))|};
+    let pkg = Package.parse rt path in
+    Alcotest.(check (list string)) "programs"
+      ["src/main.scm"] pkg.programs)
+
+let test_parse_empty_programs () =
+  with_temp_dir (fun dir ->
+    let path = Filename.concat dir "package.scm" in
+    write_file path
+      {|(define-package
+          (name foo)
+          (version "1.0.0")
+          (description "X")
+          (license "MIT")
+          (programs))|};
+    let pkg = Package.parse rt path in
+    Alcotest.(check (list string)) "empty programs" [] pkg.programs)
+
+let test_parse_no_programs () =
+  with_temp_dir (fun dir ->
+    let path = Filename.concat dir "package.scm" in
+    write_file path
+      {|(define-package
+          (name foo)
+          (version "1.0.0")
+          (description "X")
+          (license "MIT"))|};
+    let pkg = Package.parse rt path in
+    Alcotest.(check (list string)) "no programs" [] pkg.programs)
+
 (* --- Test suite --- *)
 
 let () =
@@ -266,6 +322,10 @@ let () =
       Alcotest.test_case "unknown clause" `Quick test_parse_unknown_clause;
       Alcotest.test_case "empty depends" `Quick test_parse_empty_depends;
       Alcotest.test_case "empty libraries" `Quick test_parse_empty_libraries;
+      Alcotest.test_case "programs" `Quick test_parse_programs;
+      Alcotest.test_case "programs string syntax" `Quick test_parse_programs_string_syntax;
+      Alcotest.test_case "empty programs" `Quick test_parse_empty_programs;
+      Alcotest.test_case "no programs" `Quick test_parse_no_programs;
     ];
     "find_package_file", [
       Alcotest.test_case "direct" `Quick test_find_package_file_direct;

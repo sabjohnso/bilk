@@ -16,7 +16,10 @@
         (yet-another))
       (libraries
         (my-package foo)
-        (my-package bar)))
+        (my-package bar))
+      (programs
+        main.scm
+        "tools/helper.scm"))
     v} *)
 
 (** {1 Types} *)
@@ -43,6 +46,8 @@ type t = {
   (** Dependencies on other packages. *)
   libraries : Library.library_name list;
   (** R7RS libraries provided by this package. *)
+  programs : string list;
+  (** Relative [.scm] file paths for program entry points. *)
 }
 
 (** {1 Exceptions} *)

@@ -109,6 +109,38 @@ let clean nodes =
       count
   ) 0 nodes
 
+type auto_build_result = {
+  actions_taken : build_result list;
+}
+
+let auto_build ?(verbose=false) ?on_compile ~search_paths ~builtins
+    ~readtable roots =
+  let nodes = Dep_graph.build_graph ~builtins ~search_paths readtable roots in
+  let actions = plan nodes in
+  let results = execute ~verbose ?on_compile ~search_paths actions in
+  { actions_taken = results }
+
+let lib_name_key name = String.concat "\x00" name
+
+let collect_roots ~readtable ~pkg_dir pkg =
+  let seen = Hashtbl.create 16 in
+  let acc = ref [] in
+  let add name =
+    let key = lib_name_key name in
+    if not (Hashtbl.mem seen key) then begin
+      Hashtbl.replace seen key ();
+      acc := name :: !acc
+    end
+  in
+  List.iter add pkg.Package.libraries;
+  List.iter (fun prog_rel ->
+    let prog_path = Filename.concat pkg_dir prog_rel in
+    if Sys.file_exists prog_path then
+      let imports = Dep_graph.imports_of_scm readtable prog_path in
+      List.iter add imports
+  ) pkg.Package.programs;
+  List.rev !acc
+
 let builtin_library_names inst =
   List.map (fun (lib : Library.t) -> lib.name)
     (Library.list_all inst.Instance.libraries)

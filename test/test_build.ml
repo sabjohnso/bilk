@@ -379,6 +379,167 @@ let test_builtin_library_names () =
   Alcotest.(check bool) "(srfi 1) is not builtin" false
     (List.mem ["srfi"; "1"] names)
 
+(* --- collect_roots tests --- *)
+
+let write_scm dir rel_path contents =
+  let path = Filename.concat dir rel_path in
+  let parent = Filename.dirname path in
+  let rec mkdirs d =
+    if not (Sys.file_exists d) then begin
+      mkdirs (Filename.dirname d);
+      Sys.mkdir d 0o755
+    end
+  in
+  if parent <> dir then mkdirs parent;
+  write_file path contents;
+  path
+
+let lib_name_list_testable =
+  Alcotest.testable
+    (fun fmt names ->
+      Format.fprintf fmt "[%s]"
+        (String.concat "; "
+           (List.map (fun n -> "(" ^ String.concat " " n ^ ")") names)))
+    (fun a b ->
+      let sort = List.sort compare in
+      sort a = sort b)
+
+let test_collect_roots_libs_only () =
+  with_temp_dir (fun dir ->
+    (* Write an sld for the declared library *)
+    ignore (write_sld dir ["my-pkg"; "core"]
+      "(define-library (my-pkg core)\n\
+       (import (scheme base))\n\
+       (export x)\n\
+       (begin (define x 1)))");
+    let pkg_path = Filename.concat dir "package.scm" in
+    write_file pkg_path
+      {|(define-package
+          (name my-pkg)
+          (version "1.0.0")
+          (description "X")
+          (license "MIT")
+          (libraries (my-pkg core)))|};
+    let pkg = Package.parse Readtable.default pkg_path in
+    let roots = Build.collect_roots ~readtable:Readtable.default ~pkg_dir:dir pkg in
+    Alcotest.check lib_name_list_testable "libs only"
+      [["my-pkg"; "core"]] roots)
+
+let test_collect_roots_with_programs () =
+  with_temp_dir (fun dir ->
+    (* Library *)
+    ignore (write_sld dir ["my-pkg"; "core"]
+      "(define-library (my-pkg core)\n\
+       (import (scheme base))\n\
+       (export x)\n\
+       (begin (define x 1)))");
+    (* Program that imports the same library *)
+    ignore (write_scm dir "main.scm"
+      "(import (scheme base) (my-pkg core))\n\
+       (display x)\n");
+    let pkg_path = Filename.concat dir "package.scm" in
+    write_file pkg_path
+      {|(define-package
+          (name my-pkg)
+          (version "1.0.0")
+          (description "X")
+          (license "MIT")
+          (libraries (my-pkg core))
+          (programs main.scm))|};
+    let pkg = Package.parse Readtable.default pkg_path in
+    let roots = Build.collect_roots ~readtable:Readtable.default ~pkg_dir:dir pkg in
+    (* (my-pkg core) and (scheme base) from program imports, deduplicated *)
+    Alcotest.check lib_name_list_testable "with programs"
+      [["my-pkg"; "core"]; ["scheme"; "base"]] roots)
+
+let test_collect_roots_missing_program () =
+  with_temp_dir (fun dir ->
+    ignore (write_sld dir ["my-pkg"; "core"]
+      "(define-library (my-pkg core)\n\
+       (import (scheme base))\n\
+       (export x)\n\
+       (begin (define x 1)))");
+    let pkg_path = Filename.concat dir "package.scm" in
+    write_file pkg_path
+      {|(define-package
+          (name my-pkg)
+          (version "1.0.0")
+          (description "X")
+          (license "MIT")
+          (libraries (my-pkg core))
+          (programs nonexistent.scm))|};
+    let pkg = Package.parse Readtable.default pkg_path in
+    (* Should silently skip missing program *)
+    let roots = Build.collect_roots ~readtable:Readtable.default ~pkg_dir:dir pkg in
+    Alcotest.check lib_name_list_testable "missing program skipped"
+      [["my-pkg"; "core"]] roots)
+
+(* --- auto_build tests --- *)
+
+let test_auto_build_compiles () =
+  with_temp_dir (fun dir ->
+    ignore (write_sld dir ["ab"; "a"]
+      "(define-library (ab a)\n\
+       (import (scheme base))\n\
+       (export x)\n\
+       (begin (define x 42)))");
+    let inst = Instance.create () in
+    let builtins = Build.builtin_library_names inst in
+    let result = Build.auto_build
+      ~search_paths:[dir] ~builtins
+      ~readtable:Readtable.default
+      [["ab"; "a"]] in
+    Alcotest.(check int) "one action" 1 (List.length result.actions_taken);
+    let r = List.hd result.actions_taken in
+    Alcotest.check lib_name_testable "compiled lib"
+      ["ab"; "a"] r.name;
+    let fasl_path = Fasl.fasl_path_for
+      (Filename.concat (Filename.concat dir "ab") "a.sld") in
+    Alcotest.(check bool) "fasl created" true (Sys.file_exists fasl_path))
+
+let test_auto_build_noop_when_fresh () =
+  with_temp_dir (fun dir ->
+    ignore (write_sld dir ["ab"; "b"]
+      "(define-library (ab b)\n\
+       (import (scheme base))\n\
+       (export x)\n\
+       (begin (define x 1)))");
+    let inst = Instance.create () in
+    let builtins = Build.builtin_library_names inst in
+    let _first = Build.auto_build
+      ~search_paths:[dir] ~builtins
+      ~readtable:Readtable.default
+      [["ab"; "b"]] in
+    let second = Build.auto_build
+      ~search_paths:[dir] ~builtins
+      ~readtable:Readtable.default
+      [["ab"; "b"]] in
+    Alcotest.(check int) "no actions" 0 (List.length second.actions_taken))
+
+let test_auto_build_idempotent =
+  QCheck2.Test.make ~count:5 ~name:"auto_build twice gives empty second result"
+    (QCheck2.Gen.return ())
+    (fun () ->
+       let dir = Filename.temp_dir "wile_ab_prop" "" in
+       Fun.protect ~finally:(fun () -> ignore (Sys.command ("rm -rf " ^ dir)))
+         (fun () ->
+            ignore (write_sld dir ["idm"; "a"]
+              "(define-library (idm a)\n\
+               (import (scheme base))\n\
+               (export x)\n\
+               (begin (define x 1)))");
+            let inst = Instance.create () in
+            let builtins = Build.builtin_library_names inst in
+            let _first = Build.auto_build
+              ~search_paths:[dir] ~builtins
+              ~readtable:Readtable.default
+              [["idm"; "a"]] in
+            let second = Build.auto_build
+              ~search_paths:[dir] ~builtins
+              ~readtable:Readtable.default
+              [["idm"; "a"]] in
+            second.actions_taken = []))
+
 (* --- Property tests --- *)
 
 let test_execute_makes_fresh =
@@ -480,8 +641,18 @@ let () =
     "builtin_library_names", [
       Alcotest.test_case "scheme base present" `Quick test_builtin_library_names;
     ];
+    "collect_roots", [
+      Alcotest.test_case "libs only" `Quick test_collect_roots_libs_only;
+      Alcotest.test_case "with programs" `Quick test_collect_roots_with_programs;
+      Alcotest.test_case "missing program" `Quick test_collect_roots_missing_program;
+    ];
+    "auto_build", [
+      Alcotest.test_case "compiles" `Quick test_auto_build_compiles;
+      Alcotest.test_case "noop when fresh" `Quick test_auto_build_noop_when_fresh;
+    ];
     "properties", [
       QCheck_alcotest.to_alcotest test_execute_makes_fresh;
       QCheck_alcotest.to_alcotest test_plan_preserves_topo_order;
+      QCheck_alcotest.to_alcotest test_auto_build_idempotent;
     ];
   ]

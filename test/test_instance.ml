@@ -255,6 +255,7 @@ let test_setup_package_paths_basic () =
       description = "App"; license = "MIT";
       depends = [{ dep_name = "dep-lib"; dep_constraints = [] }];
       libraries = [];
+      programs = [];
     } in
     Instance.setup_package_paths inst ~registry_root:registry pkg;
     (* Should be able to import from the dependency *)
@@ -271,6 +272,7 @@ let test_setup_package_paths_empty_deps () =
       name = "no-deps"; version = Semver.parse "1.0.0";
       description = "No deps"; license = "MIT";
       depends = []; libraries = [];
+      programs = [];
     } in
     Instance.setup_package_paths inst ~registry_root:registry pkg;
     (* search_paths should be unchanged (empty + whatever was there) *)
@@ -285,6 +287,7 @@ let test_setup_package_paths_preserves_existing () =
       name = "test"; version = Semver.parse "1.0.0";
       description = "Test"; license = "MIT";
       depends = []; libraries = [];
+      programs = [];
     } in
     Instance.setup_package_paths inst ~registry_root:registry pkg;
     Alcotest.(check bool) "preserves existing"

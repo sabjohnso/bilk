@@ -132,7 +132,7 @@ let chop_extension path =
 
 let setup_package inst start_dir =
   match Package.find_package_file start_dir with
-  | None -> ()
+  | None -> None
   | Some pkg_path ->
     let pkg = Package.parse inst.Instance.readtable pkg_path in
     let pkg_dir = Filename.dirname pkg_path in
@@ -141,15 +141,60 @@ let setup_package inst start_dir =
     Instance.setup_package_paths inst ~registry_root pkg;
     (* Prepend the package's own src/ directory *)
     if Sys.file_exists pkg_src && Sys.is_directory pkg_src then
-      inst.search_paths := pkg_src :: !(inst.search_paths)
+      inst.search_paths := pkg_src :: !(inst.search_paths);
+    Some (pkg, pkg_dir)
+
+(* --- Auto-build helpers --- *)
+
+let report_auto_build result =
+  let n = List.length result.Build.actions_taken in
+  if n > 0 then
+    Printf.eprintf "Auto-built %d librar%s.\n%!" n
+      (if n = 1 then "y" else "ies")
+
+let auto_build_for_scm inst pkg_info scm_path =
+  let rt = inst.Instance.readtable in
+  let builtins = Build.builtin_library_names inst in
+  let search_paths = !(inst.search_paths) in
+  let scm_imports =
+    try Dep_graph.imports_of_scm rt scm_path
+    with
+    | Sys_error _ | Reader.Read_error _ | Failure _ -> []
+  in
+  let pkg_roots = match pkg_info with
+    | Some (pkg, pkg_dir) ->
+      Build.collect_roots ~readtable:rt ~pkg_dir pkg
+    | None -> []
+  in
+  (* Merge: pkg_roots first, then scm imports not already present *)
+  let roots = pkg_roots @ List.filter (fun name ->
+    not (List.mem name pkg_roots)
+  ) scm_imports in
+  if roots <> [] then
+    report_auto_build
+      (Build.auto_build ~search_paths ~builtins ~readtable:rt roots)
+
+let auto_build_from_package inst pkg_info =
+  match pkg_info with
+  | None -> ()
+  | Some (pkg, pkg_dir) ->
+    let rt = inst.Instance.readtable in
+    let roots = Build.collect_roots ~readtable:rt ~pkg_dir pkg in
+    if roots <> [] then begin
+      let builtins = Build.builtin_library_names inst in
+      let search_paths = !(inst.search_paths) in
+      report_auto_build
+        (Build.auto_build ~search_paths ~builtins ~readtable:rt roots)
+    end
 
 (* --- Expression mode (-e) --- *)
 
 let run_expr expr =
   let inst = make_instance () in
   inst.search_paths := Search_path.resolve ~base_dirs:[Sys.getcwd ()];
-  setup_package inst (Sys.getcwd ());
+  let pkg_info = setup_package inst (Sys.getcwd ()) in
   handle_errors (fun () ->
+    auto_build_from_package inst pkg_info;
     let port = Port.of_string expr in
     let result = Instance.eval_port inst port in
     match result with
@@ -162,8 +207,9 @@ let run_file path script_args =
   let inst = make_instance () in
   inst.command_line := path :: script_args;
   inst.search_paths := Search_path.resolve ~base_dirs:[dir_for_path path];
-  setup_package inst (dir_for_path path);
+  let pkg_info = setup_package inst (dir_for_path path) in
   handle_errors (fun () ->
+    auto_build_for_scm inst pkg_info path;
     let port = Port.of_file path in
     ignore (Instance.eval_port inst port))
 
@@ -234,8 +280,9 @@ let generate_executable prog output_path =
 let compile_file path output exe =
   let inst = make_instance () in
   inst.search_paths := Search_path.resolve ~base_dirs:[dir_for_path path];
-  setup_package inst (dir_for_path path);
+  let pkg_info = setup_package inst (dir_for_path path) in
   handle_errors (fun () ->
+    auto_build_for_scm inst pkg_info path;
     let port = Port.of_file path in
     let prog = Instance.compile_port inst port in
     if exe then begin
@@ -257,8 +304,9 @@ let compile_file path output exe =
 let run_fasl path =
   let inst = make_instance () in
   inst.search_paths := Search_path.resolve ~base_dirs:[dir_for_path path];
-  setup_package inst (dir_for_path path);
+  let pkg_info = setup_package inst (dir_for_path path) in
   handle_errors (fun () ->
+    auto_build_from_package inst pkg_info;
     let prog = Fasl.read_program_fasl inst.symbols path in
     let result = Instance.run_program inst prog in
     match result with
@@ -439,7 +487,7 @@ let is_complete inst text =
 let run_repl theme_name =
   let inst = make_instance () in
   inst.search_paths := Search_path.resolve ~base_dirs:[Sys.getcwd ()];
-  setup_package inst (Sys.getcwd ());
+  ignore (setup_package inst (Sys.getcwd ()));
   Printf.printf "Wile Scheme %s\nType ,help for REPL commands, Ctrl-D to exit.\n%!" version;
   let saved = load_config () in
   let initial_theme = match theme_name with
@@ -1011,7 +1059,7 @@ let make_ext_cmd () =
 let run_debug path port =
   let inst = make_instance () in
   inst.search_paths := Search_path.resolve ~base_dirs:[dir_for_path path];
-  setup_package inst (dir_for_path path);
+  ignore (setup_package inst (dir_for_path path));
   handle_errors (fun () ->
     let ds = Debug_server.create inst in
     match port with
@@ -1061,7 +1109,7 @@ let make_debug_cmd () =
 let run_lsp port =
   let inst = make_instance () in
   inst.search_paths := Search_path.resolve ~base_dirs:[Sys.getcwd ()];
-  setup_package inst (Sys.getcwd ());
+  ignore (setup_package inst (Sys.getcwd ()));
   handle_errors (fun () ->
     let ls = Language_server.create inst in
     match port with
@@ -1108,17 +1156,31 @@ let make_lsp_cmd () =
 
 let run_build ~graph ~clean_flag ~dry_run ~verbose target =
   handle_errors (fun () ->
-    let search_paths = Search_path.resolve ~base_dirs:[Sys.getcwd ()] in
+    let base_search_paths = Search_path.resolve ~base_dirs:[Sys.getcwd ()] in
     let inst = Instance.create () in
     let builtins = Build.builtin_library_names inst in
-    let roots = match target with
+    let rt = Readtable.default in
+    let (search_paths, roots) = match target with
       | Some name_str ->
         let parts = String.split_on_char ' ' name_str in
-        [parts]
+        (base_search_paths, [parts])
       | None ->
-        Instance.discover_available_libraries search_paths
+        (match Package.find_package_file (Sys.getcwd ()) with
+         | Some pkg_path ->
+           let pkg = Package.parse rt pkg_path in
+           let pkg_dir = Filename.dirname pkg_path in
+           let registry_root = Pkg_manager.default_registry_root () in
+           Instance.setup_package_paths inst ~registry_root pkg;
+           let pkg_src = Filename.concat pkg_dir "src" in
+           if Sys.file_exists pkg_src && Sys.is_directory pkg_src then
+             inst.search_paths := pkg_src :: !(inst.search_paths);
+           let paths = !(inst.search_paths) in
+           let roots = Build.collect_roots ~readtable:rt ~pkg_dir pkg in
+           (paths, roots)
+         | None ->
+           (base_search_paths,
+            Instance.discover_available_libraries base_search_paths))
     in
-    let rt = Readtable.default in
     let nodes = Dep_graph.build_graph ~builtins ~search_paths rt roots in
     if graph then
       print_string (Dep_graph.to_dot nodes)
@@ -1206,7 +1268,7 @@ let make_build_cmd () =
 let run_profile path format_str =
   let inst = make_instance () in
   inst.search_paths := Search_path.resolve ~base_dirs:[dir_for_path path];
-  setup_package inst (dir_for_path path);
+  ignore (setup_package inst (dir_for_path path));
   handle_errors (fun () ->
     let prof = Profiler.create () in
     Profiler.install prof inst;
