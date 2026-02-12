@@ -268,3 +268,42 @@ mtime changes.  On a heavily-loaded system or a filesystem with
 1-second mtime granularity (e.g. older ext3, FAT), this could be
 flaky.  Acceptable for a modern Linux dev machine with sub-second
 resolution.
+
+* Phase 9 (Remote Repositories) — Minor Issues
+
+** TODO Issue 26: =syntax_to_proper_list= duplicated in =repository.ml=
+:PROPERTIES:
+:PRIORITY: B
+:END:
+
+[[file:lib/repository.ml::let syntax_to_proper_list][=Repository.syntax_to_proper_list=]] is the same function already
+duplicated in [[file:lib/dep_graph.ml::let rec syntax_to_proper_list][=Dep_graph=]], [[file:lib/library.ml][=Library=]], and [[file:lib/package.ml::let rec syntax_to_proper_list][=Package=]].
+See Issue 5.  A shared =Syntax_util= module would eliminate all four
+copies.
+
+** TODO Issue 27: Repo names with special characters don't round-trip
+:PROPERTIES:
+:PRIORITY: C
+:END:
+
+Repository names are serialized as Scheme symbols in
+[[file:lib/repository.ml::let save_repos][=save_repos=]].  Names containing spaces, parentheses,
+or other non-identifier characters won't survive a save/load
+round-trip, since =Datum.to_string= emits bare symbols and the reader
+tokenizes them differently.
+
+Fix: validate repo names on add (reject non-identifier characters),
+or quote names as strings instead of symbols.
+
+** TODO Issue 28: =pkg_fetch= gives misleading error when clones are stale
+:PROPERTIES:
+:PRIORITY: C
+:END:
+
+[[file:bin/main.ml::let pkg_fetch][=pkg_fetch=]] scans cached clones for available versions.
+If clones are out of date, =scan_versions= silently returns stale
+data and the error is "package not found in any repository" — even
+if the package exists upstream.
+
+Fix: suggest =wile pkg repo update= in the error message, or
+auto-sync before scanning.

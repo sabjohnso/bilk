@@ -105,6 +105,7 @@ let handle_errors f =
   | Lsp.Lsp_error msg -> format_error msg; 1
   | Language_server.Lsp_server_error msg -> format_error msg; 1
   | Profiler.Profiler_error msg -> format_error msg; 1
+  | Repository.Repository_error msg -> format_error msg; 1
   | Sys_error msg -> format_error msg; 1
   | Failure msg -> format_error msg; 1
 
@@ -1012,21 +1013,236 @@ let make_venv_cmd () =
   in
   Cmd.v info term
 
+(* --- Repository subcommands --- *)
+
+let wile_home () =
+  match config_dir () with
+  | Some d -> d
+  | None ->
+    Printf.eprintf "Error: cannot determine wile home directory\n%!";
+    exit 1
+
+let pkg_fetch name version =
+  handle_errors (fun () ->
+    let wile_home = wile_home () in
+    let registry_root = Pkg_manager.default_registry_root () in
+    let repos = Repository.load_repos wile_home in
+    if repos = [] then
+      raise (Repository.Repository_error "no repositories configured; use 'wile pkg repo add'");
+    let version = match version with
+      | Some v -> v
+      | None ->
+        (* Find latest version across all repos *)
+        let all_versions = List.concat_map (fun repo ->
+          Repository.scan_versions wile_home repo name
+        ) repos in
+        if all_versions = [] then
+          raise (Repository.Repository_error
+            (Printf.sprintf "package %s not found in any repository" name));
+        Semver.to_string (List.hd (List.rev
+          (List.sort Semver.compare all_versions)))
+    in
+    (* Find which repo has the package *)
+    let repo = List.find_opt (fun repo ->
+      Repository.has_package wile_home repo ~name ~version
+    ) repos in
+    match repo with
+    | None ->
+      raise (Repository.Repository_error
+        (Printf.sprintf "package %s %s not found in any repository" name version))
+    | Some repo ->
+      Repository.fetch_package ~wile_home ~registry_root repo ~name ~version;
+      Printf.printf "Fetched %s %s from %s\n%!" name version repo.name)
+
+let pkg_search query =
+  handle_errors (fun () ->
+    let wile_home = wile_home () in
+    let repos = Repository.load_repos wile_home in
+    let results = Repository.search_all wile_home repos query in
+    if results = [] then
+      print_endline "No packages found."
+    else
+      List.iter (fun (repo, entry) ->
+        Printf.printf "%s (%s): %s\n" entry.Repository.pkg_name repo.Repository.name
+          (String.concat ", " (List.map Semver.to_string entry.versions))
+      ) results)
+
+let repo_add name url =
+  handle_errors (fun () ->
+    let wile_home = wile_home () in
+    let repos = Repository.load_repos wile_home in
+    if List.exists (fun r -> r.Repository.name = name) repos then
+      raise (Repository.Repository_error
+        (Printf.sprintf "repository %S already exists" name));
+    let repo : Repository.repo = { name; url } in
+    Repository.sync wile_home repo;
+    Repository.save_repos wile_home (repos @ [repo]);
+    Printf.printf "Added repository %s (%s)\n%!" name url)
+
+let repo_list () =
+  handle_errors (fun () ->
+    let wile_home = wile_home () in
+    let repos = Repository.load_repos wile_home in
+    if repos = [] then
+      print_endline "No repositories configured."
+    else
+      List.iter (fun r ->
+        Printf.printf "%s  %s\n" r.Repository.name r.Repository.url
+      ) repos)
+
+let repo_remove name =
+  handle_errors (fun () ->
+    let wile_home = wile_home () in
+    let repos = Repository.load_repos wile_home in
+    let repo = List.find_opt (fun r -> r.Repository.name = name) repos in
+    match repo with
+    | None ->
+      raise (Repository.Repository_error
+        (Printf.sprintf "repository %S not found" name))
+    | Some repo ->
+      let repos' = List.filter (fun r -> r.Repository.name <> name) repos in
+      Repository.save_repos wile_home repos';
+      (* Clean up cached clone *)
+      let clone = Repository.clone_dir wile_home repo in
+      if Sys.file_exists clone then begin
+        let rec rm_rf path =
+          if Sys.is_directory path then begin
+            Array.iter (fun f -> rm_rf (Filename.concat path f))
+              (Sys.readdir path);
+            Sys.rmdir path
+          end else
+            Sys.remove path
+        in
+        (try rm_rf clone with _ -> ())
+      end;
+      Printf.printf "Removed repository %s\n%!" name)
+
+let repo_update name =
+  handle_errors (fun () ->
+    let wile_home = wile_home () in
+    let repos = Repository.load_repos wile_home in
+    let to_update = match name with
+      | None -> repos
+      | Some n ->
+        (match List.filter (fun r -> r.Repository.name = n) repos with
+         | [] -> raise (Repository.Repository_error
+                   (Printf.sprintf "repository %S not found" n))
+         | filtered -> filtered)
+    in
+    List.iter (fun repo ->
+      Printf.printf "Updating %s...\n%!" repo.Repository.name;
+      Repository.sync wile_home repo
+    ) to_update;
+    print_endline "Done.")
+
+let make_pkg_fetch_cmd () =
+  let open Cmdliner in
+  let name_arg =
+    Arg.(required & pos 0 (some string) None &
+         info [] ~docv:"NAME" ~doc:"Package name.")
+  in
+  let version_arg =
+    Arg.(value & pos 1 (some string) None &
+         info [] ~docv:"VERSION" ~doc:"Package version (optional, fetches latest if omitted).")
+  in
+  let cmd name ver = exit (pkg_fetch name ver) in
+  let term = Term.(const cmd $ name_arg $ version_arg) in
+  let info =
+    Cmd.info "fetch" ~version
+      ~doc:"Fetch a package from a remote repository"
+  in
+  Cmd.v info term
+
+let make_pkg_search_cmd () =
+  let open Cmdliner in
+  let query_arg =
+    Arg.(required & pos 0 (some string) None &
+         info [] ~docv:"QUERY" ~doc:"Search query.")
+  in
+  let cmd query = exit (pkg_search query) in
+  let term = Term.(const cmd $ query_arg) in
+  let info =
+    Cmd.info "search" ~version
+      ~doc:"Search remote repositories for packages"
+  in
+  Cmd.v info term
+
+let make_repo_add_cmd () =
+  let open Cmdliner in
+  let name_arg =
+    Arg.(required & pos 0 (some string) None &
+         info [] ~docv:"NAME" ~doc:"Repository name.")
+  in
+  let url_arg =
+    Arg.(required & pos 1 (some string) None &
+         info [] ~docv:"URL" ~doc:"Repository URL.")
+  in
+  let cmd name url = exit (repo_add name url) in
+  let term = Term.(const cmd $ name_arg $ url_arg) in
+  let info = Cmd.info "add" ~version ~doc:"Add a repository" in
+  Cmd.v info term
+
+let make_repo_list_cmd () =
+  let open Cmdliner in
+  let cmd () = exit (repo_list ()) in
+  let term = Term.(const cmd $ const ()) in
+  let info = Cmd.info "list" ~version ~doc:"List configured repositories" in
+  Cmd.v info term
+
+let make_repo_remove_cmd () =
+  let open Cmdliner in
+  let name_arg =
+    Arg.(required & pos 0 (some string) None &
+         info [] ~docv:"NAME" ~doc:"Repository name.")
+  in
+  let cmd name = exit (repo_remove name) in
+  let term = Term.(const cmd $ name_arg) in
+  let info = Cmd.info "remove" ~version ~doc:"Remove a repository" in
+  Cmd.v info term
+
+let make_repo_update_cmd () =
+  let open Cmdliner in
+  let name_arg =
+    Arg.(value & pos 0 (some string) None &
+         info [] ~docv:"NAME" ~doc:"Repository name (optional, updates all if omitted).")
+  in
+  let cmd name = exit (repo_update name) in
+  let term = Term.(const cmd $ name_arg) in
+  let info = Cmd.info "update" ~version ~doc:"Update repository clones" in
+  Cmd.v info term
+
+let make_repo_cmd () =
+  let open Cmdliner in
+  let info =
+    Cmd.info "repo" ~version
+      ~doc:"Manage package repositories"
+  in
+  Cmd.group info [
+    make_repo_add_cmd ();
+    make_repo_list_cmd ();
+    make_repo_remove_cmd ();
+    make_repo_update_cmd ();
+  ]
+
 let make_pkg_cmd () =
   let open Cmdliner in
   let info =
     Cmd.info "pkg" ~version
       ~doc:"Package management commands"
       ~man:[`S "DESCRIPTION";
-            `P "Manage local packages. Use $(b,wile pkg install), \
-                $(b,wile pkg list), $(b,wile pkg remove), or \
-                $(b,wile pkg info)."]
+            `P "Manage packages. Use $(b,wile pkg install), \
+                $(b,wile pkg list), $(b,wile pkg remove), \
+                $(b,wile pkg info), $(b,wile pkg fetch), \
+                $(b,wile pkg search), or $(b,wile pkg repo)."]
   in
   Cmd.group info [
     make_pkg_install_cmd ();
     make_pkg_list_cmd ();
     make_pkg_remove_cmd ();
     make_pkg_info_cmd ();
+    make_pkg_fetch_cmd ();
+    make_pkg_search_cmd ();
+    make_repo_cmd ();
   ]
 
 (* --- Extension scaffolding --- *)
