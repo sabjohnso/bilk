@@ -96,6 +96,13 @@ val build_graph :
     @raise Resolve_error if a library cannot be found and is not built-in
     (only when [~builtins] is provided). *)
 
+(** {1 Tree display} *)
+
+val format_tree : node list -> Library.library_name -> string
+(** [format_tree nodes root] formats the dependency tree rooted at
+    [root] as indented text.  Nodes already shown are marked with
+    "..." to avoid repeating subtrees. *)
+
 (** {1 Graphviz export} *)
 
 val to_dot : node list -> string

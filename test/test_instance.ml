@@ -388,6 +388,59 @@ let test_ensure_library_no_import () =
     ) (Symbol.all inst.symbols)) in
     Alcotest.(check int) "bound count unchanged" bound_before bound_after)
 
+(* --- reload_library --- *)
+
+let test_reload_library () =
+  with_temp_dir (fun dir ->
+    write_file (Filename.concat dir "test-reload/lib.sld")
+      {|(define-library (test-reload lib)
+          (export x)
+          (import (scheme base))
+          (begin (define x 1)))|};
+    let inst = Instance.create () in
+    inst.search_paths := [dir];
+    let lib = Instance.ensure_library inst ["test-reload"; "lib"] in
+    Alcotest.(check bool) "loaded" true (Option.is_some lib);
+    (* Overwrite source with new value *)
+    write_file (Filename.concat dir "test-reload/lib.sld")
+      {|(define-library (test-reload lib)
+          (export x)
+          (import (scheme base))
+          (begin (define x 2)))|};
+    Instance.reload_library inst ["test-reload"; "lib"];
+    (* The registry should have a fresh entry *)
+    match Library.lookup inst.Instance.libraries ["test-reload"; "lib"] with
+    | None -> Alcotest.fail "expected library in registry after reload"
+    | Some lib2 ->
+      (* New library should have different exports than the old one *)
+      match Hashtbl.find_opt lib2.exports "x" with
+      | None -> Alcotest.fail "expected export x"
+      | Some (_id, slot) ->
+        check_datum "reloaded value" (Datum.Fixnum 2) !slot)
+
+let test_reload_updates_global_env () =
+  with_temp_dir (fun dir ->
+    write_file (Filename.concat dir "test-reload2/lib.sld")
+      {|(define-library (test-reload2 lib)
+          (export y)
+          (import (scheme base))
+          (begin (define y 10)))|};
+    let inst = Instance.create () in
+    inst.search_paths := [dir];
+    (* Import the library *)
+    ignore (Instance.eval_string inst "(import (test-reload2 lib))");
+    check_datum "initial y" (Datum.Fixnum 10)
+      (Instance.eval_string inst "y");
+    (* Overwrite source *)
+    write_file (Filename.concat dir "test-reload2/lib.sld")
+      {|(define-library (test-reload2 lib)
+          (export y)
+          (import (scheme base))
+          (begin (define y 20)))|};
+    Instance.reload_library inst ["test-reload2"; "lib"];
+    check_datum "reloaded y" (Datum.Fixnum 20)
+      (Instance.eval_string inst "y"))
+
 let () =
   Alcotest.run "Instance"
     [ ("Instance",
@@ -443,5 +496,9 @@ let () =
        [ Alcotest.test_case "builtin" `Quick test_ensure_library_builtin
        ; Alcotest.test_case "unknown" `Quick test_ensure_library_unknown
        ; Alcotest.test_case "no import" `Quick test_ensure_library_no_import
+       ])
+    ; ("reload_library",
+       [ Alcotest.test_case "reload" `Quick test_reload_library
+       ; Alcotest.test_case "reload updates global env" `Quick test_reload_updates_global_env
        ])
     ]

@@ -269,6 +269,22 @@ let test_list_all_multiple () =
   let libs = Library.list_all reg in
   Alcotest.(check int) "two libraries" 2 (List.length libs)
 
+(* --- remove --- *)
+
+let test_remove_existing () =
+  let reg = Library.create_registry () in
+  let lib = make_test_lib () in
+  Library.register reg lib;
+  Library.remove reg ["test"; "lib"];
+  match Library.lookup reg ["test"; "lib"] with
+  | None -> ()
+  | Some _ -> Alcotest.fail "expected None after remove"
+
+let test_remove_nonexistent () =
+  let reg = Library.create_registry () in
+  (* Should not raise *)
+  Library.remove reg ["no"; "such"]
+
 (* --- export_names --- *)
 
 let test_export_names () =
@@ -329,5 +345,7 @@ let () =
        ; Alcotest.test_case "list_all multiple" `Quick test_list_all_multiple
        ; Alcotest.test_case "export_names" `Quick test_export_names
        ; Alcotest.test_case "export_names empty" `Quick test_export_names_empty
+       ; Alcotest.test_case "remove existing" `Quick test_remove_existing
+       ; Alcotest.test_case "remove nonexistent" `Quick test_remove_nonexistent
        ])
     ]

@@ -492,6 +492,31 @@ let test_to_dot_cycle_red () =
   Alcotest.(check bool) "contains red for cycle"
     true (has_substr dot "red")
 
+(* --- format_tree tests --- *)
+
+let test_format_tree_linear () =
+  let nodes = [
+    { Dep_graph.name = ["c"]; sld_path = "/c.sld"; imports = [] };
+    { Dep_graph.name = ["b"]; sld_path = "/b.sld"; imports = [["c"]] };
+    { Dep_graph.name = ["a"]; sld_path = "/a.sld"; imports = [["b"]] };
+  ] in
+  let result = Dep_graph.format_tree nodes ["a"] in
+  Alcotest.(check string) "linear chain"
+    "(a)\n  (b)\n    (c)\n"
+    result
+
+let test_format_tree_diamond () =
+  let nodes = [
+    { Dep_graph.name = ["d"]; sld_path = "/d.sld"; imports = [] };
+    { Dep_graph.name = ["b"]; sld_path = "/b.sld"; imports = [["d"]] };
+    { Dep_graph.name = ["c"]; sld_path = "/c.sld"; imports = [["d"]] };
+    { Dep_graph.name = ["a"]; sld_path = "/a.sld"; imports = [["b"]; ["c"]] };
+  ] in
+  let result = Dep_graph.format_tree nodes ["a"] in
+  Alcotest.(check string) "diamond (second d shows ...)"
+    "(a)\n  (b)\n    (d)\n  (c)\n    (d) ...\n"
+    result
+
 (* --- Property tests --- *)
 
 let test_topological_order_property =
@@ -614,6 +639,10 @@ let () =
       Alcotest.test_case "builtin omitted" `Quick test_build_graph_builtin_omitted;
       Alcotest.test_case "resolve error" `Quick test_build_graph_resolve_error;
       Alcotest.test_case "no builtins skips" `Quick test_build_graph_no_builtins_skips;
+    ];
+    "format_tree", [
+      Alcotest.test_case "linear" `Quick test_format_tree_linear;
+      Alcotest.test_case "diamond" `Quick test_format_tree_diamond;
     ];
     "to_dot", [
       Alcotest.test_case "empty" `Quick test_to_dot_empty;

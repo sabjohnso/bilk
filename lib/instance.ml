@@ -5705,6 +5705,19 @@ let run_program inst prog =
 
 let ensure_library inst name = lookup_or_load inst name
 
+let reload_library inst name =
+  let sld_path =
+    match Dep_graph.resolve_sld ~search_paths:!(inst.search_paths) name with
+    | Some p -> p
+    | None ->
+      failwith ("cannot find .sld file for " ^ Library.name_to_string name)
+  in
+  let fasl_path = Fasl.fasl_path_for sld_path in
+  (try Sys.remove fasl_path with Sys_error _ -> ());
+  Library.remove inst.libraries name;
+  ignore (lookup_or_load inst name);
+  process_import_set inst (Library.Import_lib name)
+
 (* --- Library discovery --- *)
 
 let path_to_lib_name ~search_dir path =

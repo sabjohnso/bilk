@@ -59,6 +59,10 @@ val lookup : registry -> library_name -> t option
 (** [lookup reg name] returns the library registered under [name],
     or [None] if not found. *)
 
+val remove : registry -> library_name -> unit
+(** [remove reg name] removes the library from the registry.
+    No-op if not found. *)
+
 val list_all : registry -> t list
 (** [list_all reg] returns all libraries in the registry. *)
 

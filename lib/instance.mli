@@ -180,6 +180,12 @@ val ensure_library : t -> Library.library_name -> Library.t option
     [.sld]) and returns it, without importing bindings into the global
     environment.  Returns [None] if not found. *)
 
+val reload_library : t -> Library.library_name -> unit
+(** [reload_library inst name] recompiles a library from source and
+    replaces it in the registry.  Re-imports its bindings into the
+    global environment.
+    @raise Failure if the library's .sld file cannot be found. *)
+
 val discover_available_libraries : string list -> Library.library_name list
 (** [discover_available_libraries search_dirs] scans directories for [.sld]
     files and returns the corresponding library names.  Deduplicates across

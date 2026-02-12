@@ -101,3 +101,48 @@ In [[file:bin/main.ml::let run_build][=run_build=]], the dry-run and build outpu
 the pluralization conditional.
 
 Fix: bind =let n = List.length actions in= and reuse.
+
+** TODO Issue 12: REPL banner ordering
+:PROPERTIES:
+:PRIORITY: C
+:END:
+
+[[file:bin/main.ml::let run_repl][=run_repl=]] prints the project banner, then auto-build output (on
+stderr), then the Wile version banner.  The result is:
+
+#+begin_example
+Project: my-project 0.1.0
+Auto-built 3 libraries.
+Wile Scheme 0.1.0
+Type ,help for REPL commands, Ctrl-D to exit.
+#+end_example
+
+The build output is sandwiched between two banners.  Consider combining
+them into a single greeting (e.g. =Wile Scheme 0.1.0 — Project: my-project
+0.1.0=) or printing the version line first.
+
+** TODO Issue 13: =,deps= on a builtin library prints a bare name
+:PROPERTIES:
+:PRIORITY: C
+:END:
+
+Typing =,deps (scheme base)= calls [[file:lib/dep_graph.ml::let build_graph][=Dep_graph.build_graph=]] with
+=(scheme base)= as the root.  Since builtins are skipped, the node list is
+empty.  [[file:lib/dep_graph.ml::let format_tree][=Dep_graph.format_tree=]] then prints =(scheme base)= with no
+children and no explanation.
+
+Fix: detect when the root is a builtin (or absent from the node list) and
+print a message like "built-in library (no source dependencies)" instead.
+
+** TODO Issue 14: REPL command dispatch is growing long
+:PROPERTIES:
+:PRIORITY: C
+:END:
+
+[[file:bin/main.ml::let handle_repl_command][=handle_repl_command=]] now handles 14 commands via a mix of exact
+=match= arms and =String.sub= prefix checks in the fallback =| _= arm.
+This pattern is correct but increasingly hard to maintain.
+
+Fix: refactor to a command table (name, arity, handler) and a generic
+dispatcher.  Not urgent — the current code is functional — but will become
+necessary as more commands are added.

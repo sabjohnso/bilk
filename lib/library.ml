@@ -30,6 +30,9 @@ let name_key name = String.concat "\x00" name
 let register (reg : registry) lib =
   Hashtbl.replace reg (name_key lib.name) lib
 
+let remove (reg : registry) name =
+  Hashtbl.remove reg (name_key name)
+
 let lookup (reg : registry) name =
   Hashtbl.find_opt reg (name_key name)
 

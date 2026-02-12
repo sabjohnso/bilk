@@ -186,6 +186,30 @@ let build_graph ?builtins ~search_paths rt roots =
 
   List.rev !result
 
+(* --- Tree display --- *)
+
+let format_tree nodes root =
+  let by_name = Hashtbl.create (List.length nodes) in
+  List.iter (fun n -> Hashtbl.replace by_name n.name n) nodes;
+  let buf = Buffer.create 128 in
+  let visited = Hashtbl.create 16 in
+  let rec go indent name =
+    let prefix = String.make indent ' ' in
+    let label = Library.name_to_string name in
+    if Hashtbl.mem visited name then
+      Buffer.add_string buf (prefix ^ label ^ " ...\n")
+    else begin
+      Hashtbl.replace visited name true;
+      Buffer.add_string buf (prefix ^ label ^ "\n");
+      match Hashtbl.find_opt by_name name with
+      | None -> ()
+      | Some node ->
+        List.iter (fun imp -> go (indent + 2) imp) node.imports
+    end
+  in
+  go 0 root;
+  Buffer.contents buf
+
 (* --- Graphviz export --- *)
 
 let dot_id name =

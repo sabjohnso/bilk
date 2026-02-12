@@ -317,15 +317,18 @@ let run_fasl path =
 
 let repl_help () =
   print_endline "REPL commands:";
-  print_endline "  ,help  ,h       Show this help";
-  print_endline "  ,quit  ,q       Exit the REPL";
-  print_endline "  ,load <file>    Load and evaluate a Scheme file";
-  print_endline "  ,env            List bound names in the global environment";
-  print_endline "  ,libs           List loaded/registered libraries";
-  print_endline "  ,available      List all discoverable libraries on disk";
-  print_endline "  ,exports <lib>  Show exports of a library (e.g. ,exports (scheme base))";
-  print_endline "  ,theme <name>   Switch theme (dark, light, none, or file path)";
-  print_endline "  ,paredit        Toggle paredit mode (structural editing)"
+  print_endline "  ,help  ,h        Show this help";
+  print_endline "  ,quit  ,q        Exit the REPL";
+  print_endline "  ,load <file>     Load and evaluate a Scheme file";
+  print_endline "  ,env             List bound names in the global environment";
+  print_endline "  ,libs            List loaded/registered libraries";
+  print_endline "  ,available       List all discoverable libraries on disk";
+  print_endline "  ,exports <lib>   Show exports of a library (e.g. ,exports (scheme base))";
+  print_endline "  ,build           Build/rebuild stale libraries";
+  print_endline "  ,deps <lib>      Show dependency tree (e.g. ,deps (srfi 1))";
+  print_endline "  ,reload <lib>    Reload a library from source (e.g. ,reload (my lib))";
+  print_endline "  ,theme <name>    Switch theme (dark, light, none, or file path)";
+  print_endline "  ,paredit         Toggle paredit mode (structural editing)"
 
 let repl_env inst =
   let syms = Symbol.all inst.Instance.symbols in
@@ -394,6 +397,65 @@ let repl_load inst path =
   | Failure msg -> format_error msg
   | Sys_error msg -> format_error msg
 
+let repl_build inst pkg_info =
+  let rt = inst.Instance.readtable in
+  let builtins = Build.builtin_library_names inst in
+  let search_paths = !(inst.search_paths) in
+  let roots = match pkg_info with
+    | Some (pkg, pkg_dir) ->
+      Build.collect_roots ~readtable:rt ~pkg_dir pkg
+    | None ->
+      Instance.discover_available_libraries search_paths
+  in
+  if roots = [] then
+    Printf.printf "No libraries found.\n%!"
+  else begin
+    let result = Build.auto_build ~search_paths ~builtins ~readtable:rt roots in
+    report_auto_build result;
+    if result.actions_taken = [] then
+      Printf.printf "Nothing to build (all libraries up to date).\n%!"
+  end
+
+let repl_deps inst arg =
+  try
+    let port = Port.of_string arg in
+    let syntax = Reader.read_syntax inst.Instance.readtable port in
+    let lib_name = Library.parse_library_name syntax in
+    let builtins = Build.builtin_library_names inst in
+    let nodes = Dep_graph.build_graph ~builtins
+        ~search_paths:!(inst.Instance.search_paths) inst.readtable [lib_name] in
+    print_string (Dep_graph.format_tree nodes lib_name)
+  with
+  | Reader.Read_error (_, msg) ->
+    Printf.eprintf "Error parsing library name: %s\n%!" msg
+  | Compiler.Compile_error (_, msg) ->
+    Printf.eprintf "Error parsing library name: %s\n%!" msg
+  | Dep_graph.Resolve_error (name, msg) ->
+    Printf.eprintf "Error: resolving %s: %s\n%!"
+      (Library.name_to_string name) msg
+  | Dep_graph.Cycle_error cycles ->
+    let cycle_strs = List.map (fun cycle ->
+      String.concat " -> " (List.map Library.name_to_string cycle)
+    ) cycles in
+    Printf.eprintf "Error: circular dependencies:\n  %s\n%!"
+      (String.concat "\n  " cycle_strs)
+  | Failure msg -> format_error msg
+
+let repl_reload inst arg =
+  try
+    let port = Port.of_string arg in
+    let syntax = Reader.read_syntax inst.Instance.readtable port in
+    let lib_name = Library.parse_library_name syntax in
+    Instance.reload_library inst lib_name;
+    Printf.printf "Reloaded %s\n%!" (Library.name_to_string lib_name)
+  with
+  | Reader.Read_error (_, msg) ->
+    Printf.eprintf "Error parsing library name: %s\n%!" msg
+  | Compiler.Compile_error (_, msg) ->
+    Printf.eprintf "Error: %s\n%!" msg
+  | Vm.Runtime_error msg -> format_error msg
+  | Failure msg -> format_error msg
+
 let resolve_theme name =
   match name with
   | "dark" -> Some Highlight.dark_theme
@@ -417,7 +479,7 @@ let save_repl_settings theme_ref paredit_ref =
     ("paredit", Datum.Bool !paredit_ref);
   ]
 
-let handle_repl_command inst theme_ref paredit_ref line =
+let handle_repl_command inst pkg_info theme_ref paredit_ref line =
   let line = String.trim line in
   match line with
   | ",quit" | ",q" -> exit 0
@@ -425,8 +487,13 @@ let handle_repl_command inst theme_ref paredit_ref line =
   | ",env" -> repl_env inst
   | ",libs" -> repl_libs inst
   | ",available" -> repl_available inst
+  | ",build" -> repl_build inst pkg_info
   | ",exports" ->
     Printf.eprintf "Usage: ,exports (library name)\n%!"
+  | ",deps" ->
+    Printf.eprintf "Usage: ,deps (library name)\n%!"
+  | ",reload" ->
+    Printf.eprintf "Usage: ,reload (library name)\n%!"
   | ",paredit" ->
     paredit_ref := not !(paredit_ref);
     save_repl_settings theme_ref paredit_ref;
@@ -451,6 +518,14 @@ let handle_repl_command inst theme_ref paredit_ref line =
       let arg = String.trim (String.sub line 9 (String.length line - 9)) in
       if arg = "" then Printf.eprintf "Usage: ,exports (library name)\n%!"
       else repl_exports inst arg
+    end else if String.length line > 6 && String.sub line 0 6 = ",deps " then begin
+      let arg = String.trim (String.sub line 6 (String.length line - 6)) in
+      if arg = "" then Printf.eprintf "Usage: ,deps (library name)\n%!"
+      else repl_deps inst arg
+    end else if String.length line > 8 && String.sub line 0 8 = ",reload " then begin
+      let arg = String.trim (String.sub line 8 (String.length line - 8)) in
+      if arg = "" then Printf.eprintf "Usage: ,reload (library name)\n%!"
+      else repl_reload inst arg
     end else if String.length line > 7 && String.sub line 0 7 = ",theme " then begin
       let name = String.trim (String.sub line 7 (String.length line - 7)) in
       if name = "" then Printf.eprintf "Usage: ,theme <dark|light|none|path>\n%!"
@@ -487,7 +562,13 @@ let is_complete inst text =
 let run_repl theme_name =
   let inst = make_instance () in
   inst.search_paths := Search_path.resolve ~base_dirs:[Sys.getcwd ()];
-  ignore (setup_package inst (Sys.getcwd ()));
+  let pkg_info = setup_package inst (Sys.getcwd ()) in
+  (match pkg_info with
+   | Some (pkg, _) ->
+     Printf.printf "Project: %s %s\n%!" pkg.Package.name
+       (Semver.to_string pkg.version)
+   | None -> ());
+  auto_build_from_package inst pkg_info;
   Printf.printf "Wile Scheme %s\nType ,help for REPL commands, Ctrl-D to exit.\n%!" version;
   let saved = load_config () in
   let initial_theme = match theme_name with
@@ -514,7 +595,8 @@ let run_repl theme_name =
   in
   let repl_commands =
     [",help"; ",h"; ",quit"; ",q"; ",load"; ",env"; ",libs";
-     ",available"; ",exports"; ",theme"; ",paredit"]
+     ",available"; ",exports"; ",build"; ",deps"; ",reload";
+     ",theme"; ",paredit"]
   in
   let cached_candidates = ref [] in
   let cache_gen = ref (-1) in
@@ -619,7 +701,7 @@ let run_repl theme_name =
       if trimmed = "" then
         loop ()
       else if trimmed.[0] = ',' then begin
-        handle_repl_command inst theme_ref paredit_ref trimmed;
+        handle_repl_command inst pkg_info theme_ref paredit_ref trimmed;
         loop ()
       end else begin
         Line_editor.history_add editor input;
