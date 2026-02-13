@@ -528,11 +528,6 @@ let raise_sexp rt text cursor =
 (* --- Indentation --- *)
 
 let body_indent_forms = [
-  "define"; "define-syntax"; "define-record-type"; "define-library";
-  "define-values";
-  "lambda";
-  "let"; "let*"; "letrec"; "letrec*"; "let-values"; "let*-values";
-  "let-syntax"; "letrec-syntax";
   "begin"; "when"; "unless"; "cond"; "case"; "do";
   "guard"; "syntax-rules"; "parameterize";
   "with-exception-handler"; "dynamic-wind";
@@ -540,6 +535,16 @@ let body_indent_forms = [
   "call-with-values"; "call-with-port";
   "with-input-from-file"; "with-output-to-file";
 ]
+
+let body_indent_prefixes = ["def"; "let"; "lambda"]
+
+let is_body_indent_form name =
+  List.mem name body_indent_forms
+  || List.exists (fun prefix ->
+       let plen = String.length prefix in
+       String.length name >= plen
+       && String.sub name 0 plen = prefix
+     ) body_indent_prefixes
 
 let col_of_pos text pos =
   let rec scan i =
@@ -599,7 +604,7 @@ let compute_indent rt text cursor =
           (head_tok.span.stop - head_tok.span.start) in
       let is_body_form =
         (head_tok.kind = Tokenizer.Symbol || head_tok.kind = Tokenizer.Keyword)
-        && List.mem head_text body_indent_forms
+        && is_body_indent_form head_text
       in
       if is_body_form then
         open_col + 2

@@ -359,6 +359,40 @@ let test_indent_binding_pairs () =
   Alcotest.(check int) "nested let binding pair" 8
     (Paredit.compute_indent rt text3 (String.length text3))
 
+(* --- Wildcard indentation tests --- *)
+
+let test_indent_def_wildcard () =
+  (* User-defined def* forms should indent like define *)
+  Alcotest.(check int) "defmacro" 2
+    (Paredit.compute_indent rt "(defmacro foo" 13);
+  Alcotest.(check int) "defn" 2
+    (Paredit.compute_indent rt "(defn my-fn" 11);
+  Alcotest.(check int) "define-class" 2
+    (Paredit.compute_indent rt "(define-class point" 19)
+
+let test_indent_let_wildcard () =
+  (* User-defined let* forms should indent like let *)
+  Alcotest.(check int) "let-when" 2
+    (Paredit.compute_indent rt "(let-when ((x 1))" 18);
+  Alcotest.(check int) "let/cc" 2
+    (Paredit.compute_indent rt "(let/cc k" 9)
+
+let test_indent_lambda_wildcard () =
+  (* User-defined lambda* forms should indent like lambda *)
+  Alcotest.(check int) "lambda/match" 2
+    (Paredit.compute_indent rt "(lambda/match (x)" 17);
+  Alcotest.(check int) "lambda-case" 2
+    (Paredit.compute_indent rt "(lambda-case" 12)
+
+let test_indent_no_false_wildcard () =
+  (* Words that don't start with def/let/lambda should NOT body-indent *)
+  Alcotest.(check int) "debug aligns" 7
+    (Paredit.compute_indent rt "(debug arg1" 11);
+  Alcotest.(check int) "display aligns" 9
+    (Paredit.compute_indent rt "(display arg1" 13);
+  Alcotest.(check int) "for-each aligns" 10
+    (Paredit.compute_indent rt "(for-each arg1" 14)
+
 let () =
   Alcotest.run "Paredit" [
     "navigation", [
@@ -445,5 +479,9 @@ let () =
       Alcotest.test_case "nested call" `Quick test_indent_nested_call;
       Alcotest.test_case "deep nesting" `Quick test_indent_deep_nesting;
       Alcotest.test_case "binding pairs" `Quick test_indent_binding_pairs;
+      Alcotest.test_case "def* wildcard" `Quick test_indent_def_wildcard;
+      Alcotest.test_case "let* wildcard" `Quick test_indent_let_wildcard;
+      Alcotest.test_case "lambda* wildcard" `Quick test_indent_lambda_wildcard;
+      Alcotest.test_case "no false wildcard" `Quick test_indent_no_false_wildcard;
     ];
   ]
