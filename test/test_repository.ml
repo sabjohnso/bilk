@@ -1,9 +1,9 @@
-open Wile
+open Bilk
 
 (* --- Helpers --- *)
 
 let with_temp_dir fn =
-  let dir = Filename.temp_dir "wile_repo_test" "" in
+  let dir = Filename.temp_dir "bilk_repo_test" "" in
   Fun.protect ~finally:(fun () ->
     let rec rm path =
       if Sys.is_directory path then begin
@@ -31,14 +31,14 @@ let write_file path content =
 (* --- Step 1: Config tests --- *)
 
 let test_repos_dir () =
-  let result = Repository.repos_dir "/home/user/.wile" in
+  let result = Repository.repos_dir "/home/user/.bilk" in
   Alcotest.(check string) "repos dir"
-    "/home/user/.wile/repos" result
+    "/home/user/.bilk/repos" result
 
 let test_repos_config_path () =
-  let result = Repository.repos_config_path "/home/user/.wile" in
+  let result = Repository.repos_config_path "/home/user/.bilk" in
   Alcotest.(check string) "config path"
-    "/home/user/.wile/repositories" result
+    "/home/user/.bilk/repositories" result
 
 let test_load_repos_missing_file () =
   with_temp_dir (fun dir ->
@@ -48,13 +48,13 @@ let test_load_repos_missing_file () =
 let test_load_repos_basic () =
   with_temp_dir (fun dir ->
     write_file (Filename.concat dir "repositories")
-      {|((default . "https://github.com/wile-scheme/packages"))|};
+      {|((default . "https://github.com/bilk-scheme/packages"))|};
     let repos = Repository.load_repos dir in
     Alcotest.(check int) "one repo" 1 (List.length repos);
     let r = List.hd repos in
     Alcotest.(check string) "name" "default" r.name;
     Alcotest.(check string) "url"
-      "https://github.com/wile-scheme/packages" r.url)
+      "https://github.com/bilk-scheme/packages" r.url)
 
 let test_load_repos_multiple () =
   with_temp_dir (fun dir ->
@@ -100,12 +100,12 @@ let semver_testable : Semver.t Alcotest.testable =
 
 let test_parse_index_basic () =
   let content = {|(repository
-    (name "wile-packages")
+    (name "bilk-packages")
     (packages
       (json "0.2.0" "0.3.0")
       (srfi-extra "1.0.0")))|} in
   let idx = Repository.parse_index Readtable.default content in
-  Alcotest.(check string) "repo name" "wile-packages" idx.repo_name;
+  Alcotest.(check string) "repo name" "bilk-packages" idx.repo_name;
   Alcotest.(check int) "entry count" 2 (List.length idx.entries);
   let json_entry = List.hd idx.entries in
   Alcotest.(check string) "pkg name" "json" json_entry.pkg_name;
@@ -197,17 +197,17 @@ let make_bare_repo dir =
 
 let test_clone_dir () =
   let repo : Repository.repo = { name = "default"; url = "https://example.com" } in
-  let result = Repository.clone_dir "/home/user/.wile" repo in
+  let result = Repository.clone_dir "/home/user/.bilk" repo in
   Alcotest.(check string) "clone dir"
-    "/home/user/.wile/repos/default" result
+    "/home/user/.bilk/repos/default" result
 
 let test_sync_creates_clone () =
   with_temp_dir (fun dir ->
     let (bare, _work) = make_bare_repo dir in
-    let wile_home = Filename.concat dir "home" in
+    let bilk_home = Filename.concat dir "home" in
     let repo : Repository.repo = { name = "test-repo"; url = bare } in
-    Repository.sync wile_home repo;
-    let clone = Repository.clone_dir wile_home repo in
+    Repository.sync bilk_home repo;
+    let clone = Repository.clone_dir bilk_home repo in
     Alcotest.(check bool) "clone exists" true (Sys.file_exists clone);
     Alcotest.(check bool) "README exists" true
       (Sys.file_exists (Filename.concat clone "README")))
@@ -215,36 +215,36 @@ let test_sync_creates_clone () =
 let test_sync_idempotent () =
   with_temp_dir (fun dir ->
     let (bare, _work) = make_bare_repo dir in
-    let wile_home = Filename.concat dir "home" in
+    let bilk_home = Filename.concat dir "home" in
     let repo : Repository.repo = { name = "test-repo"; url = bare } in
-    Repository.sync wile_home repo;
-    Repository.sync wile_home repo;
-    let clone = Repository.clone_dir wile_home repo in
+    Repository.sync bilk_home repo;
+    Repository.sync bilk_home repo;
+    let clone = Repository.clone_dir bilk_home repo in
     Alcotest.(check bool) "clone still exists" true (Sys.file_exists clone))
 
 let test_sync_bad_url () =
   with_temp_dir (fun dir ->
-    let wile_home = Filename.concat dir "home" in
+    let bilk_home = Filename.concat dir "home" in
     let repo : Repository.repo =
       { name = "bad"; url = "/nonexistent/repo.git" } in
     Alcotest.check_raises "bad url"
       (Repository.Repository_error
          "failed to clone repository \"bad\" from /nonexistent/repo.git")
-      (fun () -> Repository.sync wile_home repo))
+      (fun () -> Repository.sync bilk_home repo))
 
 let test_sync_pulls_new_commits () =
   with_temp_dir (fun dir ->
     let (bare, work) = make_bare_repo dir in
-    let wile_home = Filename.concat dir "home" in
+    let bilk_home = Filename.concat dir "home" in
     let repo : Repository.repo = { name = "test-repo"; url = bare } in
-    Repository.sync wile_home repo;
+    Repository.sync bilk_home repo;
     (* Add a new file to the work tree and push *)
     assert (Sys.command (Printf.sprintf
       "cd %s && echo world > NEW && git add NEW && \
        git commit -m update >/dev/null 2>&1 && git push >/dev/null 2>&1"
       work) = 0);
-    Repository.sync wile_home repo;
-    let clone = Repository.clone_dir wile_home repo in
+    Repository.sync bilk_home repo;
+    let clone = Repository.clone_dir bilk_home repo in
     Alcotest.(check bool) "NEW file pulled" true
       (Sys.file_exists (Filename.concat clone "NEW")))
 
@@ -279,29 +279,29 @@ let add_package_to_repo work name version =
 
 let test_package_dir () =
   let repo : Repository.repo = { name = "r"; url = "x" } in
-  let result = Repository.package_dir "/home/user/.wile" repo
+  let result = Repository.package_dir "/home/user/.bilk" repo
     ~name:"json" ~version:"1.0.0" in
   Alcotest.(check string) "package dir"
-    "/home/user/.wile/repos/r/packages/json/1.0.0" result
+    "/home/user/.bilk/repos/r/packages/json/1.0.0" result
 
 let test_has_package_true () =
   with_temp_dir (fun dir ->
     let (bare, work) = make_bare_repo dir in
     add_package_to_repo work "json" "1.0.0";
-    let wile_home = Filename.concat dir "home" in
+    let bilk_home = Filename.concat dir "home" in
     let repo : Repository.repo = { name = "test"; url = bare } in
-    Repository.sync wile_home repo;
+    Repository.sync bilk_home repo;
     Alcotest.(check bool) "has package" true
-      (Repository.has_package wile_home repo ~name:"json" ~version:"1.0.0"))
+      (Repository.has_package bilk_home repo ~name:"json" ~version:"1.0.0"))
 
 let test_has_package_false () =
   with_temp_dir (fun dir ->
     let (bare, _work) = make_bare_repo dir in
-    let wile_home = Filename.concat dir "home" in
+    let bilk_home = Filename.concat dir "home" in
     let repo : Repository.repo = { name = "test"; url = bare } in
-    Repository.sync wile_home repo;
+    Repository.sync bilk_home repo;
     Alcotest.(check bool) "no package" false
-      (Repository.has_package wile_home repo ~name:"ghost" ~version:"1.0.0"))
+      (Repository.has_package bilk_home repo ~name:"ghost" ~version:"1.0.0"))
 
 let test_scan_versions () =
   with_temp_dir (fun dir ->
@@ -309,10 +309,10 @@ let test_scan_versions () =
     add_package_to_repo work "json" "1.0.0";
     add_package_to_repo work "json" "2.0.0";
     add_package_to_repo work "json" "1.1.0";
-    let wile_home = Filename.concat dir "home" in
+    let bilk_home = Filename.concat dir "home" in
     let repo : Repository.repo = { name = "test"; url = bare } in
-    Repository.sync wile_home repo;
-    let versions = Repository.scan_versions wile_home repo "json" in
+    Repository.sync bilk_home repo;
+    let versions = Repository.scan_versions bilk_home repo "json" in
     Alcotest.(check (list semver_testable)) "sorted versions"
       [v 1 0 0; v 1 1 0; v 2 0 0] versions)
 
@@ -322,11 +322,11 @@ let test_fetch_installs () =
   with_temp_dir (fun dir ->
     let (bare, work) = make_bare_repo dir in
     add_package_to_repo work "json" "1.0.0";
-    let wile_home = Filename.concat dir "home" in
+    let bilk_home = Filename.concat dir "home" in
     let registry = Filename.concat dir "registry" in
     let repo : Repository.repo = { name = "test"; url = bare } in
-    Repository.sync wile_home repo;
-    Repository.fetch_package ~wile_home ~registry_root:registry repo
+    Repository.sync bilk_home repo;
+    Repository.fetch_package ~bilk_home ~registry_root:registry repo
       ~name:"json" ~version:"1.0.0";
     let pkgs = Pkg_manager.list_packages ~registry_root:registry in
     Alcotest.(check int) "one package" 1 (List.length pkgs);
@@ -335,31 +335,31 @@ let test_fetch_installs () =
 let test_fetch_not_in_repo () =
   with_temp_dir (fun dir ->
     let (bare, _work) = make_bare_repo dir in
-    let wile_home = Filename.concat dir "home" in
+    let bilk_home = Filename.concat dir "home" in
     let registry = Filename.concat dir "registry" in
     let repo : Repository.repo = { name = "test"; url = bare } in
-    Repository.sync wile_home repo;
+    Repository.sync bilk_home repo;
     Alcotest.check_raises "not found"
       (Repository.Repository_error
          "package ghost 1.0.0 not found in repository \"test\"")
       (fun () ->
-        Repository.fetch_package ~wile_home ~registry_root:registry repo
+        Repository.fetch_package ~bilk_home ~registry_root:registry repo
           ~name:"ghost" ~version:"1.0.0"))
 
 let test_fetch_already_installed () =
   with_temp_dir (fun dir ->
     let (bare, work) = make_bare_repo dir in
     add_package_to_repo work "json" "1.0.0";
-    let wile_home = Filename.concat dir "home" in
+    let bilk_home = Filename.concat dir "home" in
     let registry = Filename.concat dir "registry" in
     let repo : Repository.repo = { name = "test"; url = bare } in
-    Repository.sync wile_home repo;
-    Repository.fetch_package ~wile_home ~registry_root:registry repo
+    Repository.sync bilk_home repo;
+    Repository.fetch_package ~bilk_home ~registry_root:registry repo
       ~name:"json" ~version:"1.0.0";
     Alcotest.check_raises "already installed"
       (Pkg_manager.Pkg_error "package json 1.0.0 is already installed")
       (fun () ->
-        Repository.fetch_package ~wile_home ~registry_root:registry repo
+        Repository.fetch_package ~bilk_home ~registry_root:registry repo
           ~name:"json" ~version:"1.0.0"))
 
 (* --- Step 7: load_index + search_all tests --- *)
@@ -372,10 +372,10 @@ let test_load_index_present () =
     assert (Sys.command (Printf.sprintf
       "cd %s && git add -A && git commit -m 'add index' >/dev/null 2>&1 \
        && git push >/dev/null 2>&1" work) = 0);
-    let wile_home = Filename.concat dir "home" in
+    let bilk_home = Filename.concat dir "home" in
     let repo : Repository.repo = { name = "test"; url = bare } in
-    Repository.sync wile_home repo;
-    match Repository.load_index wile_home repo with
+    Repository.sync bilk_home repo;
+    match Repository.load_index bilk_home repo with
     | None -> Alcotest.fail "expected Some"
     | Some idx ->
       Alcotest.(check string) "repo name" "test" idx.repo_name;
@@ -384,11 +384,11 @@ let test_load_index_present () =
 let test_load_index_absent () =
   with_temp_dir (fun dir ->
     let (bare, _work) = make_bare_repo dir in
-    let wile_home = Filename.concat dir "home" in
+    let bilk_home = Filename.concat dir "home" in
     let repo : Repository.repo = { name = "test"; url = bare } in
-    Repository.sync wile_home repo;
+    Repository.sync bilk_home repo;
     Alcotest.(check bool) "absent" true
-      (Repository.load_index wile_home repo = None))
+      (Repository.load_index bilk_home repo = None))
 
 let test_search_all_multi_repos () =
   with_temp_dir (fun dir ->
@@ -420,12 +420,12 @@ let test_search_all_multi_repos () =
     assert (Sys.command (Printf.sprintf
       "cd %s && git add -A && git commit -m idx >/dev/null 2>&1 && \
        git push >/dev/null 2>&1" work_b) = 0);
-    let wile_home = Filename.concat dir "home" in
+    let bilk_home = Filename.concat dir "home" in
     let repo_a : Repository.repo = { name = "a"; url = bare_a } in
     let repo_b : Repository.repo = { name = "b"; url = bare_b } in
-    Repository.sync wile_home repo_a;
-    Repository.sync wile_home repo_b;
-    let results = Repository.search_all wile_home [repo_a; repo_b] "json" in
+    Repository.sync bilk_home repo_a;
+    Repository.sync bilk_home repo_b;
+    let results = Repository.search_all bilk_home [repo_a; repo_b] "json" in
     Alcotest.(check int) "two json matches" 2 (List.length results))
 
 (* --- Test suite --- *)

@@ -2,7 +2,7 @@
 
    Handle-based value management for the C FFI.  Instance and value handles
    are integer indices into hash tables.  Handle 0 is reserved as the
-   error sentinel (WILE_NULL). *)
+   error sentinel (BILK_NULL). *)
 
 (* ---- Internal types ---- *)
 
@@ -149,7 +149,7 @@ let do_call ih proc_h arg_hs =
 (* ---- Primitive registration ---- *)
 
 external c_dispatch_primitive : int -> int -> int array -> int
-  = "wile_c_dispatch_primitive"
+  = "bilk_c_dispatch_primitive"
 
 let do_define_primitive ih name prim_id =
   with_instance_unit ih (fun entry ->
@@ -456,45 +456,45 @@ let () =
 (* ---- Callback registration ---- *)
 
 let () =
-  Callback.register "wile_create_instance" create_instance;
-  Callback.register "wile_destroy_instance" destroy_instance;
-  Callback.register "wile_error_message" error_message;
-  Callback.register "wile_eval_string" eval_string;
-  Callback.register "wile_load_file" do_load_file;
-  Callback.register "wile_load_fasl" do_load_fasl;
-  Callback.register "wile_lookup" do_lookup;
-  Callback.register "wile_call" do_call;
-  Callback.register "wile_define_primitive" do_define_primitive;
-  Callback.register "wile_make_nil" make_nil;
-  Callback.register "wile_make_void" make_void;
-  Callback.register "wile_make_bool" make_bool;
-  Callback.register "wile_make_fixnum" make_fixnum;
-  Callback.register "wile_make_flonum" make_flonum;
-  Callback.register "wile_make_string" make_string;
-  Callback.register "wile_make_symbol" make_symbol;
-  Callback.register "wile_make_cons" make_cons;
-  Callback.register "wile_make_vector" make_vector;
-  Callback.register "wile_make_list" make_list;
-  Callback.register "wile_is_nil" is_nil;
-  Callback.register "wile_is_bool" is_bool;
-  Callback.register "wile_is_fixnum" is_fixnum;
-  Callback.register "wile_is_integer" is_integer;
-  Callback.register "wile_is_flonum" is_flonum;
-  Callback.register "wile_is_string" is_string;
-  Callback.register "wile_is_symbol" is_symbol;
-  Callback.register "wile_is_pair" is_pair;
-  Callback.register "wile_is_vector" is_vector;
-  Callback.register "wile_is_true" is_true;
-  Callback.register "wile_get_bool" get_bool;
-  Callback.register "wile_get_fixnum" get_fixnum;
-  Callback.register "wile_get_integer_string" get_integer_string;
-  Callback.register "wile_get_flonum" get_flonum;
-  Callback.register "wile_get_string" get_string;
-  Callback.register "wile_get_symbol_name" get_symbol_name;
-  Callback.register "wile_car" do_car;
-  Callback.register "wile_cdr" do_cdr;
-  Callback.register "wile_vector_length" do_vector_length;
-  Callback.register "wile_vector_ref" do_vector_ref;
-  Callback.register "wile_display_string" display_to_string;
-  Callback.register "wile_write_string" write_to_string;
-  Callback.register "wile_release" release
+  Callback.register "bilk_create_instance" create_instance;
+  Callback.register "bilk_destroy_instance" destroy_instance;
+  Callback.register "bilk_error_message" error_message;
+  Callback.register "bilk_eval_string" eval_string;
+  Callback.register "bilk_load_file" do_load_file;
+  Callback.register "bilk_load_fasl" do_load_fasl;
+  Callback.register "bilk_lookup" do_lookup;
+  Callback.register "bilk_call" do_call;
+  Callback.register "bilk_define_primitive" do_define_primitive;
+  Callback.register "bilk_make_nil" make_nil;
+  Callback.register "bilk_make_void" make_void;
+  Callback.register "bilk_make_bool" make_bool;
+  Callback.register "bilk_make_fixnum" make_fixnum;
+  Callback.register "bilk_make_flonum" make_flonum;
+  Callback.register "bilk_make_string" make_string;
+  Callback.register "bilk_make_symbol" make_symbol;
+  Callback.register "bilk_make_cons" make_cons;
+  Callback.register "bilk_make_vector" make_vector;
+  Callback.register "bilk_make_list" make_list;
+  Callback.register "bilk_is_nil" is_nil;
+  Callback.register "bilk_is_bool" is_bool;
+  Callback.register "bilk_is_fixnum" is_fixnum;
+  Callback.register "bilk_is_integer" is_integer;
+  Callback.register "bilk_is_flonum" is_flonum;
+  Callback.register "bilk_is_string" is_string;
+  Callback.register "bilk_is_symbol" is_symbol;
+  Callback.register "bilk_is_pair" is_pair;
+  Callback.register "bilk_is_vector" is_vector;
+  Callback.register "bilk_is_true" is_true;
+  Callback.register "bilk_get_bool" get_bool;
+  Callback.register "bilk_get_fixnum" get_fixnum;
+  Callback.register "bilk_get_integer_string" get_integer_string;
+  Callback.register "bilk_get_flonum" get_flonum;
+  Callback.register "bilk_get_string" get_string;
+  Callback.register "bilk_get_symbol_name" get_symbol_name;
+  Callback.register "bilk_car" do_car;
+  Callback.register "bilk_cdr" do_cdr;
+  Callback.register "bilk_vector_length" do_vector_length;
+  Callback.register "bilk_vector_ref" do_vector_ref;
+  Callback.register "bilk_display_string" display_to_string;
+  Callback.register "bilk_write_string" write_to_string;
+  Callback.register "bilk_release" release

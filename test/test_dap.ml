@@ -1,4 +1,4 @@
-open Wile
+open Bilk
 
 let test_parse_valid_request () =
   let json = `Assoc [

@@ -1,4 +1,4 @@
-open Wile
+open Bilk
 
 (* -- Unit tests -- *)
 
@@ -80,7 +80,7 @@ let test_scheme_char_registered () =
 let test_features () =
   let inst = Instance.create () in
   Alcotest.(check bool) "has r7rs" true (List.mem "r7rs" inst.features);
-  Alcotest.(check bool) "has wile" true (List.mem "wile" inst.features)
+  Alcotest.(check bool) "has bilk" true (List.mem "bilk" inst.features)
 
 let test_eval_port_multiple () =
   let inst = Instance.create () in
@@ -171,7 +171,7 @@ let test_eval_datum_call () =
 
 let test_load_file () =
   let inst = Instance.create () in
-  let path = Filename.temp_file "wile_test" ".scm" in
+  let path = Filename.temp_file "bilk_test" ".scm" in
   Fun.protect ~finally:(fun () -> Sys.remove path) (fun () ->
     let oc = open_out path in
     output_string oc "(define load-test-var 123)";
@@ -182,7 +182,7 @@ let test_load_file () =
 
 let test_load_fasl () =
   let inst = Instance.create () in
-  let path = Filename.temp_file "wile_test" ".fasl" in
+  let path = Filename.temp_file "bilk_test" ".fasl" in
   Fun.protect ~finally:(fun () -> Sys.remove path) (fun () ->
     (* Compile a simple expression to a code object and serialize it *)
     let code = Compiler.compile inst.symbols
@@ -202,7 +202,7 @@ let test_eval_port_import () =
 (* --- Package integration tests --- *)
 
 let with_temp_dir fn =
-  let dir = Filename.temp_dir "wile_inst_test" "" in
+  let dir = Filename.temp_dir "bilk_inst_test" "" in
   Fun.protect ~finally:(fun () ->
     let rec rm path =
       if Sys.is_directory path then begin
@@ -336,7 +336,7 @@ let test_discover_dedup () =
       [["foo"; "bar"]] results)
 
 let test_discover_nonexistent_dir () =
-  let results = Instance.discover_available_libraries ["/tmp/nonexistent_wile_test_dir"] in
+  let results = Instance.discover_available_libraries ["/tmp/nonexistent_bilk_test_dir"] in
   Alcotest.(check (list lib_name_testable)) "nonexistent" [] results
 
 let test_discover_symlink_loop () =

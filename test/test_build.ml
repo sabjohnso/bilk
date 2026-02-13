@@ -1,9 +1,9 @@
-open Wile
+open Bilk
 
 (* --- Helpers --- *)
 
 let with_temp_dir fn =
-  let dir = Filename.temp_dir "wile_build_test" "" in
+  let dir = Filename.temp_dir "bilk_build_test" "" in
   Fun.protect ~finally:(fun () -> ignore (Sys.command ("rm -rf " ^ dir))) (fun () -> fn dir)
 
 let write_file path contents =
@@ -520,7 +520,7 @@ let test_auto_build_idempotent =
   QCheck2.Test.make ~count:5 ~name:"auto_build twice gives empty second result"
     (QCheck2.Gen.return ())
     (fun () ->
-       let dir = Filename.temp_dir "wile_ab_prop" "" in
+       let dir = Filename.temp_dir "bilk_ab_prop" "" in
        Fun.protect ~finally:(fun () -> ignore (Sys.command ("rm -rf " ^ dir)))
          (fun () ->
             ignore (write_sld dir ["idm"; "a"]
@@ -546,7 +546,7 @@ let test_execute_makes_fresh =
   QCheck2.Test.make ~count:5 ~name:"execute makes all nodes fresh"
     (QCheck2.Gen.return ())
     (fun () ->
-       let dir = Filename.temp_dir "wile_build_prop" "" in
+       let dir = Filename.temp_dir "bilk_build_prop" "" in
        Fun.protect ~finally:(fun () -> ignore (Sys.command ("rm -rf " ^ dir)))
          (fun () ->
             let sld_a = write_sld dir ["fresh"; "a"]
@@ -574,7 +574,7 @@ let test_plan_preserves_topo_order =
   QCheck2.Test.make ~count:5 ~name:"plan preserves topological order"
     (QCheck2.Gen.return ())
     (fun () ->
-       let dir = Filename.temp_dir "wile_build_topo_prop" "" in
+       let dir = Filename.temp_dir "bilk_build_topo_prop" "" in
        Fun.protect ~finally:(fun () -> ignore (Sys.command ("rm -rf " ^ dir)))
          (fun () ->
             let sld_a = write_sld dir ["topo"; "a"]
@@ -615,7 +615,7 @@ let test_plan_preserves_topo_order =
 (* --- stdlib validation tests --- *)
 
 let test_stdlib_graph () =
-  let stdlib = Wile_config.stdlib_source_dir in
+  let stdlib = Bilk_config.stdlib_source_dir in
   let inst = Instance.create () in
   let builtins = Build.builtin_library_names inst in
   let search_paths = [stdlib] in
@@ -648,7 +648,7 @@ let test_stdlib_graph () =
   ) nodes
 
 let test_stdlib_auto_build () =
-  let stdlib = Wile_config.stdlib_source_dir in
+  let stdlib = Bilk_config.stdlib_source_dir in
   let inst = Instance.create () in
   let builtins = Build.builtin_library_names inst in
   let search_paths = [stdlib] in

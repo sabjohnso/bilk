@@ -1,4 +1,4 @@
-open Wile
+open Bilk
 
 let loc = Loc.make "test" 1 1
 let mk d = Syntax.make loc d

@@ -1,4 +1,4 @@
-open Wile
+open Bilk
 
 let check_int msg expected actual =
   Alcotest.(check int) msg expected actual

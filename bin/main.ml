@@ -1,20 +1,20 @@
-open Wile
+open Bilk
 
 let version = "0.1.0"
 
 let history_file =
   match Sys.getenv_opt "HOME" with
-  | Some home -> Some (Filename.concat home ".wile_history")
+  | Some home -> Some (Filename.concat home ".bilk_history")
   | None -> None
 
 (* --- Persistent REPL settings --- *)
 
 let config_dir () =
-  match Sys.getenv_opt "WILE_HOME" with
+  match Sys.getenv_opt "BILK_HOME" with
   | Some d when d <> "" -> Some d
   | _ ->
     match Sys.getenv_opt "HOME" with
-    | Some home -> Some (Filename.concat home ".wile")
+    | Some home -> Some (Filename.concat home ".bilk")
     | None -> None
 
 let config_file () =
@@ -248,23 +248,23 @@ let generate_executable prog output_path =
     "let fasl_data = \"%s\"\n\
      let () =\n\
      \  try\n\
-     \    let inst = Wile.Instance.create () in\n\
-     \    inst.Wile.Instance.fasl_cache := true;\n\
-     \    inst.Wile.Instance.search_paths :=\n\
-     \      Wile.Search_path.resolve ~base_dirs:[Sys.getcwd ()];\n\
-     \    let prog = Wile.Fasl.read_program_bytes\n\
-     \      inst.Wile.Instance.symbols (Bytes.of_string fasl_data) in\n\
-     \    ignore (Wile.Instance.run_program inst prog)\n\
+     \    let inst = Bilk.Instance.create () in\n\
+     \    inst.Bilk.Instance.fasl_cache := true;\n\
+     \    inst.Bilk.Instance.search_paths :=\n\
+     \      Bilk.Search_path.resolve ~base_dirs:[Sys.getcwd ()];\n\
+     \    let prog = Bilk.Fasl.read_program_bytes\n\
+     \      inst.Bilk.Instance.symbols (Bytes.of_string fasl_data) in\n\
+     \    ignore (Bilk.Instance.run_program inst prog)\n\
      \  with\n\
-     \  | Wile.Vm.Runtime_error msg ->\n\
+     \  | Bilk.Vm.Runtime_error msg ->\n\
      \    Printf.eprintf \"Error: %%s\\n%%!\" msg; exit 1\n\
-     \  | Wile.Fasl.Fasl_error msg ->\n\
+     \  | Bilk.Fasl.Fasl_error msg ->\n\
      \    Printf.eprintf \"Error: %%s\\n%%!\" msg; exit 1\n\
      \  | Failure msg ->\n\
      \    Printf.eprintf \"Error: %%s\\n%%!\" msg; exit 1\n"
     escaped
   in
-  let tmp_ml = Filename.temp_file "wile_aot_" ".ml" in
+  let tmp_ml = Filename.temp_file "bilk_aot_" ".ml" in
   let tmp_base = Filename.chop_extension tmp_ml in
   Fun.protect ~finally:(fun () ->
     remove_if_exists tmp_ml;
@@ -276,14 +276,14 @@ let generate_executable prog output_path =
       Fun.protect ~finally:(fun () -> close_out oc) (fun () ->
         output_string oc ocaml_src);
       let cmd = Printf.sprintf
-        "ocamlfind ocamlopt -package wile -linkpkg %s -o %s 2>&1"
+        "ocamlfind ocamlopt -package bilk -linkpkg %s -o %s 2>&1"
         (Filename.quote tmp_ml) (Filename.quote output_path)
       in
       let exit_code = Sys.command cmd in
       if exit_code <> 0 then
         failwith (Printf.sprintf
           "ocamlfind ocamlopt failed (exit %d). \
-           Ensure wile is installed: opam install ."
+           Ensure bilk is installed: opam install ."
           exit_code))
 
 let compile_file path output exe =
@@ -578,12 +578,12 @@ let run_repl theme_name =
        (Semver.to_string pkg.version)
    | None -> ());
   auto_build_from_package inst pkg_info;
-  Printf.printf "Wile Scheme %s\nType ,help for REPL commands, Ctrl-D to exit.\n%!" version;
+  Printf.printf "Bilk Scheme %s\nType ,help for REPL commands, Ctrl-D to exit.\n%!" version;
   let saved = load_config () in
   let initial_theme = match theme_name with
     | Some name -> resolve_theme name
     | None ->
-      match Sys.getenv_opt "WILE_THEME" with
+      match Sys.getenv_opt "BILK_THEME" with
       | Some name -> resolve_theme name
       | None ->
         match List.assoc_opt "theme" saved with
@@ -701,7 +701,7 @@ let run_repl theme_name =
         end)
   in
   let editor = Line_editor.create {
-    prompt = "\x1b[1mwile>\x1b[0m ";
+    prompt = "\x1b[1mbilk>\x1b[0m ";
     continuation_prompt = "  ... ";
     history_file;
     max_history = 1000;
@@ -793,29 +793,29 @@ let make_default_cmd () =
   in
   let term = Term.(const default_cmd $ expr_opt $ file_arg $ theme_opt) in
   let info =
-    Cmd.info "wile" ~version
-      ~doc:"Wile Scheme — an R7RS implementation"
+    Cmd.info "bilk" ~version
+      ~doc:"Bilk Scheme — an R7RS implementation"
       ~man:[`S "DESCRIPTION";
             `P "Run Scheme code interactively, from a file, or from a \
                 command-line expression.";
             `S "SUBCOMMANDS";
-            `P "Use $(b,wile compile) to ahead-of-time compile Scheme source.";
-            `P "Use $(b,wile run) to execute a compiled program FASL.";
-            `P "Use $(b,wile pkg) to manage local packages.";
-            `P "Use $(b,wile venv) to create a virtual environment.";
-            `P "Use $(b,wile ext) to manage native extensions.";
-            `P "Use $(b,wile build) to build libraries from a package.";
-            `P "Use $(b,wile test) to discover and run Scheme test files.";
-            `P "Use $(b,wile debug) to debug a Scheme program via DAP.";
-            `P "Use $(b,wile lsp) to start the Language Server Protocol server.";
-            `P "Use $(b,wile profile) to profile a Scheme program.";
+            `P "Use $(b,bilk compile) to ahead-of-time compile Scheme source.";
+            `P "Use $(b,bilk run) to execute a compiled program FASL.";
+            `P "Use $(b,bilk pkg) to manage local packages.";
+            `P "Use $(b,bilk venv) to create a virtual environment.";
+            `P "Use $(b,bilk ext) to manage native extensions.";
+            `P "Use $(b,bilk build) to build libraries from a package.";
+            `P "Use $(b,bilk test) to discover and run Scheme test files.";
+            `P "Use $(b,bilk debug) to debug a Scheme program via DAP.";
+            `P "Use $(b,bilk lsp) to start the Language Server Protocol server.";
+            `P "Use $(b,bilk profile) to profile a Scheme program.";
             `S "ENVIRONMENT";
-            `P "$(b,WILE_VENV) — path to active virtual environment \
+            `P "$(b,BILK_VENV) — path to active virtual environment \
                 (its $(b,lib/) directory is searched for libraries).";
-            `P "$(b,WILE_PATH) — colon-separated list of additional \
+            `P "$(b,BILK_PATH) — colon-separated list of additional \
                 library search directories.";
-            `P "$(b,WILE_HOME) — override for the Wile home directory \
-                (default: $(b,~/.wile/))."]
+            `P "$(b,BILK_HOME) — override for the Bilk home directory \
+                (default: $(b,~/.bilk/))."]
   in
   Cmd.v info term
 
@@ -828,7 +828,7 @@ let make_compile_cmd () =
   let compile_exe =
     Arg.(value & flag &
          info ["exe"] ~doc:"Generate a standalone native executable \
-           (requires wile to be installed as an opam package).")
+           (requires bilk to be installed as an opam package).")
   in
   let compile_file_arg =
     Arg.(required & pos 0 (some string) None &
@@ -863,7 +863,7 @@ let make_run_cmd () =
       ~doc:"Execute a program FASL file"
       ~man:[`S "DESCRIPTION";
             `P "Loads and executes a program FASL file produced by \
-                $(b,wile compile)."]
+                $(b,bilk compile)."]
   in
   Cmd.v info term
 
@@ -994,7 +994,7 @@ let make_pkg_lock_cmd () =
   let term = Term.(const cmd $ const ()) in
   let info =
     Cmd.info "lock" ~version
-      ~doc:"Resolve dependencies and write wile.lock"
+      ~doc:"Resolve dependencies and write bilk.lock"
   in
   Cmd.v info term
 
@@ -1112,13 +1112,13 @@ let make_venv_cmd () =
   in
   let cmd dir =
     exit (handle_errors (fun () ->
-      Venv.create ~wile_version:version dir;
+      Venv.create ~bilk_version:version dir;
       let abs_dir =
         if Filename.is_relative dir then Filename.concat (Sys.getcwd ()) dir
         else dir
       in
       Printf.printf "Created virtual environment in %s\n%!" dir;
-      Printf.printf "Activate with: export WILE_VENV=%s\n%!" abs_dir))
+      Printf.printf "Activate with: export BILK_VENV=%s\n%!" abs_dir))
   in
   let term = Term.(const cmd $ dir_arg) in
   let info =
@@ -1126,33 +1126,33 @@ let make_venv_cmd () =
       ~doc:"Create a virtual environment"
       ~man:[`S "DESCRIPTION";
             `P "Creates a new virtual environment directory with a $(b,lib/) \
-                subdirectory for library files and a $(b,wile-venv.cfg) marker. \
-                Activate by setting $(b,WILE_VENV) to the directory path."]
+                subdirectory for library files and a $(b,bilk-venv.cfg) marker. \
+                Activate by setting $(b,BILK_VENV) to the directory path."]
   in
   Cmd.v info term
 
 (* --- Repository subcommands --- *)
 
-let wile_home () =
+let bilk_home () =
   match config_dir () with
   | Some d -> d
   | None ->
-    Printf.eprintf "Error: cannot determine wile home directory\n%!";
+    Printf.eprintf "Error: cannot determine bilk home directory\n%!";
     exit 1
 
 let pkg_fetch name version =
   handle_errors (fun () ->
-    let wile_home = wile_home () in
+    let bilk_home = bilk_home () in
     let registry_root = install_registry_root () in
-    let repos = Repository.load_repos wile_home in
+    let repos = Repository.load_repos bilk_home in
     if repos = [] then
-      raise (Repository.Repository_error "no repositories configured; use 'wile pkg repo add'");
+      raise (Repository.Repository_error "no repositories configured; use 'bilk pkg repo add'");
     let version = match version with
       | Some v -> v
       | None ->
         (* Find latest version across all repos *)
         let all_versions = List.concat_map (fun repo ->
-          Repository.scan_versions wile_home repo name
+          Repository.scan_versions bilk_home repo name
         ) repos in
         if all_versions = [] then
           raise (Repository.Repository_error
@@ -1162,21 +1162,21 @@ let pkg_fetch name version =
     in
     (* Find which repo has the package *)
     let repo = List.find_opt (fun repo ->
-      Repository.has_package wile_home repo ~name ~version
+      Repository.has_package bilk_home repo ~name ~version
     ) repos in
     match repo with
     | None ->
       raise (Repository.Repository_error
         (Printf.sprintf "package %s %s not found in any repository" name version))
     | Some repo ->
-      Repository.fetch_package ~wile_home ~registry_root repo ~name ~version;
+      Repository.fetch_package ~bilk_home ~registry_root repo ~name ~version;
       Printf.printf "Fetched %s %s from %s\n%!" name version repo.name)
 
 let pkg_search query =
   handle_errors (fun () ->
-    let wile_home = wile_home () in
-    let repos = Repository.load_repos wile_home in
-    let results = Repository.search_all wile_home repos query in
+    let bilk_home = bilk_home () in
+    let repos = Repository.load_repos bilk_home in
+    let results = Repository.search_all bilk_home repos query in
     if results = [] then
       print_endline "No packages found."
     else
@@ -1187,20 +1187,20 @@ let pkg_search query =
 
 let repo_add name url =
   handle_errors (fun () ->
-    let wile_home = wile_home () in
-    let repos = Repository.load_repos wile_home in
+    let bilk_home = bilk_home () in
+    let repos = Repository.load_repos bilk_home in
     if List.exists (fun r -> r.Repository.name = name) repos then
       raise (Repository.Repository_error
         (Printf.sprintf "repository %S already exists" name));
     let repo : Repository.repo = { name; url } in
-    Repository.sync wile_home repo;
-    Repository.save_repos wile_home (repos @ [repo]);
+    Repository.sync bilk_home repo;
+    Repository.save_repos bilk_home (repos @ [repo]);
     Printf.printf "Added repository %s (%s)\n%!" name url)
 
 let repo_list () =
   handle_errors (fun () ->
-    let wile_home = wile_home () in
-    let repos = Repository.load_repos wile_home in
+    let bilk_home = bilk_home () in
+    let repos = Repository.load_repos bilk_home in
     if repos = [] then
       print_endline "No repositories configured."
     else
@@ -1210,8 +1210,8 @@ let repo_list () =
 
 let repo_remove name =
   handle_errors (fun () ->
-    let wile_home = wile_home () in
-    let repos = Repository.load_repos wile_home in
+    let bilk_home = bilk_home () in
+    let repos = Repository.load_repos bilk_home in
     let repo = List.find_opt (fun r -> r.Repository.name = name) repos in
     match repo with
     | None ->
@@ -1219,9 +1219,9 @@ let repo_remove name =
         (Printf.sprintf "repository %S not found" name))
     | Some repo ->
       let repos' = List.filter (fun r -> r.Repository.name <> name) repos in
-      Repository.save_repos wile_home repos';
+      Repository.save_repos bilk_home repos';
       (* Clean up cached clone *)
-      let clone = Repository.clone_dir wile_home repo in
+      let clone = Repository.clone_dir bilk_home repo in
       if Sys.file_exists clone then begin
         let rec rm_rf path =
           if Sys.is_directory path then begin
@@ -1237,8 +1237,8 @@ let repo_remove name =
 
 let repo_update name =
   handle_errors (fun () ->
-    let wile_home = wile_home () in
-    let repos = Repository.load_repos wile_home in
+    let bilk_home = bilk_home () in
+    let repos = Repository.load_repos bilk_home in
     let to_update = match name with
       | None -> repos
       | Some n ->
@@ -1249,7 +1249,7 @@ let repo_update name =
     in
     List.iter (fun repo ->
       Printf.printf "Updating %s...\n%!" repo.Repository.name;
-      Repository.sync wile_home repo
+      Repository.sync bilk_home repo
     ) to_update;
     print_endline "Done.")
 
@@ -1348,12 +1348,12 @@ let make_pkg_cmd () =
     Cmd.info "pkg" ~version
       ~doc:"Package management commands"
       ~man:[`S "DESCRIPTION";
-            `P "Manage packages. Use $(b,wile pkg init), \
-                $(b,wile pkg install), \
-                $(b,wile pkg lock), $(b,wile pkg list), \
-                $(b,wile pkg remove), $(b,wile pkg info), \
-                $(b,wile pkg why), $(b,wile pkg fetch), \
-                $(b,wile pkg search), or $(b,wile pkg repo)."]
+            `P "Manage packages. Use $(b,bilk pkg init), \
+                $(b,bilk pkg install), \
+                $(b,bilk pkg lock), $(b,bilk pkg list), \
+                $(b,bilk pkg remove), $(b,bilk pkg info), \
+                $(b,bilk pkg why), $(b,bilk pkg fetch), \
+                $(b,bilk pkg search), or $(b,bilk pkg repo)."]
   in
   Cmd.group info [
     make_pkg_init_cmd ();
@@ -1375,39 +1375,39 @@ let ensure_dir path =
 
 let ext_init_ocaml name dir =
   handle_errors (fun () ->
-    let project_dir = Filename.concat dir ("wile-" ^ name) in
+    let project_dir = Filename.concat dir ("bilk-" ^ name) in
     ensure_dir project_dir;
     ensure_dir (Filename.concat project_dir "lib");
     ensure_dir (Filename.concat project_dir "scheme");
     ensure_dir (Filename.concat project_dir (Filename.concat "scheme" name));
     (* dune-project *)
     let oc = open_out (Filename.concat project_dir "dune-project") in
-    Printf.fprintf oc "(lang dune 3.0)\n(name wile_%s)\n" name;
+    Printf.fprintf oc "(lang dune 3.0)\n(name bilk_%s)\n" name;
     close_out oc;
     (* lib/dune *)
     let oc = open_out (Filename.concat project_dir "lib/dune") in
     Printf.fprintf oc
-      "(library\n (name wile_%s)\n (public_name wile_%s)\n (libraries wile))\n"
+      "(library\n (name bilk_%s)\n (public_name bilk_%s)\n (libraries bilk))\n"
       name name;
     close_out oc;
-    (* lib/wile_<name>.ml *)
+    (* lib/bilk_<name>.ml *)
     let oc = open_out (Filename.concat project_dir
-      (Printf.sprintf "lib/wile_%s.ml" name)) in
+      (Printf.sprintf "lib/bilk_%s.ml" name)) in
     Printf.fprintf oc
       "let init inst =\n\
-      \  Wile.Instance.define_primitive inst \"%s-hello\" (fun _args ->\n\
-      \    Wile.Datum.Str (Bytes.of_string \"hello from %s!\"))\n\
+      \  Bilk.Instance.define_primitive inst \"%s-hello\" (fun _args ->\n\
+      \    Bilk.Datum.Str (Bytes.of_string \"hello from %s!\"))\n\
        \n\
-       let () = Wile.Extension.register_static \"%s\" init\n"
+       let () = Bilk.Extension.register_static \"%s\" init\n"
       name name name;
     close_out oc;
-    (* lib/wile_<name>.mli *)
+    (* lib/bilk_<name>.mli *)
     let oc = open_out (Filename.concat project_dir
-      (Printf.sprintf "lib/wile_%s.mli" name)) in
+      (Printf.sprintf "lib/bilk_%s.mli" name)) in
     Printf.fprintf oc
-      "(** %s extension for Wile. *)\n\
+      "(** %s extension for Bilk. *)\n\
        \n\
-       val init : Wile.Instance.t -> unit\n\
+       val init : Bilk.Instance.t -> unit\n\
        (** [init inst] registers the extension's primitives. *)\n"
       name;
     close_out oc;
@@ -1425,7 +1425,7 @@ let ext_init_ocaml name dir =
 
 let ext_init_c name dir =
   handle_errors (fun () ->
-    let project_dir = Filename.concat dir ("wile-" ^ name) in
+    let project_dir = Filename.concat dir ("bilk-" ^ name) in
     ensure_dir project_dir;
     ensure_dir (Filename.concat project_dir "src");
     ensure_dir (Filename.concat project_dir "scheme");
@@ -1438,29 +1438,29 @@ let ext_init_c name dir =
        \n\
        .PHONY: all clean\n\
        \n\
-       all: wile_%s.so\n\
+       all: bilk_%s.so\n\
        \n\
-       wile_%s.so: src/wile_%s.c\n\
+       bilk_%s.so: src/bilk_%s.c\n\
        \t$(CC) -shared $(CFLAGS) -o $@ $<\n\
        \n\
        clean:\n\
-       \trm -f wile_%s.so\n"
+       \trm -f bilk_%s.so\n"
       name name name name;
     close_out oc;
-    (* src/wile_<name>.c *)
+    (* src/bilk_<name>.c *)
     let oc = open_out (Filename.concat project_dir
-      (Printf.sprintf "src/wile_%s.c" name)) in
+      (Printf.sprintf "src/bilk_%s.c" name)) in
     Printf.fprintf oc
-      "#include \"wile.h\"\n\
+      "#include \"bilk.h\"\n\
        \n\
-       static wile_val_t my_hello(wile_inst_t inst, int argc,\n\
-       \                            const wile_val_t *argv, void *data) {\n\
+       static bilk_val_t my_hello(bilk_inst_t inst, int argc,\n\
+       \                            const bilk_val_t *argv, void *data) {\n\
        \    (void)argc; (void)argv; (void)data;\n\
-       \    return wile_string(inst, \"hello from %s!\");\n\
+       \    return bilk_string(inst, \"hello from %s!\");\n\
        }\n\
        \n\
-       WILE_EXT_INIT {\n\
-       \    wile_define_primitive(inst, \"%s-hello\", my_hello, NULL);\n\
+       BILK_EXT_INIT {\n\
+       \    bilk_define_primitive(inst, \"%s-hello\", my_hello, NULL);\n\
        }\n"
       name name;
     close_out oc;
@@ -1516,7 +1516,7 @@ let make_ext_cmd () =
     Cmd.info "ext" ~version
       ~doc:"Extension management commands"
       ~man:[`S "DESCRIPTION";
-            `P "Manage native extensions. Use $(b,wile ext init) to \
+            `P "Manage native extensions. Use $(b,bilk ext init) to \
                 create a new extension project."]
   in
   Cmd.group info [
@@ -1932,7 +1932,7 @@ let make_profile_cmd () =
   Cmd.v info term
 
 (* Manual subcommand dispatch to avoid Cmd.group intercepting positional
-   file arguments (e.g. "wile file.scm") as unknown subcommand names. *)
+   file arguments (e.g. "bilk file.scm") as unknown subcommand names. *)
 let () =
   let open Cmdliner in
   let argc = Array.length Sys.argv in

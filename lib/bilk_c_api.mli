@@ -5,13 +5,13 @@
     interact with the Scheme runtime through integer handles.
 
     Handles are 32-bit integers indexing into per-instance hash tables.
-    Handle [0] ([WILE_NULL]) is reserved as the error/not-found sentinel.
+    Handle [0] ([BILK_NULL]) is reserved as the error/not-found sentinel.
 
-    All API functions catch Wile exceptions and store error messages in the
+    All API functions catch Bilk exceptions and store error messages in the
     per-instance [last_error] field.  C callers query errors via
     {!error_message}.
 
-    This module is an internal bridge — C programs use the [wile.h] header,
+    This module is an internal bridge — C programs use the [bilk.h] header,
     not this module directly.  OCaml programs should use {!Instance} and
     {!Datum} instead. *)
 
@@ -193,7 +193,7 @@ val release : int -> int -> unit
 val temporary_handle : Instance.t -> int
 (** [temporary_handle inst] registers an existing {!Instance.t} in the
     handle table and returns a fresh handle.  Used to give C extension
-    init functions a valid [wile_inst_t] handle.  The handle should be
+    init functions a valid [bilk_inst_t] handle.  The handle should be
     released with {!release_handle} when no longer needed. *)
 
 val release_handle : int -> unit

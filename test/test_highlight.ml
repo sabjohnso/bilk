@@ -1,4 +1,4 @@
-open Wile
+open Bilk
 
 let rt = Readtable.default
 let theme = Highlight.dark_theme
@@ -72,7 +72,7 @@ let test_light_theme () =
     "(define x 42)" (Highlight.strip_ansi result)
 
 let test_theme_load () =
-  let tmp = Filename.temp_file "wile_theme" ".scm" in
+  let tmp = Filename.temp_file "bilk_theme" ".scm" in
   Fun.protect ~finally:(fun () -> Sys.remove tmp) (fun () ->
     let oc = open_out tmp in
     output_string oc {|(theme "test"

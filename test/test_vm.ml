@@ -1,4 +1,4 @@
-open Wile
+open Bilk
 
 let datum_testable =
   Alcotest.testable Datum.pp Datum.equal
@@ -1973,7 +1973,7 @@ let test_cond_expand_else () =
 
 let test_cond_expand_and () =
   check_datum "cond-expand and" (Datum.Fixnum 1)
-    (eval "(cond-expand ((and r7rs wile) 1) (else 0))")
+    (eval "(cond-expand ((and r7rs bilk) 1) (else 0))")
 
 let test_cond_expand_or () =
   check_datum "cond-expand or" (Datum.Fixnum 1)
@@ -2000,7 +2000,7 @@ let test_cond_expand_nested () =
 (* --- include / include-ci --- *)
 
 let test_include_basic () =
-  let tmp = Filename.temp_file "wile_inc" ".scm" in
+  let tmp = Filename.temp_file "bilk_inc" ".scm" in
   let oc = open_out tmp in
   output_string oc "(define x 42)";
   close_out oc;
@@ -2011,8 +2011,8 @@ let test_include_basic () =
   Sys.remove tmp
 
 let test_include_multiple () =
-  let tmp1 = Filename.temp_file "wile_inc" ".scm" in
-  let tmp2 = Filename.temp_file "wile_inc" ".scm" in
+  let tmp1 = Filename.temp_file "bilk_inc" ".scm" in
+  let tmp2 = Filename.temp_file "bilk_inc" ".scm" in
   let oc1 = open_out tmp1 in output_string oc1 "(define a 1)"; close_out oc1;
   let oc2 = open_out tmp2 in output_string oc2 "(define b 2)"; close_out oc2;
   let inst = Instance.create () in
@@ -2023,7 +2023,7 @@ let test_include_multiple () =
   Sys.remove tmp1; Sys.remove tmp2
 
 let test_include_ci () =
-  let tmp = Filename.temp_file "wile_inc" ".scm" in
+  let tmp = Filename.temp_file "bilk_inc" ".scm" in
   let oc = open_out tmp in
   output_string oc "(define ABC 99)";
   close_out oc;
@@ -2037,9 +2037,9 @@ let test_include_ci () =
 let test_include_not_found () =
   let inst = Instance.create () in
   Alcotest.check_raises "include not found"
-    (Sys_error "/tmp/nonexistent_wile_inc.scm: No such file or directory")
+    (Sys_error "/tmp/nonexistent_bilk_inc.scm: No such file or directory")
     (fun () -> ignore (Instance.eval_string inst
-      "(include \"/tmp/nonexistent_wile_inc.scm\")"))
+      "(include \"/tmp/nonexistent_bilk_inc.scm\")"))
 
 (* --- define-library --- *)
 
@@ -2106,7 +2106,7 @@ let test_deflib_with_syntax () =
       "(double 3)"])
 
 let test_deflib_with_include () =
-  let tmp = Filename.temp_file "wile_lib" ".scm" in
+  let tmp = Filename.temp_file "bilk_lib" ".scm" in
   let oc = open_out tmp in
   output_string oc "(define x 77)";
   close_out oc;
@@ -2164,7 +2164,7 @@ let test_deflib_slot_sharing () =
 (* --- Library file loading --- *)
 
 let test_load_from_sld () =
-  let dir = Filename.temp_dir "wile_lib" "" in
+  let dir = Filename.temp_dir "bilk_lib" "" in
   let sub = Filename.concat dir "myfilelib" in
   Sys.mkdir sub 0o755;
   let sld = Filename.concat sub "stuff.sld" in
@@ -2182,8 +2182,8 @@ let test_load_from_sld () =
   Sys.remove sld; Sys.rmdir sub; Sys.rmdir dir
 
 let test_load_search_path_order () =
-  let dir1 = Filename.temp_dir "wile_lib1" "" in
-  let dir2 = Filename.temp_dir "wile_lib2" "" in
+  let dir1 = Filename.temp_dir "bilk_lib1" "" in
+  let dir2 = Filename.temp_dir "bilk_lib2" "" in
   let sub1 = Filename.concat dir1 "order" in
   let sub2 = Filename.concat dir2 "order" in
   Sys.mkdir sub1 0o755; Sys.mkdir sub2 0o755;
@@ -2218,7 +2218,7 @@ let test_load_not_found () =
     (fun () -> ignore (Instance.eval_string inst "(import (no such lib))"))
 
 let test_load_transitive () =
-  let dir = Filename.temp_dir "wile_lib" "" in
+  let dir = Filename.temp_dir "bilk_lib" "" in
   let sub_a = Filename.concat dir "trans" in
   Sys.mkdir sub_a 0o755;
   let sld_a = Filename.concat sub_a "a.sld" in
@@ -2247,7 +2247,7 @@ let test_load_transitive () =
 
 let test_loading_libs_per_instance () =
   (* Two instances loading from the same dir should not interfere *)
-  let dir = Filename.temp_dir "wile_lib" "" in
+  let dir = Filename.temp_dir "bilk_lib" "" in
   let sub = Filename.concat dir "iso" in
   Sys.mkdir sub 0o755;
   let sld = Filename.concat sub "lib.sld" in
@@ -2271,7 +2271,7 @@ let test_loading_libs_per_instance () =
 let test_loading_libs_cleanup_on_error () =
   (* If loading a library fails, loading_libs must be cleaned up so
      a corrected version can be loaded later *)
-  let dir = Filename.temp_dir "wile_lib" "" in
+  let dir = Filename.temp_dir "bilk_lib" "" in
   let sub = Filename.concat dir "retry" in
   Sys.mkdir sub 0o755;
   let sld = Filename.concat sub "lib.sld" in
@@ -2301,7 +2301,7 @@ let test_loading_libs_cleanup_on_error () =
 
 let test_cond_expand_library_autoload () =
   (* cond-expand (library ...) should auto-load from .sld files *)
-  let dir = Filename.temp_dir "wile_lib" "" in
+  let dir = Filename.temp_dir "bilk_lib" "" in
   let sub = Filename.concat dir "probe" in
   Sys.mkdir sub 0o755;
   let sld = Filename.concat sub "lib.sld" in
@@ -2528,7 +2528,7 @@ let test_peek_u8_port () =
 (* --- File I/O tests --- *)
 
 let test_file_read_write_roundtrip () =
-  let tmp = Filename.temp_file "wile_test" ".txt" in
+  let tmp = Filename.temp_file "bilk_test" ".txt" in
   let inst = Instance.create () in
   let code = Printf.sprintf
     "(begin
@@ -2566,7 +2566,7 @@ let test_call_with_port_closes () =
              (input-port-open? saved))")
 
 let test_with_output_to_file () =
-  let tmp = Filename.temp_file "wile_test" ".txt" in
+  let tmp = Filename.temp_file "bilk_test" ".txt" in
   let inst = Instance.create () in
   let code = Printf.sprintf
     "(begin
@@ -2598,7 +2598,7 @@ let test_read_eof_obj () =
     (eval "(eof-object? (read (open-input-string \"\")))")
 
 let test_file_exists () =
-  let tmp = Filename.temp_file "wile_test" ".txt" in
+  let tmp = Filename.temp_file "bilk_test" ".txt" in
   let inst = Instance.create () in
   let code = Printf.sprintf "(file-exists? \"%s\")" tmp in
   check_datum "file-exists? true"
@@ -2608,7 +2608,7 @@ let test_file_exists () =
     (Datum.Bool false) (Instance.eval_string inst code)
 
 let test_delete_file () =
-  let tmp = Filename.temp_file "wile_test" ".txt" in
+  let tmp = Filename.temp_file "bilk_test" ".txt" in
   let inst = Instance.create () in
   let code = Printf.sprintf
     "(begin (delete-file \"%s\") (file-exists? \"%s\"))" tmp tmp in
@@ -2616,7 +2616,7 @@ let test_delete_file () =
     (Datum.Bool false) (Instance.eval_string inst code)
 
 let test_call_with_input_file () =
-  let tmp = Filename.temp_file "wile_test" ".txt" in
+  let tmp = Filename.temp_file "bilk_test" ".txt" in
   let oc = open_out tmp in
   output_string oc "hello"; close_out oc;
   let inst = Instance.create () in
@@ -2630,7 +2630,7 @@ let test_call_with_input_file () =
 (* --- Library tests --- *)
 
 let test_import_scheme_file () =
-  let tmp = Filename.temp_file "wile_test" ".txt" in
+  let tmp = Filename.temp_file "bilk_test" ".txt" in
   let inst = Instance.create () in
   ignore (Instance.eval_string inst "(import (scheme file))");
   let result = Instance.eval_string inst
@@ -2654,7 +2654,7 @@ let test_import_scheme_write () =
                   (get-output-string p))"])
 
 let test_file_exists_delete () =
-  let tmp = Filename.temp_file "wile_test" ".txt" in
+  let tmp = Filename.temp_file "bilk_test" ".txt" in
   let inst = Instance.create () in
   ignore (Instance.eval_string inst "(import (scheme file))");
   let code = Printf.sprintf
@@ -2832,7 +2832,7 @@ let test_get_env_var_path () =
 
 let test_get_env_var_missing () =
   check_datum "missing env var"
-    (Datum.Bool false) (eval "(get-environment-variable \"NONEXISTENT_WILE_12345\")")
+    (Datum.Bool false) (eval "(get-environment-variable \"NONEXISTENT_BILK_12345\")")
 
 let test_get_env_vars_list () =
   check_datum "env vars is list"
@@ -2870,7 +2870,7 @@ let test_command_line_script_args () =
 
 let test_shebang_eval_port () =
   let inst = Instance.create () in
-  let port = Port.of_string "#!/usr/bin/env wile\n(+ 1 2)" in
+  let port = Port.of_string "#!/usr/bin/env bilk\n(+ 1 2)" in
   let result = Instance.eval_port inst port in
   check_datum "shebang eval_port"
     (Datum.Fixnum 3) result
@@ -2940,7 +2940,7 @@ let test_interaction_env_sees_globals () =
     (Instance.eval_string inst "(eval 'xyz (interaction-environment))")
 
 let test_load_basic () =
-  let tmp = Filename.temp_file "wile_load" ".scm" in
+  let tmp = Filename.temp_file "bilk_load" ".scm" in
   let oc = open_out tmp in
   output_string oc "(define loaded-val 123)\n";
   close_out oc;
@@ -2953,7 +2953,7 @@ let test_load_basic () =
   Sys.remove tmp
 
 let test_load_multi_expr () =
-  let tmp = Filename.temp_file "wile_load" ".scm" in
+  let tmp = Filename.temp_file "bilk_load" ".scm" in
   let oc = open_out tmp in
   output_string oc "(define a 10)\n(define b 20)\n";
   close_out oc;
@@ -2973,7 +2973,7 @@ let test_import_scheme_eval () =
     (Instance.eval_string inst "(eval '(* 2 3) (environment '(scheme base)))")
 
 let test_import_scheme_load () =
-  let tmp = Filename.temp_file "wile_load" ".scm" in
+  let tmp = Filename.temp_file "bilk_load" ".scm" in
   let oc = open_out tmp in
   output_string oc "(define load-test-val 77)\n";
   close_out oc;
@@ -3026,7 +3026,7 @@ let test_eval_cond () =
     (eval "(eval '(cond (#f 1) (#t 2) (else 3)) (environment '(scheme base)))")
 
 let test_load_with_env_spec () =
-  let tmp = Filename.temp_file "wile_load" ".scm" in
+  let tmp = Filename.temp_file "bilk_load" ".scm" in
   let oc = open_out tmp in
   output_string oc "(define env-loaded 55)\n";
   close_out oc;

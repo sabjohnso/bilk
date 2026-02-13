@@ -1,4 +1,4 @@
-open Wile
+open Bilk
 
 let char_type_testable =
   Alcotest.testable

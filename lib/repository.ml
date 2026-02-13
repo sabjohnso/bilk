@@ -24,14 +24,14 @@ let mkdir_p path =
 
 (* --- Configuration --- *)
 
-let repos_dir wile_home =
-  Filename.concat wile_home "repos"
+let repos_dir bilk_home =
+  Filename.concat bilk_home "repos"
 
-let repos_config_path wile_home =
-  Filename.concat wile_home "repositories"
+let repos_config_path bilk_home =
+  Filename.concat bilk_home "repositories"
 
-let load_repos wile_home =
-  let path = repos_config_path wile_home in
+let load_repos bilk_home =
+  let path = repos_config_path bilk_home in
   if not (Sys.file_exists path) then []
   else
     let port = Port.of_file path in
@@ -47,9 +47,9 @@ let load_repos wile_home =
       ) pairs
     | None -> error "malformed repository config"
 
-let save_repos wile_home repos =
-  let path = repos_config_path wile_home in
-  mkdir_p wile_home;
+let save_repos bilk_home repos =
+  let path = repos_config_path bilk_home in
+  mkdir_p bilk_home;
   let alist = Datum.list_of (List.map (fun r ->
     Datum.Pair { car = Datum.Symbol r.name;
                  cdr = Datum.Str (Bytes.of_string r.url) }
@@ -60,11 +60,11 @@ let save_repos wile_home repos =
 
 (* --- Clone management --- *)
 
-let clone_dir wile_home repo =
-  Filename.concat (repos_dir wile_home) repo.name
+let clone_dir bilk_home repo =
+  Filename.concat (repos_dir bilk_home) repo.name
 
-let sync wile_home repo =
-  let dest = clone_dir wile_home repo in
+let sync bilk_home repo =
+  let dest = clone_dir bilk_home repo in
   if Sys.file_exists dest && Sys.file_exists (Filename.concat dest ".git") then begin
     (* Pull latest *)
     let cmd = Printf.sprintf "git -C %s pull --ff-only >/dev/null"
@@ -86,7 +86,7 @@ let sync wile_home repo =
       rm_rf dest
     end;
     (* Fresh clone *)
-    mkdir_p (repos_dir wile_home);
+    mkdir_p (repos_dir bilk_home);
     let cmd = Printf.sprintf "git clone --depth 1 %s %s >/dev/null"
       (Filename.quote repo.url) (Filename.quote dest) in
     let rc = Sys.command cmd in
@@ -148,8 +148,8 @@ let parse_index readtable content =
     { repo_name; entries = !entries }
   | _ -> error "index: expected (repository ...)"
 
-let load_index wile_home repo =
-  let idx_path = Filename.concat (clone_dir wile_home repo) "index.scm" in
+let load_index bilk_home repo =
+  let idx_path = Filename.concat (clone_dir bilk_home repo) "index.scm" in
   if Sys.file_exists idx_path then
     let ic = open_in idx_path in
     let content = Fun.protect ~finally:(fun () -> close_in ic)
@@ -160,19 +160,19 @@ let load_index wile_home repo =
 
 (* --- Package access --- *)
 
-let package_dir wile_home repo ~name ~version =
+let package_dir bilk_home repo ~name ~version =
   Filename.concat
     (Filename.concat
-      (Filename.concat (clone_dir wile_home repo) "packages")
+      (Filename.concat (clone_dir bilk_home repo) "packages")
       name)
     version
 
-let has_package wile_home repo ~name ~version =
-  Sys.file_exists (package_dir wile_home repo ~name ~version)
+let has_package bilk_home repo ~name ~version =
+  Sys.file_exists (package_dir bilk_home repo ~name ~version)
 
-let scan_versions wile_home repo name =
+let scan_versions bilk_home repo name =
   let pkg_dir = Filename.concat
-    (Filename.concat (clone_dir wile_home repo) "packages") name in
+    (Filename.concat (clone_dir bilk_home repo) "packages") name in
   if not (Sys.file_exists pkg_dir) then []
   else
     Sys.readdir pkg_dir
@@ -182,8 +182,8 @@ let scan_versions wile_home repo name =
          with Semver.Parse_error _ -> None)
     |> List.sort Semver.compare
 
-let fetch_package ~wile_home ~registry_root repo ~name ~version =
-  let src_dir = package_dir wile_home repo ~name ~version in
+let fetch_package ~bilk_home ~registry_root repo ~name ~version =
+  let src_dir = package_dir bilk_home repo ~name ~version in
   if not (Sys.file_exists src_dir) then
     errorf "package %s %s not found in repository %S" name version repo.name;
   Pkg_manager.install ~registry_root ~src_dir
@@ -202,9 +202,9 @@ let search_index idx query =
     contains_at 0
   ) idx.entries
 
-let search_all wile_home repos query =
+let search_all bilk_home repos query =
   List.concat_map (fun repo ->
-    match load_index wile_home repo with
+    match load_index bilk_home repo with
     | None -> []
     | Some idx ->
       List.map (fun entry -> (repo, entry)) (search_index idx query)

@@ -1,4 +1,4 @@
-#+TITLE: Wile — Open Issues
+#+TITLE: Bilk — Open Issues
 #+STARTUP: showall
 
 * Known Issues
@@ -108,17 +108,17 @@ Fix: bind =let n = List.length actions in= and reuse.
 :END:
 
 [[file:bin/main.ml::let run_repl][=run_repl=]] prints the project banner, then auto-build output (on
-stderr), then the Wile version banner.  The result is:
+stderr), then the Bilk version banner.  The result is:
 
 #+begin_example
 Project: my-project 0.1.0
 Auto-built 3 libraries.
-Wile Scheme 0.1.0
+Bilk Scheme 0.1.0
 Type ,help for REPL commands, Ctrl-D to exit.
 #+end_example
 
 The build output is sandwiched between two banners.  Consider combining
-them into a single greeting (e.g. =Wile Scheme 0.1.0 — Project: my-project
+them into a single greeting (e.g. =Bilk Scheme 0.1.0 — Project: my-project
 0.1.0=) or printing the version line first.
 
 ** TODO Issue 13: =,deps= on a builtin library prints a bare name
@@ -154,14 +154,14 @@ necessary as more commands are added.
 :PRIORITY: C
 :END:
 
-The =read= call in [[file:lib/inotify_stubs.c::wile_inotify_read][=wile_inotify_read=]] and =inotify_add_watch=
-in [[file:lib/inotify_stubs.c::wile_inotify_add_watch][=wile_inotify_add_watch=]] should release the OCaml runtime lock
+The =read= call in [[file:lib/inotify_stubs.c::bilk_inotify_read][=bilk_inotify_read=]] and =inotify_add_watch=
+in [[file:lib/inotify_stubs.c::bilk_inotify_add_watch][=bilk_inotify_add_watch=]] should release the OCaml runtime lock
 via =caml_enter_blocking_section= / =caml_leave_blocking_section=.
 This follows the pattern used by OCaml's own =unix_read= stub.  In
 practice the fd is =IN_NONBLOCK= so =read= returns immediately, but
 =inotify_add_watch= can block on directory stat.
 
-** TODO Issue 16: Document fixed-size offsets array in =wile_inotify_read=
+** TODO Issue 16: Document fixed-size offsets array in =bilk_inotify_read=
 :PROPERTIES:
 :PRIORITY: C
 :END:
@@ -176,7 +176,7 @@ documenting why 256 is sufficient.
 :PRIORITY: C
 :END:
 
-The mask constant C functions ([[file:lib/inotify_stubs.c::95][=wile_in_modify= etc.]]) call
+The mask constant C functions ([[file:lib/inotify_stubs.c::95][=bilk_in_modify= etc.]]) call
 =caml_copy_int64= which heap-allocates a boxed value on every call.
 Now that the OCaml side caches them at module init this is only called
 once, but if someone calls the externals directly they pay allocation
@@ -305,5 +305,37 @@ If clones are out of date, =scan_versions= silently returns stale
 data and the error is "package not found in any repository" — even
 if the package exists upstream.
 
-Fix: suggest =wile pkg repo update= in the error message, or
+Fix: suggest =bilk pkg repo update= in the error message, or
 auto-sync before scanning.
+
+** TODO Issue 29: Backtracking provenance pollutes conflict error heuristic
+:PROPERTIES:
+:PRIORITY: C
+:END:
+
+[[file:lib/pkg_manager.ml::| None ->][=resolve= error path]] accumulates provenance from all
+backtracking attempts into a single mutable hashtable.  When the
+solver returns =None= (no valid combination found), the heuristic
+that picks the "most constrained" dependency to report uses
+combined constraints from incompatible backtracking paths.  This
+can mis-identify the actual culprit or produce a confusing error
+message.
+
+Fix: either snapshot and restore provenance per backtracking
+attempt, or collect provenance only on the final failed path.
+
+** TODO Issue 30: Redundant =installed_versions= calls on resolver error path
+:PROPERTIES:
+:PRIORITY: C
+:END:
+
+[[file:lib/pkg_manager.ml::let format_conflict_error][=format_conflict_error=]] calls
+=installed_versions= to list available versions.  The =None=
+error-path heuristic in [[file:lib/pkg_manager.ml::| None ->][=resolve=]] also calls
+=installed_versions= for every provenance entry to find the
+failed dependency.  These are redundant filesystem reads for the
+same data.
+
+Fix: pass the already-computed versions into
+=format_conflict_error=, or cache =installed_versions= results
+during resolution.

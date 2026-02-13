@@ -1,7 +1,7 @@
 ;; Profiler demo — run with:
-;;   wile profile examples/profiler-demo.scm
-;;   wile profile --format=flamegraph examples/profiler-demo.scm > profile.svg
-;;   wile profile --format=trace examples/profiler-demo.scm > profile.json
+;;   bilk profile examples/profiler-demo.scm
+;;   bilk profile --format=flamegraph examples/profiler-demo.scm > profile.svg
+;;   bilk profile --format=trace examples/profiler-demo.scm > profile.json
 
 (define (fib n)
   (if (< n 2) n

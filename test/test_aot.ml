@@ -1,4 +1,4 @@
-open Wile
+open Bilk
 
 (* --- Helpers --- *)
 
@@ -75,7 +75,7 @@ let test_file_roundtrip () =
     declarations = [Fasl.Lib_import iset; Fasl.Lib_code code]
   } in
   let tbl = Symbol.create_table () in
-  let path = Filename.temp_file "wile_test_" ".fasl" in
+  let path = Filename.temp_file "bilk_test_" ".fasl" in
   Fun.protect ~finally:(fun () -> Sys.remove path) (fun () ->
     Fasl.write_program_fasl path prog;
     let prog' = Fasl.read_program_fasl tbl path in
@@ -295,7 +295,7 @@ let test_e2e_file_roundtrip () =
        (if (< n 2) 1 (* n (fact (- n 1))))) \
      (fact 10)" in
   let prog = Instance.compile_port inst port in
-  let path = Filename.temp_file "wile_e2e_" ".fasl" in
+  let path = Filename.temp_file "bilk_e2e_" ".fasl" in
   Fun.protect ~finally:(fun () -> Sys.remove path) (fun () ->
     Fasl.write_program_fasl path prog;
     let inst2 = make_instance () in

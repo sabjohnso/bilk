@@ -11,7 +11,7 @@
 #include <errno.h>
 #include <string.h>
 
-CAMLprim value wile_inotify_init(value unit) {
+CAMLprim value bilk_inotify_init(value unit) {
     CAMLparam1(unit);
     int fd = inotify_init1(IN_NONBLOCK | IN_CLOEXEC);
     if (fd < 0)
@@ -19,7 +19,7 @@ CAMLprim value wile_inotify_init(value unit) {
     CAMLreturn(Val_int(fd));
 }
 
-CAMLprim value wile_inotify_add_watch(value fd_v, value path_v, value mask_v) {
+CAMLprim value bilk_inotify_add_watch(value fd_v, value path_v, value mask_v) {
     CAMLparam3(fd_v, path_v, mask_v);
     int fd = Int_val(fd_v);
     const char *path = String_val(path_v);
@@ -33,7 +33,7 @@ CAMLprim value wile_inotify_add_watch(value fd_v, value path_v, value mask_v) {
     CAMLreturn(Val_int(wd));
 }
 
-CAMLprim value wile_inotify_rm_watch(value fd_v, value wd_v) {
+CAMLprim value bilk_inotify_rm_watch(value fd_v, value wd_v) {
     CAMLparam2(fd_v, wd_v);
     int fd = Int_val(fd_v);
     int wd = Int_val(wd_v);
@@ -43,7 +43,7 @@ CAMLprim value wile_inotify_rm_watch(value fd_v, value wd_v) {
 
 /* Read inotify events into a list of (wd, mask, name) tuples.
    Returns an empty list if no events are available (EAGAIN). */
-CAMLprim value wile_inotify_read(value fd_v) {
+CAMLprim value bilk_inotify_read(value fd_v) {
     CAMLparam1(fd_v);
     CAMLlocal4(result, cons, tuple, name_val);
     int fd = Int_val(fd_v);
@@ -92,42 +92,42 @@ CAMLprim value wile_inotify_read(value fd_v) {
 }
 
 /* Mask constants */
-CAMLprim value wile_in_modify(value unit)   { (void)unit; return caml_copy_int64(IN_MODIFY); }
-CAMLprim value wile_in_create(value unit)   { (void)unit; return caml_copy_int64(IN_CREATE); }
-CAMLprim value wile_in_delete(value unit)   { (void)unit; return caml_copy_int64(IN_DELETE); }
-CAMLprim value wile_in_moved_to(value unit) { (void)unit; return caml_copy_int64(IN_MOVED_TO); }
-CAMLprim value wile_in_moved_from(value unit) { (void)unit; return caml_copy_int64(IN_MOVED_FROM); }
-CAMLprim value wile_in_isdir(value unit)    { (void)unit; return caml_copy_int64(IN_ISDIR); }
+CAMLprim value bilk_in_modify(value unit)   { (void)unit; return caml_copy_int64(IN_MODIFY); }
+CAMLprim value bilk_in_create(value unit)   { (void)unit; return caml_copy_int64(IN_CREATE); }
+CAMLprim value bilk_in_delete(value unit)   { (void)unit; return caml_copy_int64(IN_DELETE); }
+CAMLprim value bilk_in_moved_to(value unit) { (void)unit; return caml_copy_int64(IN_MOVED_TO); }
+CAMLprim value bilk_in_moved_from(value unit) { (void)unit; return caml_copy_int64(IN_MOVED_FROM); }
+CAMLprim value bilk_in_isdir(value unit)    { (void)unit; return caml_copy_int64(IN_ISDIR); }
 
 #else  /* not __linux__ */
 
 #include <caml/fail.h>
 
-CAMLprim value wile_inotify_init(value unit) {
+CAMLprim value bilk_inotify_init(value unit) {
     (void)unit;
     return Val_int(-1);
 }
 
-CAMLprim value wile_inotify_add_watch(value fd_v, value path_v, value mask_v) {
+CAMLprim value bilk_inotify_add_watch(value fd_v, value path_v, value mask_v) {
     (void)fd_v; (void)path_v; (void)mask_v;
     return Val_int(-1);
 }
 
-CAMLprim value wile_inotify_rm_watch(value fd_v, value wd_v) {
+CAMLprim value bilk_inotify_rm_watch(value fd_v, value wd_v) {
     (void)fd_v; (void)wd_v;
     return Val_unit;
 }
 
-CAMLprim value wile_inotify_read(value fd_v) {
+CAMLprim value bilk_inotify_read(value fd_v) {
     (void)fd_v;
     return Val_emptylist;
 }
 
-CAMLprim value wile_in_modify(value unit)     { (void)unit; return caml_copy_int64(0); }
-CAMLprim value wile_in_create(value unit)     { (void)unit; return caml_copy_int64(0); }
-CAMLprim value wile_in_delete(value unit)     { (void)unit; return caml_copy_int64(0); }
-CAMLprim value wile_in_moved_to(value unit)   { (void)unit; return caml_copy_int64(0); }
-CAMLprim value wile_in_moved_from(value unit) { (void)unit; return caml_copy_int64(0); }
-CAMLprim value wile_in_isdir(value unit)      { (void)unit; return caml_copy_int64(0); }
+CAMLprim value bilk_in_modify(value unit)     { (void)unit; return caml_copy_int64(0); }
+CAMLprim value bilk_in_create(value unit)     { (void)unit; return caml_copy_int64(0); }
+CAMLprim value bilk_in_delete(value unit)     { (void)unit; return caml_copy_int64(0); }
+CAMLprim value bilk_in_moved_to(value unit)   { (void)unit; return caml_copy_int64(0); }
+CAMLprim value bilk_in_moved_from(value unit) { (void)unit; return caml_copy_int64(0); }
+CAMLprim value bilk_in_isdir(value unit)      { (void)unit; return caml_copy_int64(0); }
 
 #endif

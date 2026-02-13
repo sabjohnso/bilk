@@ -1,9 +1,9 @@
-open Wile
+open Bilk
 
 (* --- Helpers --- *)
 
 let with_temp_dir fn =
-  let dir = Filename.temp_dir "wile_depgraph_test" "" in
+  let dir = Filename.temp_dir "bilk_depgraph_test" "" in
   Fun.protect ~finally:(fun () -> ignore (Sys.command ("rm -rf " ^ dir))) (fun () -> fn dir)
 
 let write_file path contents =
@@ -221,7 +221,7 @@ let test_imports_of_sld_cond_expand_nested () =
     let _path = write_sld dir ["mylib"; "nested"]
         "(define-library (mylib nested)\n\
          (cond-expand\n\
-           (wile\n\
+           (bilk\n\
              (import (scheme base))\n\
              (import (scheme write)))\n\
            (else\n\
@@ -523,7 +523,7 @@ let test_topological_order_property =
   QCheck2.Test.make ~count:50 ~name:"topological order is valid"
     (QCheck2.Gen.int_range 2 6)
     (fun n ->
-       let dir = Filename.temp_dir "wile_depgraph_prop" "" in
+       let dir = Filename.temp_dir "bilk_depgraph_prop" "" in
        Fun.protect ~finally:(fun () -> ignore (Sys.command ("rm -rf " ^ dir)))
          (fun () ->
             let sub = Filename.concat dir "chain" in
@@ -560,7 +560,7 @@ let test_dot_edge_roundtrip =
   QCheck2.Test.make ~count:30 ~name:"DOT has edge for every import"
     (QCheck2.Gen.int_range 2 5)
     (fun n ->
-       let dir = Filename.temp_dir "wile_depgraph_dot_prop" "" in
+       let dir = Filename.temp_dir "bilk_depgraph_dot_prop" "" in
        Fun.protect ~finally:(fun () -> ignore (Sys.command ("rm -rf " ^ dir)))
          (fun () ->
             let sub = Filename.concat dir "dotchain" in

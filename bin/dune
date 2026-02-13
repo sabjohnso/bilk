@@ -1,4 +1,4 @@
 (executable
- (public_name wile)
+ (public_name bilk)
  (name main)
- (libraries wile cmdliner))
+ (libraries bilk cmdliner))

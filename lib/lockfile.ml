@@ -21,7 +21,7 @@ type mismatch =
 (* --- Path --- *)
 
 let lockfile_path project_dir =
-  Filename.concat project_dir "wile.lock"
+  Filename.concat project_dir "bilk.lock"
 
 (* --- S-expression helpers --- *)
 

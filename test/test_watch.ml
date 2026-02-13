@@ -1,4 +1,4 @@
-open Wile
+open Bilk
 
 (* --- Helpers --- *)
 
@@ -15,7 +15,7 @@ let event_testable =
     a.Watch.path = b.Watch.path && a.kind = b.kind)
 
 let with_tmp_dir f =
-  let dir = Filename.temp_dir "wile_watch_test" "" in
+  let dir = Filename.temp_dir "bilk_watch_test" "" in
   Fun.protect ~finally:(fun () ->
     ignore (Sys.command (Printf.sprintf "rm -rf %s" (Filename.quote dir))))
     (fun () -> f dir)

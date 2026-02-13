@@ -1,4 +1,4 @@
-open Wile
+open Bilk
 
 let check_bool = Alcotest.(check bool)
 

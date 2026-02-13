@@ -1,17 +1,17 @@
-(* Integration tests for the "wile test" command.
+(* Integration tests for the "bilk test" command.
    Each test creates a temporary project directory with package.scm,
-   libraries, and test files, then invokes "wile test" as a subprocess. *)
+   libraries, and test files, then invokes "bilk test" as a subprocess. *)
 
 (* --- Helpers --- *)
 
-let wile_exe =
-  (* Tests run from _build/default/test/; the wile binary is at
+let bilk_exe =
+  (* Tests run from _build/default/test/; the bilk binary is at
      _build/default/bin/main.exe *)
   let dir = Filename.dirname Sys.executable_name in
   Filename.concat (Filename.concat (Filename.dirname dir) "bin") "main.exe"
 
 let with_temp_dir fn =
-  let dir = Filename.temp_dir "wile_test_cmd" "" in
+  let dir = Filename.temp_dir "bilk_test_cmd" "" in
   Fun.protect ~finally:(fun () ->
     let rec rm path =
       if Sys.is_directory path then begin
@@ -31,14 +31,14 @@ let write_file path content =
   Fun.protect ~finally:(fun () -> close_out oc)
     (fun () -> output_string oc content)
 
-let run_wile_test ?file () =
+let run_bilk_test ?file () =
   let dev_null = Unix.openfile "/dev/null" [Unix.O_RDONLY] 0 in
   let out_r, out_w = Unix.pipe () in
   let args = match file with
-    | Some f -> [| wile_exe; "test"; f |]
-    | None -> [| wile_exe; "test" |]
+    | Some f -> [| bilk_exe; "test"; f |]
+    | None -> [| bilk_exe; "test" |]
   in
-  let pid = Unix.create_process wile_exe args dev_null out_w out_w in
+  let pid = Unix.create_process bilk_exe args dev_null out_w out_w in
   Unix.close dev_null;
   Unix.close out_w;
   let buf = Buffer.create 256 in
@@ -79,7 +79,7 @@ let test_passing_test () =
     let saved = Sys.getcwd () in
     Fun.protect ~finally:(fun () -> Sys.chdir saved) (fun () ->
       Sys.chdir dir;
-      let (code, output) = run_wile_test () in
+      let (code, output) = run_bilk_test () in
       Alcotest.(check int) "exit code" 0 code;
       Alcotest.(check bool) "output contains PASS"
         true (let r = Str.regexp_string "PASS" in
@@ -96,7 +96,7 @@ let test_failing_test () =
     let saved = Sys.getcwd () in
     Fun.protect ~finally:(fun () -> Sys.chdir saved) (fun () ->
       Sys.chdir dir;
-      let (code, output) = run_wile_test () in
+      let (code, output) = run_bilk_test () in
       Alcotest.(check bool) "exit code non-zero" true (code <> 0);
       Alcotest.(check bool) "output contains FAIL"
         true (let r = Str.regexp_string "FAIL" in
@@ -116,7 +116,7 @@ let test_single_file () =
     Fun.protect ~finally:(fun () -> Sys.chdir saved) (fun () ->
       Sys.chdir dir;
       let file = Filename.concat test_dir "test-one.scm" in
-      let (code, output) = run_wile_test ~file () in
+      let (code, output) = run_bilk_test ~file () in
       Alcotest.(check int) "exit code" 0 code;
       Alcotest.(check bool) "output contains PASS"
         true (let r = Str.regexp_string "PASS" in
@@ -132,7 +132,7 @@ let test_single_file () =
 
 let () =
   Alcotest.run "Test Command" [
-    "wile test", [
+    "bilk test", [
       Alcotest.test_case "passing test" `Slow test_passing_test;
       Alcotest.test_case "failing test" `Slow test_failing_test;
       Alcotest.test_case "single file" `Slow test_single_file;

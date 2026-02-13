@@ -2831,7 +2831,7 @@ let detect_features () =
     | "Cygwin" -> "cygwin"
     | s -> String.lowercase_ascii s
   in
-  ["r7rs"; "wile"; os] @ Srfi.bundled_features
+  ["r7rs"; "bilk"; os] @ Srfi.bundled_features
 
 (* --- R7RS export names --- *)
 

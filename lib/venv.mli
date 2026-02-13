@@ -1,14 +1,14 @@
 (** Virtual environment support.
 
     A virtual environment is a directory containing a marker file
-    ([wile-venv.cfg]) and a library directory ([lib/]) for
+    ([bilk-venv.cfg]) and a library directory ([lib/]) for
     user-installed [.sld] files.  Inspired by Python's venv model. *)
 
 (** {1 Types} *)
 
-(** Virtual environment configuration stored in [wile-venv.cfg]. *)
+(** Virtual environment configuration stored in [bilk-venv.cfg]. *)
 type config = {
-  wile_version : string;  (** Wile version that created the venv. *)
+  bilk_version : string;  (** Bilk version that created the venv. *)
   created : string;        (** ISO 8601 creation timestamp. *)
 }
 
@@ -18,18 +18,18 @@ exception Venv_error of string
 
 (** {1 Operations} *)
 
-val create : wile_version:string -> string -> unit
-(** [create ~wile_version dir] creates a new virtual environment at
+val create : bilk_version:string -> string -> unit
+(** [create ~bilk_version dir] creates a new virtual environment at
     [dir].  Creates the directory (and parents) if needed, writes
-    [wile-venv.cfg], and creates the [lib/] subdirectory.
-    @raise Venv_error if [dir] already contains a [wile-venv.cfg]. *)
+    [bilk-venv.cfg], and creates the [lib/] subdirectory.
+    @raise Venv_error if [dir] already contains a [bilk-venv.cfg]. *)
 
 val is_venv : string -> bool
-(** [is_venv dir] returns [true] if [dir] contains a [wile-venv.cfg]
+(** [is_venv dir] returns [true] if [dir] contains a [bilk-venv.cfg]
     marker file. *)
 
 val read_config : string -> config
-(** [read_config dir] reads and parses [wile-venv.cfg] from [dir].
+(** [read_config dir] reads and parses [bilk-venv.cfg] from [dir].
     @raise Venv_error if the file is missing or malformed. *)
 
 val lib_path : string -> string

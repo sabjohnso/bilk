@@ -1,4 +1,4 @@
-open Wile
+open Bilk
 
 let loc_testable =
   Alcotest.testable Loc.pp Loc.equal
@@ -110,7 +110,7 @@ let qcheck_roundtrip =
       Buffer.contents buf = expected)
 
 let test_of_file_basic () =
-  let tmp = Filename.temp_file "wile_test" ".scm" in
+  let tmp = Filename.temp_file "bilk_test" ".scm" in
   let () =
     let oc = open_out tmp in
     output_string oc "(+ 1 2)";
@@ -123,11 +123,11 @@ let test_of_file_basic () =
 
 let test_of_file_not_found () =
   Alcotest.check_raises "sys_error"
-    (Sys_error "/tmp/nonexistent_wile_test.scm: No such file or directory")
-    (fun () -> ignore (Port.of_file "/tmp/nonexistent_wile_test.scm"))
+    (Sys_error "/tmp/nonexistent_bilk_test.scm: No such file or directory")
+    (fun () -> ignore (Port.of_file "/tmp/nonexistent_bilk_test.scm"))
 
 let test_of_file_loc () =
-  let tmp = Filename.temp_file "wile_test" ".scm" in
+  let tmp = Filename.temp_file "bilk_test" ".scm" in
   let () =
     let oc = open_out tmp in
     output_string oc "a\nb";
@@ -167,7 +167,7 @@ let test_output_string_close () =
   Alcotest.(check bool) "closed" false (Port.is_open p)
 
 let test_output_channel () =
-  let tmp = Filename.temp_file "wile_test" ".out" in
+  let tmp = Filename.temp_file "bilk_test" ".out" in
   let p = Port.open_output_file tmp in
   Port.write_string p "hello file";
   Port.close p;
@@ -251,7 +251,7 @@ let test_file_name () =
   Alcotest.(check string) "string output" "<string>" (Port.file_name op)
 
 let test_open_input_file () =
-  let tmp = Filename.temp_file "wile_test" ".scm" in
+  let tmp = Filename.temp_file "bilk_test" ".scm" in
   let () =
     let oc = open_out tmp in
     output_string oc "abc";

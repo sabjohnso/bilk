@@ -55,14 +55,14 @@ let load_cmxs inst name path =
 
 (* ---- C extension loading (.so) ---- *)
 
-external ext_dlopen : string -> nativeint = "wile_ext_dlopen"
-external ext_dlsym : nativeint -> string -> nativeint = "wile_ext_dlsym"
-external ext_dlclose : nativeint -> unit = "wile_ext_dlclose"
-external ext_call_init : nativeint -> int -> unit = "wile_ext_call_init"
+external ext_dlopen : string -> nativeint = "bilk_ext_dlopen"
+external ext_dlsym : nativeint -> string -> nativeint = "bilk_ext_dlsym"
+external ext_dlclose : nativeint -> unit = "bilk_ext_dlclose"
+external ext_call_init : nativeint -> int -> unit = "bilk_ext_call_init"
 
-(* Forward references filled in by Wile_c_api to break the dependency cycle:
+(* Forward references filled in by Bilk_c_api to break the dependency cycle:
    Extension -> Instance (OK)
-   Extension -/-> Wile_c_api (would cause: Wile_c_api -> Instance -> Extension -> Wile_c_api) *)
+   Extension -/-> Bilk_c_api (would cause: Bilk_c_api -> Instance -> Extension -> Bilk_c_api) *)
 let c_temporary_handle_ref : (Instance.t -> int) ref =
   ref (fun _inst -> extension_error "C extension support not initialized")
 let c_release_handle_ref : (int -> unit) ref =
@@ -75,10 +75,10 @@ let load_c inst path =
       extension_error (Printf.sprintf "dlopen %s: %s" path msg)
   in
   let fn_ptr =
-    try ext_dlsym handle "wile_ext_init"
+    try ext_dlsym handle "bilk_ext_init"
     with Failure msg ->
       (try ext_dlclose handle with _ -> ());
-      extension_error (Printf.sprintf "dlsym wile_ext_init in %s: %s" path msg)
+      extension_error (Printf.sprintf "dlsym bilk_ext_init in %s: %s" path msg)
   in
   let ih = !c_temporary_handle_ref inst in
   Fun.protect ~finally:(fun () ->
@@ -87,7 +87,7 @@ let load_c inst path =
     (fun () ->
       try ext_call_init fn_ptr ih
       with Failure msg ->
-        extension_error (Printf.sprintf "wile_ext_init in %s failed: %s"
+        extension_error (Printf.sprintf "bilk_ext_init in %s failed: %s"
           path msg))
 
 (* ---- Main entry point ---- *)
@@ -96,8 +96,8 @@ let load_native inst ~search_dirs ~sld_dir name =
   (* 1. Try static registry *)
   if init_static inst name then ()
   else begin
-    let cmxs_name = "wile_" ^ name ^ ".cmxs" in
-    let so_name = "wile_" ^ name ^ ".so" in
+    let cmxs_name = "bilk_" ^ name ^ ".cmxs" in
+    let so_name = "bilk_" ^ name ^ ".so" in
     (* 2. Try .cmxs *)
     match find_file ~search_dirs ~sld_dir cmxs_name with
     | Some path -> load_cmxs inst name path

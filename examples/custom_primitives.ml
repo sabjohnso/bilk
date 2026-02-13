@@ -7,7 +7,7 @@
    - Looking up and calling Scheme procedures defined in loaded files
 *)
 
-open Wile
+open Bilk
 
 let () =
   let inst = Instance.create () in

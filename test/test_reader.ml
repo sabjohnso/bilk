@@ -1,4 +1,4 @@
-open Wile
+open Bilk
 
 let datum_testable =
   Alcotest.testable Datum.pp Datum.equal
@@ -343,30 +343,30 @@ let test_reader_shebang () =
   (* Shebang line skipped *)
   check_datum "shebang + expr"
     (Datum.Fixnum 42)
-    (read_one "#!/usr/bin/env wile\n42");
+    (read_one "#!/usr/bin/env bilk\n42");
   (* Shebang with arguments *)
   check_datum "shebang with args"
     (Datum.Fixnum 42)
-    (read_one "#!/usr/bin/env wile --script\n42");
+    (read_one "#!/usr/bin/env bilk --script\n42");
   (* Shebang only — reads EOF *)
   check_datum "shebang only"
     Datum.Eof
-    (read_one "#!/usr/bin/env wile\n");
+    (read_one "#!/usr/bin/env bilk\n");
   (* Shebang no trailing newline *)
   check_datum "shebang no newline"
     Datum.Eof
-    (read_one "#!/usr/bin/env wile");
+    (read_one "#!/usr/bin/env bilk");
   (* Shebang with space after #! *)
   check_datum "shebang space after bang"
     (Datum.Fixnum 42)
-    (read_one "#! /usr/bin/env wile\n42");
+    (read_one "#! /usr/bin/env bilk\n42");
   (* Shebang + list expression *)
   check_datum "shebang + list"
     (Datum.Pair { car = Datum.Symbol "+";
                   cdr = Datum.Pair { car = Datum.Fixnum 1;
                                      cdr = Datum.Pair { car = Datum.Fixnum 2;
                                                         cdr = Datum.Nil } } })
-    (read_one "#!/usr/bin/env wile\n(+ 1 2)")
+    (read_one "#!/usr/bin/env bilk\n(+ 1 2)")
 
 let test_reader_shebang_vs_directive () =
   (* #!fold-case at start of file still works as directive *)

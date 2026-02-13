@@ -1,11 +1,11 @@
 type config = {
-  wile_version : string;
+  bilk_version : string;
   created : string;
 }
 
 exception Venv_error of string
 
-let cfg_name = "wile-venv.cfg"
+let cfg_name = "bilk-venv.cfg"
 
 let lib_path dir = Filename.concat dir "lib"
 
@@ -22,7 +22,7 @@ let mkdir_p dir =
   in
   ensure dir
 
-let create ~wile_version dir =
+let create ~bilk_version dir =
   if is_venv dir then
     raise (Venv_error (Printf.sprintf
       "directory already contains a virtual environment: %s" dir));
@@ -40,7 +40,7 @@ let create ~wile_version dir =
   in
   let oc = open_out cfg_path in
   Fun.protect ~finally:(fun () -> close_out oc) (fun () ->
-    Printf.fprintf oc "wile-version = %s\n" wile_version;
+    Printf.fprintf oc "bilk-version = %s\n" bilk_version;
     Printf.fprintf oc "created = %s\n" now)
 
 let read_config dir =
@@ -49,7 +49,7 @@ let read_config dir =
     raise (Venv_error (Printf.sprintf
       "not a virtual environment (missing %s): %s" cfg_name dir));
   let ic = open_in cfg_path in
-  let wile_version = ref "" in
+  let bilk_version = ref "" in
   let created = ref "" in
   Fun.protect ~finally:(fun () -> close_in ic) (fun () ->
     try while true do
@@ -58,14 +58,14 @@ let read_config dir =
       | [key; value] ->
         let k = String.trim key in
         let v = String.trim value in
-        if k = "wile-version" then wile_version := v
+        if k = "bilk-version" then bilk_version := v
         else if k = "created" then created := v
       | _ -> ()
     done with End_of_file -> ());
-  if !wile_version = "" then
+  if !bilk_version = "" then
     raise (Venv_error (Printf.sprintf
-      "malformed %s: missing wile-version in %s" cfg_name dir));
+      "malformed %s: missing bilk-version in %s" cfg_name dir));
   if !created = "" then
     raise (Venv_error (Printf.sprintf
       "malformed %s: missing created in %s" cfg_name dir));
-  { wile_version = !wile_version; created = !created }
+  { bilk_version = !bilk_version; created = !created }

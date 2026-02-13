@@ -11,8 +11,8 @@
 #include <string.h>
 #include <stdint.h>
 
-/* wile_ext_dlopen(path : string) -> nativeint handle */
-CAMLprim value wile_ext_dlopen(value path_v)
+/* bilk_ext_dlopen(path : string) -> nativeint handle */
+CAMLprim value bilk_ext_dlopen(value path_v)
 {
     CAMLparam1(path_v);
     const char *path = String_val(path_v);
@@ -23,8 +23,8 @@ CAMLprim value wile_ext_dlopen(value path_v)
     CAMLreturn(caml_copy_nativeint((intptr_t)handle));
 }
 
-/* wile_ext_dlsym(handle : nativeint, name : string) -> nativeint fn_ptr */
-CAMLprim value wile_ext_dlsym(value handle_v, value name_v)
+/* bilk_ext_dlsym(handle : nativeint, name : string) -> nativeint fn_ptr */
+CAMLprim value bilk_ext_dlsym(value handle_v, value name_v)
 {
     CAMLparam2(handle_v, name_v);
     void *handle = (void *)Nativeint_val(handle_v);
@@ -38,8 +38,8 @@ CAMLprim value wile_ext_dlsym(value handle_v, value name_v)
     CAMLreturn(caml_copy_nativeint((intptr_t)sym));
 }
 
-/* wile_ext_dlclose(handle : nativeint) -> unit */
-CAMLprim value wile_ext_dlclose(value handle_v)
+/* bilk_ext_dlclose(handle : nativeint) -> unit */
+CAMLprim value bilk_ext_dlclose(value handle_v)
 {
     CAMLparam1(handle_v);
     void *handle = (void *)Nativeint_val(handle_v);
@@ -47,9 +47,9 @@ CAMLprim value wile_ext_dlclose(value handle_v)
     CAMLreturn(Val_unit);
 }
 
-/* wile_ext_call_init(fn_ptr : nativeint, inst_handle : int) -> unit
-   Calls: void wile_ext_init(int32_t inst) */
-CAMLprim value wile_ext_call_init(value fn_ptr_v, value inst_handle_v)
+/* bilk_ext_call_init(fn_ptr : nativeint, inst_handle : int) -> unit
+   Calls: void bilk_ext_init(int32_t inst) */
+CAMLprim value bilk_ext_call_init(value fn_ptr_v, value inst_handle_v)
 {
     CAMLparam2(fn_ptr_v, inst_handle_v);
     typedef void (*init_fn_t)(int32_t);

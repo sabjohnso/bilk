@@ -1,4 +1,4 @@
-open Wile
+open Bilk
 
 let syntax_testable =
   Alcotest.testable Syntax.pp Syntax.equal

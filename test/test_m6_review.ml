@@ -1,4 +1,4 @@
-open Wile
+open Bilk
 
 (* Regression tests for bugs found during M6 code review. *)
 

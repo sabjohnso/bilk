@@ -2,20 +2,20 @@
 
 (* Unix.file_descr and int have the same representation (Val_int),
    so we declare the externals with the types we actually want. *)
-external inotify_init : unit -> Unix.file_descr = "wile_inotify_init"
+external inotify_init : unit -> Unix.file_descr = "bilk_inotify_init"
 external inotify_add_watch : Unix.file_descr -> string -> int64 -> int
-  = "wile_inotify_add_watch"
+  = "bilk_inotify_add_watch"
 external inotify_rm_watch : Unix.file_descr -> int -> unit
-  = "wile_inotify_rm_watch"
+  = "bilk_inotify_rm_watch"
 external inotify_read : Unix.file_descr -> (int * int64 * string) list
-  = "wile_inotify_read"
+  = "bilk_inotify_read"
 
-external in_modify : unit -> int64 = "wile_in_modify"
-external in_create : unit -> int64 = "wile_in_create"
-external in_delete : unit -> int64 = "wile_in_delete"
-external in_moved_to : unit -> int64 = "wile_in_moved_to"
-external in_moved_from : unit -> int64 = "wile_in_moved_from"
-external in_isdir : unit -> int64 = "wile_in_isdir"
+external in_modify : unit -> int64 = "bilk_in_modify"
+external in_create : unit -> int64 = "bilk_in_create"
+external in_delete : unit -> int64 = "bilk_in_delete"
+external in_moved_to : unit -> int64 = "bilk_in_moved_to"
+external in_moved_from : unit -> int64 = "bilk_in_moved_from"
+external in_isdir : unit -> int64 = "bilk_in_isdir"
 
 (* Cache mask constants at module init to avoid repeated allocation *)
 let mask_modify = in_modify ()

@@ -1,6 +1,6 @@
 (lang dune 3.6)
 
-(name wile)
+(name bilk)
 
 (generate_opam_files true)
 
@@ -16,7 +16,7 @@
 (documentation https://url/to/documentation)
 
 (package
- (name wile)
+ (name bilk)
  (synopsis "A short synopsis")
  (description "A longer description")
  (depends

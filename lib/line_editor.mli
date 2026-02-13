@@ -29,7 +29,7 @@ type completion_result =
 (** Editor configuration. *)
 type config = {
   prompt : string;
-  (** Primary prompt string (e.g. ["wile> "]). *)
+  (** Primary prompt string (e.g. ["bilk> "]). *)
 
   continuation_prompt : string;
   (** Continuation prompt for incomplete input (e.g. ["  ... "]). *)

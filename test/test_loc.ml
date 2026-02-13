@@ -1,4 +1,4 @@
-open Wile
+open Bilk
 
 let loc_testable =
   Alcotest.testable Loc.pp Loc.equal

@@ -51,7 +51,7 @@ let make_diagnostic line col end_col message =
       ("end", `Assoc [("line", `Int line); ("character", `Int end_col)]);
     ]);
     ("severity", `Int 1);
-    ("source", `String "wile");
+    ("source", `String "bilk");
     ("message", `String message);
   ]
 
@@ -334,7 +334,7 @@ let capabilities_json =
             `String "definition"; `String "readonly"])]);
         ("full", `Bool true)])]);
     ("serverInfo", `Assoc [
-      ("name", `String "wile");
+      ("name", `String "bilk");
       ("version", `String "0.1.0")])]
 
 (* --- Session loop --- *)

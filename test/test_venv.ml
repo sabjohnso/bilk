@@ -1,9 +1,9 @@
-open Wile
+open Bilk
 
 (* --- Helpers --- *)
 
 let with_tmpdir f =
-  let dir = Filename.temp_dir "wile_venv_test_" "" in
+  let dir = Filename.temp_dir "bilk_venv_test_" "" in
   Fun.protect ~finally:(fun () ->
     (* Clean up recursively *)
     let rec rm path =
@@ -23,40 +23,40 @@ let with_tmpdir f =
 let test_create_new_dir () =
   with_tmpdir (fun parent ->
     let dir = Filename.concat parent "myvenv" in
-    Venv.create ~wile_version:"0.1.0" dir;
+    Venv.create ~bilk_version:"0.1.0" dir;
     Alcotest.(check bool) "dir exists" true (Sys.file_exists dir);
     Alcotest.(check bool) "lib exists" true
       (Sys.file_exists (Filename.concat dir "lib"));
     Alcotest.(check bool) "cfg exists" true
-      (Sys.file_exists (Filename.concat dir "wile-venv.cfg")))
+      (Sys.file_exists (Filename.concat dir "bilk-venv.cfg")))
 
 let test_create_existing_empty_dir () =
   with_tmpdir (fun dir ->
     (* dir already exists but is empty — should succeed *)
-    Venv.create ~wile_version:"0.1.0" dir;
+    Venv.create ~bilk_version:"0.1.0" dir;
     Alcotest.(check bool) "cfg exists" true
-      (Sys.file_exists (Filename.concat dir "wile-venv.cfg")))
+      (Sys.file_exists (Filename.concat dir "bilk-venv.cfg")))
 
 let test_create_already_venv () =
   with_tmpdir (fun dir ->
-    Venv.create ~wile_version:"0.1.0" dir;
+    Venv.create ~bilk_version:"0.1.0" dir;
     Alcotest.check_raises "already a venv"
       (Venv.Venv_error (Printf.sprintf
         "directory already contains a virtual environment: %s" dir))
-      (fun () -> Venv.create ~wile_version:"0.1.0" dir))
+      (fun () -> Venv.create ~bilk_version:"0.1.0" dir))
 
 let test_create_nested () =
   with_tmpdir (fun parent ->
     let dir = Filename.concat parent "a/b/c" in
-    Venv.create ~wile_version:"1.0.0" dir;
+    Venv.create ~bilk_version:"1.0.0" dir;
     Alcotest.(check bool) "cfg exists" true
-      (Sys.file_exists (Filename.concat dir "wile-venv.cfg")))
+      (Sys.file_exists (Filename.concat dir "bilk-venv.cfg")))
 
 (* --- is_venv tests --- *)
 
 let test_is_venv_true () =
   with_tmpdir (fun dir ->
-    Venv.create ~wile_version:"0.1.0" dir;
+    Venv.create ~bilk_version:"0.1.0" dir;
     Alcotest.(check bool) "is venv" true (Venv.is_venv dir))
 
 let test_is_venv_false_empty () =
@@ -71,9 +71,9 @@ let test_is_venv_false_nonexistent () =
 
 let test_read_config () =
   with_tmpdir (fun dir ->
-    Venv.create ~wile_version:"0.1.0" dir;
+    Venv.create ~bilk_version:"0.1.0" dir;
     let cfg = Venv.read_config dir in
-    Alcotest.(check string) "version" "0.1.0" cfg.wile_version;
+    Alcotest.(check string) "version" "0.1.0" cfg.bilk_version;
     (* created is a timestamp — just check it's not empty *)
     Alcotest.(check bool) "created non-empty" true
       (String.length cfg.created > 0))
@@ -82,18 +82,18 @@ let test_read_config_missing () =
   with_tmpdir (fun dir ->
     Alcotest.check_raises "missing cfg"
       (Venv.Venv_error (Printf.sprintf
-        "not a virtual environment (missing wile-venv.cfg): %s" dir))
+        "not a virtual environment (missing bilk-venv.cfg): %s" dir))
       (fun () -> ignore (Venv.read_config dir)))
 
 let test_read_config_malformed () =
   with_tmpdir (fun dir ->
-    let cfg_path = Filename.concat dir "wile-venv.cfg" in
+    let cfg_path = Filename.concat dir "bilk-venv.cfg" in
     let oc = open_out cfg_path in
     output_string oc "garbage\n";
     close_out oc;
     Alcotest.check_raises "malformed cfg"
       (Venv.Venv_error (Printf.sprintf
-        "malformed wile-venv.cfg: missing wile-version in %s" dir))
+        "malformed bilk-venv.cfg: missing bilk-version in %s" dir))
       (fun () -> ignore (Venv.read_config dir)))
 
 (* --- lib_path tests --- *)

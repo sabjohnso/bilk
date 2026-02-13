@@ -5,7 +5,7 @@ let errorf fmt = Printf.ksprintf error fmt
 
 let default_registry_root () =
   match Sys.getenv_opt "HOME" with
-  | Some home -> Filename.concat (Filename.concat home ".wile") "packages"
+  | Some home -> Filename.concat (Filename.concat home ".bilk") "packages"
   | None -> error "HOME environment variable not set"
 
 let local_registry_root project_dir =
@@ -134,7 +134,7 @@ let install ~registry_root ~src_dir:source_dir =
   let parent = Filename.dirname dest in
   mkdir_p parent;
   let tmp = Filename.temp_dir
-    (Printf.sprintf "wile_install_%s_" pkg.name) "" in
+    (Printf.sprintf "bilk_install_%s_" pkg.name) "" in
   Fun.protect ~finally:(fun () ->
     if Sys.file_exists tmp then (try rm_rf tmp with _ -> ()))
     (fun () ->

@@ -1,4 +1,4 @@
-(** Native extension loading for Wile.
+(** Native extension loading for Bilk.
 
     Extensions are shared libraries (.cmxs for OCaml, .so for C) that
     register Scheme primitives when loaded.  They integrate with the
@@ -42,37 +42,37 @@ val load_native : Instance.t -> search_dirs:string list
 
     Search order:
     + Static registry (already linked)
-    + [wile_<name>.cmxs] in [sld_dir] (if given), then [search_dirs]
-    + [wile_<name>.so] in [sld_dir] (if given), then [search_dirs]
+    + [bilk_<name>.cmxs] in [sld_dir] (if given), then [search_dirs]
+    + [bilk_<name>.so] in [sld_dir] (if given), then [search_dirs]
 
     For [.cmxs] files, the module is loaded via [Dynlink].  Its init code
     is expected to call {!register_static}, after which {!init_static} is
     called.
 
     For [.so] files, the shared library is loaded via [dlopen] and its
-    [wile_ext_init] entry point is called with a temporary instance handle.
+    [bilk_ext_init] entry point is called with a temporary instance handle.
 
     @raise Extension_error if the extension is not found or fails to load. *)
 
 val load_c : Instance.t -> string -> unit
 (** [load_c inst path] loads a C extension [.so] file at [path].
 
-    Opens the shared library with [dlopen], finds the [wile_ext_init]
+    Opens the shared library with [dlopen], finds the [bilk_ext_init]
     symbol, and calls it with a temporary instance handle.  The C init
-    function registers primitives via the C API ([wile_define_primitive]).
+    function registers primitives via the C API ([bilk_define_primitive]).
 
     @raise Extension_error if the file cannot be loaded or the entry
     point is missing. *)
 
 (** {1 C handle bridge}
 
-    Forward references that {!Wile_c_api} fills in at module-init time
+    Forward references that {!Bilk_c_api} fills in at module-init time
     to break the dependency cycle
     [Extension -> Instance -> Extension (OK)] vs
-    [Extension -> Wile_c_api -> Instance -> Extension (cycle)]. *)
+    [Extension -> Bilk_c_api -> Instance -> Extension (cycle)]. *)
 
 val c_temporary_handle_ref : (Instance.t -> int) ref
-(** Set by {!Wile_c_api} to {!Wile_c_api.temporary_handle}. *)
+(** Set by {!Bilk_c_api} to {!Bilk_c_api.temporary_handle}. *)
 
 val c_release_handle_ref : (int -> unit) ref
-(** Set by {!Wile_c_api} to {!Wile_c_api.release_handle}. *)
+(** Set by {!Bilk_c_api} to {!Bilk_c_api.release_handle}. *)

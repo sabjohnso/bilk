@@ -1,4 +1,4 @@
-open Wile
+open Bilk
 
 (* --- Step 1: Scaffold + Binary Helpers --- *)
 
@@ -261,7 +261,7 @@ let test_code_end_to_end () =
 (* --- Step 6: File I/O + Header Validation --- *)
 
 let with_temp_file suffix fn =
-  let path = Filename.temp_file "wile_fasl_test" suffix in
+  let path = Filename.temp_file "bilk_fasl_test" suffix in
   Fun.protect ~finally:(fun () -> try Sys.remove path with _ -> ()) (fun () -> fn path)
 
 let test_file_roundtrip () =
@@ -464,7 +464,7 @@ let test_cache_fresh () =
 (* --- Step 9: Instance Integration --- *)
 
 let with_temp_dir fn =
-  let dir = Filename.temp_dir "wile_fasl_test" "" in
+  let dir = Filename.temp_dir "bilk_fasl_test" "" in
   Fun.protect ~finally:(fun () ->
     (* Recursively clean up *)
     let rec rm path =

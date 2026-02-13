@@ -1,6 +1,6 @@
-# Wile
+# Bilk
 
-Wile is an R7RS Scheme implementation written in OCaml. It compiles Scheme
+Bilk is an R7RS Scheme implementation written in OCaml. It compiles Scheme
 source to bytecode and executes it on a stack-based virtual machine (SBCL-style:
 every `eval` compiles to bytecode, then executes — there is no interpreter
 mode).
@@ -31,11 +31,11 @@ mode).
   `include-shared` in `define-library`
 - **Package management** — local package manager with semantic versioning and
   dependency resolution
-- **Virtual environments** — Python-inspired `WILE_VENV`/`WILE_PATH` for
+- **Virtual environments** — Python-inspired `BILK_VENV`/`BILK_PATH` for
   isolated library search paths
 - **Developer tooling** — Language Server Protocol (LSP) server, Debug Adapter
   Protocol (DAP) server, runtime profiler with flame graph output
-- **Shebang support** — use `#!/usr/bin/env wile` for executable scripts
+- **Shebang support** — use `#!/usr/bin/env bilk` for executable scripts
 
 ## Building from Source
 
@@ -52,8 +52,8 @@ mode).
 Clone the repository and create a local opam switch:
 
 ```sh
-git clone https://github.com/wile-scheme/wile.git
-cd wile
+git clone https://github.com/bilk-scheme/bilk.git
+cd bilk
 opam switch create . ocaml-variants.5.3.0+BER
 eval $(opam env)
 ```
@@ -82,7 +82,7 @@ codebase.
 
 ### Install
 
-To install the `wile` binary and library into the current opam switch:
+To install the `bilk` binary and library into the current opam switch:
 
 ```sh
 dune install
@@ -93,7 +93,7 @@ dune install
 ### Interactive REPL
 
 ```sh
-wile
+bilk
 ```
 
 The REPL supports syntax highlighting, rainbow parentheses, paredit structural
@@ -103,19 +103,19 @@ for available REPL commands.
 ### Run a file
 
 ```sh
-wile hello.scm
+bilk hello.scm
 ```
 
 ### Evaluate an expression
 
 ```sh
-wile -e '(display (+ 1 2))'
+bilk -e '(display (+ 1 2))'
 ```
 
 ### Script with arguments
 
 ```scheme
-#!/usr/bin/env wile
+#!/usr/bin/env bilk
 (import (scheme base) (scheme write) (scheme process-context))
 (for-each (lambda (arg) (display arg) (newline))
           (command-line))
@@ -129,14 +129,14 @@ chmod +x script.scm
 ### Compile to bytecode
 
 ```sh
-wile compile program.scm -o program.fasl
-wile run program.fasl
+bilk compile program.scm -o program.fasl
+bilk run program.fasl
 ```
 
 ### Compile to native executable
 
 ```sh
-wile compile program.scm --exe -o program
+bilk compile program.scm --exe -o program
 ./program
 ```
 
@@ -144,48 +144,48 @@ wile compile program.scm --exe -o program
 
 | Command         | Description                                |
 |-----------------|--------------------------------------------|
-| `wile`          | Start the interactive REPL                 |
-| `wile FILE`     | Execute a Scheme source file               |
-| `wile -e EXPR`  | Evaluate an expression and print result    |
-| `wile compile`  | Ahead-of-time compile to FASL or native    |
-| `wile run`      | Execute a compiled FASL program            |
-| `wile pkg`      | Manage local packages                      |
-| `wile venv`     | Create a virtual environment               |
-| `wile ext`      | Manage native extensions                   |
-| `wile debug`    | Debug a program via DAP                    |
-| `wile lsp`      | Start the LSP server                       |
-| `wile profile`  | Profile a program                          |
+| `bilk`          | Start the interactive REPL                 |
+| `bilk FILE`     | Execute a Scheme source file               |
+| `bilk -e EXPR`  | Evaluate an expression and print result    |
+| `bilk compile`  | Ahead-of-time compile to FASL or native    |
+| `bilk run`      | Execute a compiled FASL program            |
+| `bilk pkg`      | Manage local packages                      |
+| `bilk venv`     | Create a virtual environment               |
+| `bilk ext`      | Manage native extensions                   |
+| `bilk debug`    | Debug a program via DAP                    |
+| `bilk lsp`      | Start the LSP server                       |
+| `bilk profile`  | Profile a program                          |
 
 ## Environment Variables
 
 | Variable      | Description                                              |
 |---------------|----------------------------------------------------------|
-| `WILE_VENV`   | Path to active virtual environment                       |
-| `WILE_PATH`   | Colon-separated additional library search directories    |
-| `WILE_HOME`   | Override for Wile home directory (default: `~/.wile/`)   |
-| `WILE_THEME`  | Color theme: `dark`, `light`, `none`, or a file path     |
-| `WILE_STDLIB` | Override for built-in stdlib directory                    |
+| `BILK_VENV`   | Path to active virtual environment                       |
+| `BILK_PATH`   | Colon-separated additional library search directories    |
+| `BILK_HOME`   | Override for Bilk home directory (default: `~/.bilk/`)   |
+| `BILK_THEME`  | Color theme: `dark`, `light`, `none`, or a file path     |
+| `BILK_STDLIB` | Override for built-in stdlib directory                    |
 
 ## Embedding
 
 ### OCaml
 
 ```ocaml
-let inst = Wile.Instance.create () in
-let result = Wile.Instance.eval_string inst "(+ 1 2)" in
-Printf.printf "%s\n" (Wile.Datum.to_string result)
+let inst = Bilk.Instance.create () in
+let result = Bilk.Instance.eval_string inst "(+ 1 2)" in
+Printf.printf "%s\n" (Bilk.Datum.to_string result)
 ```
 
 ### C
 
 ```c
-#include "wile.h"
+#include "bilk.h"
 
 int main(void) {
-    wile_inst_t inst = wile_create();
-    wile_val_t result = wile_eval_string(inst, "(+ 1 2)");
-    printf("%s\n", wile_to_string(inst, result));
-    wile_destroy(inst);
+    bilk_inst_t inst = bilk_create();
+    bilk_val_t result = bilk_eval_string(inst, "(+ 1 2)");
+    printf("%s\n", bilk_to_string(inst, result));
+    bilk_destroy(inst);
     return 0;
 }
 ```

@@ -1,13 +1,13 @@
 (library
- (name wile)
- (public_name wile)
+ (name bilk)
+ (public_name bilk)
  (libraries unix dynlink yojson zarith)
- (foreign_stubs (language c) (names wile_stubs ext_stubs inotify_stubs))
+ (foreign_stubs (language c) (names bilk_stubs ext_stubs inotify_stubs))
  (c_library_flags (-ldl))
- (install_c_headers wile))
+ (install_c_headers bilk))
 
 (rule
- (targets wile_config.ml)
+ (targets bilk_config.ml)
  (deps (env_var PWD))
  (action
   (bash "echo 'let stdlib_source_dir = \"'$(cd %{project_root} && pwd)'/stdlib\"' > %{targets}")))

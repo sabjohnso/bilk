@@ -1,9 +1,9 @@
-open Wile
+open Bilk
 
 (* --- Helpers --- *)
 
 let with_tmpdir f =
-  let dir = Filename.temp_dir "wile_sp_test_" "" in
+  let dir = Filename.temp_dir "bilk_sp_test_" "" in
   Fun.protect ~finally:(fun () ->
     let rec rm path =
       if Sys.is_directory path then begin
@@ -37,68 +37,68 @@ let with_env vars f =
     ) saved
   ) f
 
-(* --- wile_home tests --- *)
+(* --- bilk_home tests --- *)
 
-let test_wile_home_default () =
-  with_env [("WILE_HOME", None)] (fun () ->
+let test_bilk_home_default () =
+  with_env [("BILK_HOME", None)] (fun () ->
     let home = match Sys.getenv_opt "HOME" with
       | Some h -> h | None -> "."
     in
-    let expected = Filename.concat home ".wile" in
-    Alcotest.(check string) "default" expected (Search_path.wile_home ()))
+    let expected = Filename.concat home ".bilk" in
+    Alcotest.(check string) "default" expected (Search_path.bilk_home ()))
 
-let test_wile_home_override () =
-  with_env [("WILE_HOME", Some "/custom/wile")] (fun () ->
-    Alcotest.(check string) "override" "/custom/wile"
-      (Search_path.wile_home ()))
+let test_bilk_home_override () =
+  with_env [("BILK_HOME", Some "/custom/bilk")] (fun () ->
+    Alcotest.(check string) "override" "/custom/bilk"
+      (Search_path.bilk_home ()))
 
 (* --- site_lib tests --- *)
 
 let test_site_lib () =
-  with_env [("WILE_HOME", Some "/custom/wile")] (fun () ->
-    Alcotest.(check string) "site_lib" "/custom/wile/lib"
+  with_env [("BILK_HOME", Some "/custom/bilk")] (fun () ->
+    Alcotest.(check string) "site_lib" "/custom/bilk/lib"
       (Search_path.site_lib ()))
 
 (* --- env_paths tests --- *)
 
 let test_env_paths_unset () =
-  with_env [("WILE_PATH", None)] (fun () ->
+  with_env [("BILK_PATH", None)] (fun () ->
     Alcotest.(check (list string)) "unset" [] (Search_path.env_paths ()))
 
 let test_env_paths_single () =
-  with_env [("WILE_PATH", Some "/foo/bar")] (fun () ->
+  with_env [("BILK_PATH", Some "/foo/bar")] (fun () ->
     Alcotest.(check (list string)) "single" ["/foo/bar"]
       (Search_path.env_paths ()))
 
 let test_env_paths_multiple () =
-  with_env [("WILE_PATH", Some "/a:/b:/c")] (fun () ->
+  with_env [("BILK_PATH", Some "/a:/b:/c")] (fun () ->
     Alcotest.(check (list string)) "multiple" ["/a"; "/b"; "/c"]
       (Search_path.env_paths ()))
 
 let test_env_paths_filter_empty () =
-  with_env [("WILE_PATH", Some "/a::/b:")] (fun () ->
+  with_env [("BILK_PATH", Some "/a::/b:")] (fun () ->
     Alcotest.(check (list string)) "filter empty" ["/a"; "/b"]
       (Search_path.env_paths ()))
 
 (* --- venv_lib_path tests --- *)
 
 let test_venv_lib_path_unset () =
-  with_env [("WILE_VENV", None)] (fun () ->
+  with_env [("BILK_VENV", None)] (fun () ->
     Alcotest.(check (option string)) "unset" None
       (Search_path.venv_lib_path ()))
 
 let test_venv_lib_path_valid () =
   with_tmpdir (fun dir ->
-    Venv.create ~wile_version:"0.1.0" dir;
-    with_env [("WILE_VENV", Some dir)] (fun () ->
+    Venv.create ~bilk_version:"0.1.0" dir;
+    with_env [("BILK_VENV", Some dir)] (fun () ->
       Alcotest.(check (option string)) "valid"
         (Some (Filename.concat dir "lib"))
         (Search_path.venv_lib_path ())))
 
 let test_venv_lib_path_invalid () =
   with_tmpdir (fun dir ->
-    (* dir exists but has no wile-venv.cfg *)
-    with_env [("WILE_VENV", Some dir)] (fun () ->
+    (* dir exists but has no bilk-venv.cfg *)
+    with_env [("BILK_VENV", Some dir)] (fun () ->
       Alcotest.(check (option string)) "invalid" None
         (Search_path.venv_lib_path ())))
 
@@ -106,9 +106,9 @@ let test_venv_lib_path_invalid () =
 
 let test_resolve_base_only () =
   with_tmpdir (fun dir ->
-    with_env [("WILE_VENV", None); ("WILE_PATH", None);
-              ("WILE_HOME", Some (Filename.concat dir "home"));
-              ("WILE_STDLIB", Some "/nonexistent/stdlib")] (fun () ->
+    with_env [("BILK_VENV", None); ("BILK_PATH", None);
+              ("BILK_HOME", Some (Filename.concat dir "home"));
+              ("BILK_STDLIB", Some "/nonexistent/stdlib")] (fun () ->
       (* Only base_dirs that exist should appear *)
       let sub = Filename.concat dir "exists" in
       Sys.mkdir sub 0o755;
@@ -120,17 +120,17 @@ let test_resolve_order () =
     let base = Filename.concat dir "base" in
     Sys.mkdir base 0o755;
     let venv_dir = Filename.concat dir "venv" in
-    Venv.create ~wile_version:"0.1.0" venv_dir;
+    Venv.create ~bilk_version:"0.1.0" venv_dir;
     let wpath = Filename.concat dir "wpath" in
     Sys.mkdir wpath 0o755;
     let home_dir = Filename.concat dir "home" in
     Sys.mkdir home_dir 0o755;
     let home_lib = Filename.concat home_dir "lib" in
     Sys.mkdir home_lib 0o755;
-    with_env [("WILE_VENV", Some venv_dir);
-              ("WILE_PATH", Some wpath);
-              ("WILE_HOME", Some home_dir);
-              ("WILE_STDLIB", Some "/nonexistent/stdlib")] (fun () ->
+    with_env [("BILK_VENV", Some venv_dir);
+              ("BILK_PATH", Some wpath);
+              ("BILK_HOME", Some home_dir);
+              ("BILK_STDLIB", Some "/nonexistent/stdlib")] (fun () ->
       let result = Search_path.resolve ~base_dirs:[base] in
       let expected = [
         base;
@@ -142,10 +142,10 @@ let test_resolve_order () =
 
 let test_resolve_filters_nonexistent () =
   with_tmpdir (fun dir ->
-    with_env [("WILE_VENV", None);
-              ("WILE_PATH", Some "/nonexistent/wile/path");
-              ("WILE_HOME", Some (Filename.concat dir "home"));
-              ("WILE_STDLIB", Some "/nonexistent/stdlib")] (fun () ->
+    with_env [("BILK_VENV", None);
+              ("BILK_PATH", Some "/nonexistent/bilk/path");
+              ("BILK_HOME", Some (Filename.concat dir "home"));
+              ("BILK_STDLIB", Some "/nonexistent/stdlib")] (fun () ->
       let result = Search_path.resolve ~base_dirs:["/nonexistent/base"] in
       Alcotest.(check (list string)) "all filtered" [] result))
 
@@ -153,9 +153,9 @@ let test_resolve_filters_nonexistent () =
 
 let () =
   Alcotest.run "Search_path" [
-    "wile_home", [
-      Alcotest.test_case "default" `Quick test_wile_home_default;
-      Alcotest.test_case "override" `Quick test_wile_home_override;
+    "bilk_home", [
+      Alcotest.test_case "default" `Quick test_bilk_home_default;
+      Alcotest.test_case "override" `Quick test_bilk_home_override;
     ];
     "site_lib", [
       Alcotest.test_case "path" `Quick test_site_lib;

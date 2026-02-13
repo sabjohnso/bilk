@@ -1,4 +1,4 @@
-(* embedding_basics.ml — Basic Wile embedding demo.
+(* embedding_basics.ml — Basic Bilk embedding demo.
 
    Demonstrates:
    - Instance.create      — create a Scheme instance
@@ -9,7 +9,7 @@
    - Datum helpers        — is_true, to_list, list_of, to_string
 *)
 
-open Wile
+open Bilk
 
 let () =
   (* 1. Create a fresh Scheme instance *)

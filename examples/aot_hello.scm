@@ -1,11 +1,11 @@
 ;; aot_hello.scm — A small program for ahead-of-time compilation.
 ;;
 ;; Compile and run:
-;;   wile compile examples/aot_hello.scm -o hello.fasl
-;;   wile run hello.fasl
+;;   bilk compile examples/aot_hello.scm -o hello.fasl
+;;   bilk run hello.fasl
 ;;
 ;; Or compile to a native executable (requires: opam install .):
-;;   wile compile --exe examples/aot_hello.scm -o hello
+;;   bilk compile --exe examples/aot_hello.scm -o hello
 ;;   ./hello
 
 (define (fizzbuzz n)

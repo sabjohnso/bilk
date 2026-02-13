@@ -1,8 +1,8 @@
 (** Lockfile for reproducible installs.
 
     Records exact versions and content hashes for all resolved
-    dependencies.  Written to [wile.lock] next to [package.scm]
-    by [wile pkg lock], consumed by [wile pkg install].
+    dependencies.  Written to [bilk.lock] next to [package.scm]
+    by [bilk pkg lock], consumed by [bilk pkg install].
 
     {b Format:}
     {v
@@ -40,7 +40,7 @@ type mismatch =
 (** {1 Path} *)
 
 val lockfile_path : string -> string
-(** [lockfile_path project_dir] returns [project_dir/wile.lock]. *)
+(** [lockfile_path project_dir] returns [project_dir/bilk.lock]. *)
 
 (** {1 Parsing and writing} *)
 

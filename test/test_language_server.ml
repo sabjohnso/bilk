@@ -1,4 +1,4 @@
-open Wile
+open Bilk
 
 (* Helper: send a JSON-RPC message via Content-Length framing *)
 let send_msg oc json =

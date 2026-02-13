@@ -1,4 +1,4 @@
-open Wile
+open Bilk
 
 (* --- Alcotest unit tests --- *)
 

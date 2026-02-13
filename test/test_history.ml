@@ -1,4 +1,4 @@
-open Wile
+open Bilk
 
 let list_eq = Alcotest.(check (list string))
 
@@ -158,7 +158,7 @@ let test_next_matching_without_prev () =
 (* --- File I/O --- *)
 
 let test_save_load_roundtrip () =
-  let tmp = Filename.temp_file "wile_hist_test" ".txt" in
+  let tmp = Filename.temp_file "bilk_hist_test" ".txt" in
   Fun.protect ~finally:(fun () -> Sys.remove tmp) (fun () ->
     let h1 = History.create () in
     History.add h1 "alpha";
@@ -175,7 +175,7 @@ let test_load_nonexistent () =
   Alcotest.(check int) "still empty" 0 (History.length h)
 
 let test_load_respects_max_length () =
-  let tmp = Filename.temp_file "wile_hist_test" ".txt" in
+  let tmp = Filename.temp_file "bilk_hist_test" ".txt" in
   Fun.protect ~finally:(fun () -> Sys.remove tmp) (fun () ->
     let h1 = History.create () in
     History.add h1 "one";

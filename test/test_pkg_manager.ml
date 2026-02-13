@@ -1,9 +1,9 @@
-open Wile
+open Bilk
 
 (* --- Helpers --- *)
 
 let with_temp_dir fn =
-  let dir = Filename.temp_dir "wile_pkgmgr_test" "" in
+  let dir = Filename.temp_dir "bilk_pkgmgr_test" "" in
   Fun.protect ~finally:(fun () ->
     let rec rm path =
       if Sys.is_directory path then begin

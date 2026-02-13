@@ -1,8 +1,8 @@
-open Wile
+open Bilk
 
-(* Force Wile_c_api module initialization so that
+(* Force Bilk_c_api module initialization so that
    Extension.c_temporary_handle_ref is set *)
-let () = ignore (Wile_c_api.error_message 0)
+let () = ignore (Bilk_c_api.error_message 0)
 
 (* -- Helpers -- *)
 
@@ -63,7 +63,7 @@ let test_load_native_not_found () =
   let inst = Instance.create () in
   Alcotest.check_raises "not found"
     (Extension.Extension_error
-       "extension not found: no-such-ext (searched for wile_no-such-ext.cmxs and wile_no-such-ext.so)")
+       "extension not found: no-such-ext (searched for bilk_no-such-ext.cmxs and bilk_no-such-ext.so)")
     (fun () ->
       Extension.load_native inst ~search_dirs:[] ~sld_dir:None "no-such-ext")
 
@@ -178,7 +178,7 @@ let test_fasl_lib_native_roundtrip () =
     declarations = [decl];
     syntax_bindings = [];
   } in
-  let tmp = Filename.temp_file "wile_test_ext_" ".fasl" in
+  let tmp = Filename.temp_file "bilk_test_ext_" ".fasl" in
   Fun.protect ~finally:(fun () -> Sys.remove tmp)
     (fun () ->
       Fasl.write_lib_fasl tmp fasl;
@@ -195,7 +195,7 @@ let test_fasl_program_native_roundtrip () =
   let prog : Fasl.program_fasl = {
     declarations = [Fasl.Lib_native "my-ext"];
   } in
-  let tmp = Filename.temp_file "wile_test_prog_" ".fasl" in
+  let tmp = Filename.temp_file "bilk_test_prog_" ".fasl" in
   Fun.protect ~finally:(fun () -> Sys.remove tmp)
     (fun () ->
       Fasl.write_program_fasl tmp prog;
@@ -217,7 +217,7 @@ let test_fasl_lib_native_replay () =
     declarations = [Fasl.Lib_native "test-replay-ext"];
     syntax_bindings = [];
   } in
-  let tmp = Filename.temp_file "wile_test_replay_" ".fasl" in
+  let tmp = Filename.temp_file "bilk_test_replay_" ".fasl" in
   Fun.protect ~finally:(fun () -> Sys.remove tmp)
     (fun () ->
       Fasl.write_lib_fasl tmp fasl;
@@ -251,21 +251,21 @@ let test_c_ext_dlopen_nonexistent () =
 
 let test_c_ext_compile_and_load () =
   (* Compile a minimal C extension and load it *)
-  let tmpdir = Filename.temp_dir "wile_cext_" "" in
+  let tmpdir = Filename.temp_dir "bilk_cext_" "" in
   Fun.protect ~finally:(fun () ->
     (try Sys.remove (Filename.concat tmpdir "test_cext.c") with _ -> ());
-    (try Sys.remove (Filename.concat tmpdir "wile_test_cext.so") with _ -> ());
+    (try Sys.remove (Filename.concat tmpdir "bilk_test_cext.so") with _ -> ());
     (try Sys.rmdir tmpdir with _ -> ()))
     (fun () ->
       let c_src = Filename.concat tmpdir "test_cext.c" in
-      let so_path = Filename.concat tmpdir "wile_test_cext.so" in
+      let so_path = Filename.concat tmpdir "bilk_test_cext.so" in
       let oc = open_out c_src in
       Printf.fprintf oc
         "#include <stdint.h>\n\
          /* Minimal C extension that calls back to register a primitive */\n\
          /* We just define the entry point; it will be called with a handle */\n\
-         void wile_ext_init(int32_t inst) {\n\
-           /* In a real extension, this would call wile_define_primitive */\n\
+         void bilk_ext_init(int32_t inst) {\n\
+           /* In a real extension, this would call bilk_define_primitive */\n\
            /* For this test, we just need it to not crash */\n\
            (void)inst;\n\
          }\n";
@@ -285,18 +285,18 @@ let test_c_ext_compile_and_load () =
 
 let test_load_native_so_fallback () =
   (* Create a .so file in a temp dir and verify load_native finds it *)
-  let tmpdir = Filename.temp_dir "wile_sofb_" "" in
+  let tmpdir = Filename.temp_dir "bilk_sofb_" "" in
   Fun.protect ~finally:(fun () ->
     (try Sys.remove (Filename.concat tmpdir "test_fb.c") with _ -> ());
-    (try Sys.remove (Filename.concat tmpdir "wile_test-fb.so") with _ -> ());
+    (try Sys.remove (Filename.concat tmpdir "bilk_test-fb.so") with _ -> ());
     (try Sys.rmdir tmpdir with _ -> ()))
     (fun () ->
       let c_src = Filename.concat tmpdir "test_fb.c" in
-      let so_path = Filename.concat tmpdir "wile_test-fb.so" in
+      let so_path = Filename.concat tmpdir "bilk_test-fb.so" in
       let oc = open_out c_src in
       Printf.fprintf oc
         "#include <stdint.h>\n\
-         void wile_ext_init(int32_t inst) { (void)inst; }\n";
+         void bilk_ext_init(int32_t inst) { (void)inst; }\n";
       close_out oc;
       let cmd = Printf.sprintf
         "cc -shared -fPIC -o %s %s 2>&1"
@@ -317,13 +317,13 @@ let test_load_native_so_fallback () =
    via bin/main.ml helpers — no subprocess needed *)
 
 let test_scaffold_ocaml () =
-  let tmpdir = Filename.temp_dir "wile_ext_scaffold_" "" in
+  let tmpdir = Filename.temp_dir "bilk_ext_scaffold_" "" in
   Fun.protect ~finally:(fun () ->
     let cmd = Printf.sprintf "rm -rf %s" (Filename.quote tmpdir) in
     ignore (Sys.command cmd))
     (fun () ->
       (* Directly generate the scaffold structure *)
-      let project_dir = Filename.concat tmpdir "wile-mytest" in
+      let project_dir = Filename.concat tmpdir "bilk-mytest" in
       let ensure_dir path =
         if not (Sys.file_exists path) then Sys.mkdir path 0o755 in
       ensure_dir project_dir;
@@ -336,17 +336,17 @@ let test_scaffold_ocaml () =
         close_out oc
       in
       write_file (Filename.concat project_dir "dune-project")
-        "(lang dune 3.0)\n(name wile_mytest)\n";
+        "(lang dune 3.0)\n(name bilk_mytest)\n";
       write_file (Filename.concat project_dir "lib/dune")
-        "(library\n (name wile_mytest)\n (public_name wile_mytest)\n (libraries wile))\n";
-      write_file (Filename.concat project_dir "lib/wile_mytest.ml")
+        "(library\n (name bilk_mytest)\n (public_name bilk_mytest)\n (libraries bilk))\n";
+      write_file (Filename.concat project_dir "lib/bilk_mytest.ml")
         "let init inst =\n\
-        \  Wile.Instance.define_primitive inst \"mytest-hello\" (fun _args ->\n\
-        \    Wile.Datum.Str (Bytes.of_string \"hello from mytest!\"))\n\
+        \  Bilk.Instance.define_primitive inst \"mytest-hello\" (fun _args ->\n\
+        \    Bilk.Datum.Str (Bytes.of_string \"hello from mytest!\"))\n\
         \n\
-        let () = Wile.Extension.register_static \"mytest\" init\n";
-      write_file (Filename.concat project_dir "lib/wile_mytest.mli")
-        "(** mytest extension for Wile. *)\n\nval init : Wile.Instance.t -> unit\n";
+        let () = Bilk.Extension.register_static \"mytest\" init\n";
+      write_file (Filename.concat project_dir "lib/bilk_mytest.mli")
+        "(** mytest extension for Bilk. *)\n\nval init : Bilk.Instance.t -> unit\n";
       write_file (Filename.concat project_dir "scheme/mytest/core.sld")
         "(define-library (mytest core)\n  (export mytest-hello)\n  (include-shared \"mytest\"))\n";
       Alcotest.(check bool) "project dir" true (Sys.file_exists project_dir);
@@ -354,20 +354,20 @@ let test_scaffold_ocaml () =
         (Sys.file_exists (Filename.concat project_dir "dune-project"));
       Alcotest.(check bool) "lib/dune" true
         (Sys.file_exists (Filename.concat project_dir "lib/dune"));
-      Alcotest.(check bool) "lib/wile_mytest.ml" true
-        (Sys.file_exists (Filename.concat project_dir "lib/wile_mytest.ml"));
-      Alcotest.(check bool) "lib/wile_mytest.mli" true
-        (Sys.file_exists (Filename.concat project_dir "lib/wile_mytest.mli"));
+      Alcotest.(check bool) "lib/bilk_mytest.ml" true
+        (Sys.file_exists (Filename.concat project_dir "lib/bilk_mytest.ml"));
+      Alcotest.(check bool) "lib/bilk_mytest.mli" true
+        (Sys.file_exists (Filename.concat project_dir "lib/bilk_mytest.mli"));
       Alcotest.(check bool) "scheme/mytest/core.sld" true
         (Sys.file_exists (Filename.concat project_dir "scheme/mytest/core.sld")))
 
 let test_scaffold_c () =
-  let tmpdir = Filename.temp_dir "wile_ext_scaffold_c_" "" in
+  let tmpdir = Filename.temp_dir "bilk_ext_scaffold_c_" "" in
   Fun.protect ~finally:(fun () ->
     let cmd = Printf.sprintf "rm -rf %s" (Filename.quote tmpdir) in
     ignore (Sys.command cmd))
     (fun () ->
-      let project_dir = Filename.concat tmpdir "wile-mycext" in
+      let project_dir = Filename.concat tmpdir "bilk-mycext" in
       let ensure_dir path =
         if not (Sys.file_exists path) then Sys.mkdir path 0o755 in
       ensure_dir project_dir;
@@ -380,15 +380,15 @@ let test_scaffold_c () =
         close_out oc
       in
       write_file (Filename.concat project_dir "Makefile") "all:\n\t@echo ok\n";
-      write_file (Filename.concat project_dir "src/wile_mycext.c")
-        "#include \"wile.h\"\nWILE_EXT_INIT { (void)inst; }\n";
+      write_file (Filename.concat project_dir "src/bilk_mycext.c")
+        "#include \"bilk.h\"\nBILK_EXT_INIT { (void)inst; }\n";
       write_file (Filename.concat project_dir "scheme/mycext/core.sld")
         "(define-library (mycext core)\n  (export mycext-hello)\n  (include-shared \"mycext\"))\n";
       Alcotest.(check bool) "project dir" true (Sys.file_exists project_dir);
       Alcotest.(check bool) "Makefile" true
         (Sys.file_exists (Filename.concat project_dir "Makefile"));
-      Alcotest.(check bool) "src/wile_mycext.c" true
-        (Sys.file_exists (Filename.concat project_dir "src/wile_mycext.c"));
+      Alcotest.(check bool) "src/bilk_mycext.c" true
+        (Sys.file_exists (Filename.concat project_dir "src/bilk_mycext.c"));
       Alcotest.(check bool) "scheme/mycext/core.sld" true
         (Sys.file_exists (Filename.concat project_dir "scheme/mycext/core.sld")))
 
@@ -431,7 +431,7 @@ let () =
     "C extension end-to-end", [
       Alcotest.test_case "with define_primitive" `Quick (fun () ->
         (* Test that a C ext init function that calls back via
-           wile_define_primitive actually works.
+           bilk_define_primitive actually works.
            We simulate this by registering a static extension
            that acts like a C init function would. *)
         Extension.register_static "test-c-e2e" (fun inst ->

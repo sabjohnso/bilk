@@ -1,9 +1,9 @@
-open Wile
+open Bilk
 
 (* --- Helpers --- *)
 
 let with_temp_dir fn =
-  let dir = Filename.temp_dir "wile_lockfile_test" "" in
+  let dir = Filename.temp_dir "bilk_lockfile_test" "" in
   Fun.protect ~finally:(fun () ->
     let rec rm path =
       if Sys.is_directory path then begin
@@ -74,11 +74,11 @@ let mismatch_testable : Lockfile.mismatch Alcotest.testable =
 
 let test_lockfile_path () =
   let p = Lockfile.lockfile_path "/some/project" in
-  Alcotest.(check string) "path" "/some/project/wile.lock" p
+  Alcotest.(check string) "path" "/some/project/bilk.lock" p
 
 let test_write_parse_roundtrip_one () =
   with_temp_dir (fun dir ->
-    let path = Filename.concat dir "wile.lock" in
+    let path = Filename.concat dir "bilk.lock" in
     let lock : Lockfile.t = {
       created = "2026-01-15T10:30:00Z";
       packages = [
@@ -93,7 +93,7 @@ let test_write_parse_roundtrip_one () =
 
 let test_write_parse_roundtrip_multi () =
   with_temp_dir (fun dir ->
-    let path = Filename.concat dir "wile.lock" in
+    let path = Filename.concat dir "bilk.lock" in
     let lock : Lockfile.t = {
       created = "2026-02-12T12:00:00Z";
       packages = [
@@ -109,7 +109,7 @@ let test_write_parse_roundtrip_multi () =
 
 let test_parse_empty_packages () =
   with_temp_dir (fun dir ->
-    let path = Filename.concat dir "wile.lock" in
+    let path = Filename.concat dir "bilk.lock" in
     let lock : Lockfile.t = {
       created = "2026-01-01T00:00:00Z";
       packages = [];
@@ -121,7 +121,7 @@ let test_parse_empty_packages () =
 
 let test_parse_malformed () =
   with_temp_dir (fun dir ->
-    let path = Filename.concat dir "wile.lock" in
+    let path = Filename.concat dir "bilk.lock" in
     write_file path "(not-a-lockfile)";
     Alcotest.check_raises "malformed"
       (Lockfile.Lockfile_error "expected (lock ...)")
@@ -129,7 +129,7 @@ let test_parse_malformed () =
 
 let test_parse_missing_created () =
   with_temp_dir (fun dir ->
-    let path = Filename.concat dir "wile.lock" in
+    let path = Filename.concat dir "bilk.lock" in
     write_file path "(lock (packages))";
     Alcotest.check_raises "missing created"
       (Lockfile.Lockfile_error "missing required field: created")

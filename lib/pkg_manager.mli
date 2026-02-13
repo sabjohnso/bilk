@@ -23,7 +23,7 @@ exception Pkg_error of string
 (** {1 Registry root} *)
 
 val default_registry_root : unit -> string
-(** [default_registry_root ()] returns [~/.wile/packages/]. *)
+(** [default_registry_root ()] returns [~/.bilk/packages/]. *)
 
 val local_registry_root : string -> string
 (** [local_registry_root project_dir] returns [project_dir/_packages]. *)
