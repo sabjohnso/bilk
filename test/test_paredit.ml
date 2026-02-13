@@ -395,6 +395,95 @@ let test_indent_lambda_wildcard () =
   Alcotest.(check int) "lambda-case" 2
     (Paredit.compute_indent rt "(lambda-case" 12)
 
+(* === Re-indentation === *)
+
+let test_indent_line_noop () =
+  (* Single line at row 0 with no leading ws → no change *)
+  let result = Paredit.indent_line rt "(define x 1)" 5 in
+  check_edit "single line no-op" "(define x 1)" 5 result
+
+let test_indent_line_remove_ws_row0 () =
+  (* Row 0 with leading whitespace → removes it *)
+  let result = Paredit.indent_line rt "  (define x)" 5 in
+  check_edit "remove ws row 0" "(define x)" 3 result
+
+let test_indent_line_add_indent () =
+  (* (define x\n1) → second line needs indent 2 *)
+  let result = Paredit.indent_line rt "(define x\n1)" 10 in
+  check_edit "add indent" "(define x\n  1)" 12 result
+
+let test_indent_line_reduce_indent () =
+  (* (define x\n      1) → too much indent, reduce to 2 *)
+  let result = Paredit.indent_line rt "(define x\n      1)" 16 in
+  check_edit "reduce indent" "(define x\n  1)" 12 result
+
+let test_indent_line_cursor_in_ws () =
+  (* Cursor within the whitespace → moves to end of new ws *)
+  let result = Paredit.indent_line rt "(define x\n      1)" 12 in
+  check_edit "cursor in ws" "(define x\n  1)" 12 result
+
+let test_indent_line_correct_already () =
+  (* Second line already has correct indent → no change *)
+  let result = Paredit.indent_line rt "(define x\n  1)" 12 in
+  check_edit "already correct" "(define x\n  1)" 12 result
+
+let test_indent_line_call_align () =
+  (* (foo bar\nbaz) → baz should align with bar at col 5 *)
+  let result = Paredit.indent_line rt "(foo bar\nbaz)" 9 in
+  check_edit "call align" "(foo bar\n     baz)" 14 result
+
+let test_indent_line_nested () =
+  (* (define (foo x)\n(+ x 1)) → second line indent 2 *)
+  let result = Paredit.indent_line rt "(define (foo x)\n(+ x 1))" 16 in
+  check_edit "nested" "(define (foo x)\n  (+ x 1))" 18 result
+
+let test_indent_line_empty () =
+  (* Empty string → no change *)
+  let result = Paredit.indent_line rt "" 0 in
+  check_edit "empty" "" 0 result
+
+let test_indent_all_basic () =
+  (* Re-indent all lines of a define form *)
+  let result = Paredit.indent_all rt "(define (foo x)\n(+ x 1))" 16 in
+  check_edit "indent all" "(define (foo x)\n  (+ x 1))" 18 result
+
+let test_indent_all_multiple () =
+  (* Multi-line with wrong indent everywhere *)
+  let result = Paredit.indent_all rt "(define (foo x)\n    (if (= x 0)\n0\n1))" 0 in
+  check_edit "indent all multi" "(define (foo x)\n  (if (= x 0)\n      0\n      1))" 0 result
+
+let test_indent_all_skips_row0 () =
+  (* Row 0 (prompt line) is left untouched; only continuation lines re-indent *)
+  let result = Paredit.indent_all rt "  (define x\n1)" 0 in
+  check_edit "skips row 0" "  (define x\n    1)" 0 result
+
+let test_indent_all_compose () =
+  (* Full example from description.org: cond clauses align with first clause *)
+  let before =
+    "(define (compose . fs)\n\
+     \  (let ((n (length fs)))\n\
+     \    (cond ((= n 0) identity)\n\
+     \      ((= n 1) (car fs))\n\
+     \      ((= n 2)\n\
+     \       (let ((f (car fs))\n\
+     \             (g (cadr fs)))\n\
+     \         (lambda (x) (f (g x)))))\n\
+     \      (else (compose (car fs) (apply compose (cdr fs)))))))"
+  in
+  let expected =
+    "(define (compose . fs)\n\
+     \  (let ((n (length fs)))\n\
+     \    (cond ((= n 0) identity)\n\
+     \          ((= n 1) (car fs))\n\
+     \          ((= n 2)\n\
+     \           (let ((f (car fs))\n\
+     \                 (g (cadr fs)))\n\
+     \             (lambda (x) (f (g x)))))\n\
+     \          (else (compose (car fs) (apply compose (cdr fs)))))))"
+  in
+  let result = Paredit.indent_all rt before 0 in
+  check_edit "compose example" expected 0 result
+
 let test_indent_no_false_wildcard () =
   (* Words that don't start with def/let/lambda should NOT body-indent *)
   Alcotest.(check int) "debug aligns" 7
@@ -494,5 +583,20 @@ let () =
       Alcotest.test_case "let* wildcard" `Quick test_indent_let_wildcard;
       Alcotest.test_case "lambda* wildcard" `Quick test_indent_lambda_wildcard;
       Alcotest.test_case "no false wildcard" `Quick test_indent_no_false_wildcard;
+    ];
+    "re-indentation", [
+      Alcotest.test_case "indent line no-op" `Quick test_indent_line_noop;
+      Alcotest.test_case "indent line remove ws row 0" `Quick test_indent_line_remove_ws_row0;
+      Alcotest.test_case "indent line add indent" `Quick test_indent_line_add_indent;
+      Alcotest.test_case "indent line reduce indent" `Quick test_indent_line_reduce_indent;
+      Alcotest.test_case "indent line cursor in ws" `Quick test_indent_line_cursor_in_ws;
+      Alcotest.test_case "indent line correct already" `Quick test_indent_line_correct_already;
+      Alcotest.test_case "indent line call align" `Quick test_indent_line_call_align;
+      Alcotest.test_case "indent line nested" `Quick test_indent_line_nested;
+      Alcotest.test_case "indent line empty" `Quick test_indent_line_empty;
+      Alcotest.test_case "indent all basic" `Quick test_indent_all_basic;
+      Alcotest.test_case "indent all multiple" `Quick test_indent_all_multiple;
+      Alcotest.test_case "indent all skips row 0" `Quick test_indent_all_skips_row0;
+      Alcotest.test_case "indent all compose" `Quick test_indent_all_compose;
     ];
   ]

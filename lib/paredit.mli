@@ -94,3 +94,12 @@ val raise_sexp : Readtable.t -> string -> int -> edit_result
     the opening paren; regular calls align with the first argument if one
     appears on the same line as the operator, otherwise indent by 2. *)
 val compute_indent : Readtable.t -> string -> int -> int
+
+(** [indent_line rt text cursor] re-indents the line containing [cursor],
+    adjusting the cursor position. Row 0 always uses indent 0.
+    Other rows use {!compute_indent}. *)
+val indent_line : Readtable.t -> string -> int -> edit_result
+
+(** [indent_all rt text cursor] re-indents all lines in [text] from top
+    to bottom, adjusting the cursor position. *)
+val indent_all : Readtable.t -> string -> int -> edit_result

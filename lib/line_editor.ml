@@ -379,6 +379,42 @@ let set_content st text =
   Buffer.add_string st.content text;
   st.cursor <- String.length text
 
+(* --- Completion helper --- *)
+
+let handle_completion t st =
+  match t.config.complete with
+  | None -> ()
+  | Some complete_fn ->
+    let text = content_string st in
+    let (_rows, cols) = Terminal.get_terminal_size t.term in
+    let width = max 40 cols in
+    begin match complete_fn text st.cursor ~width with
+    | No_completions ->
+      Terminal.write_string t.term "\x07"  (* bell *)
+    | Single (new_text, new_cursor) ->
+      Buffer.clear st.content;
+      Buffer.add_string st.content new_text;
+      st.cursor <- new_cursor;
+      render t st
+    | Multiple (new_text, new_cursor, display) ->
+      Buffer.clear st.content;
+      Buffer.add_string st.content new_text;
+      st.cursor <- new_cursor;
+      (* Show candidates below the input *)
+      let text' = content_string st in
+      let nlines = num_lines text' in
+      let cur_row = cursor_row text' st.cursor in
+      let remaining = nlines - 1 - cur_row in
+      if remaining > 0 then
+        Terminal.write_string t.term (Printf.sprintf "\x1b[%dB" remaining);
+      Terminal.write_string t.term "\r\n";
+      Terminal.write_string t.term display;
+      Terminal.write_string t.term "\r\n";
+      (* Re-render the input *)
+      st.rendered_row <- 0;
+      render t st
+    end
+
 (* --- Main read loop --- *)
 
 let read_input t =
@@ -668,37 +704,22 @@ let read_input t =
       loop ()
 
     | Terminal.Tab ->
-      (match t.config.complete with
-       | None -> ()
-       | Some complete_fn ->
-         let text = content_string st in
-         let (_rows, cols) = Terminal.get_terminal_size t.term in
-         let width = max 40 cols in
-         (match complete_fn text st.cursor ~width with
-          | No_completions ->
-            Terminal.write_string t.term "\x07"  (* bell *)
-          | Single (new_text, new_cursor) ->
-            Buffer.clear st.content;
-            Buffer.add_string st.content new_text;
-            st.cursor <- new_cursor;
-            render t st
-          | Multiple (new_text, new_cursor, display) ->
-            Buffer.clear st.content;
-            Buffer.add_string st.content new_text;
-            st.cursor <- new_cursor;
-            (* Show candidates below the input *)
-            let text' = content_string st in
-            let nlines = num_lines text' in
-            let cur_row = cursor_row text' st.cursor in
-            let remaining = nlines - 1 - cur_row in
-            if remaining > 0 then
-              Terminal.write_string t.term (Printf.sprintf "\x1b[%dB" remaining);
-            Terminal.write_string t.term "\r\n";
-            Terminal.write_string t.term display;
-            Terminal.write_string t.term "\r\n";
-            (* Re-render the input *)
-            st.rendered_row <- 0;
-            render t st));
+      if paredit_active t then begin
+        let text = content_string st in
+        let rt = get_readtable t in
+        apply_paredit_result st (Paredit.indent_line rt text st.cursor);
+        render t st
+      end else
+        handle_completion t st;
+      loop ()
+
+    | Terminal.Shift_tab ->
+      if paredit_active t then begin
+        let text = content_string st in
+        let rt = get_readtable t in
+        apply_paredit_result st (Paredit.indent_all rt text st.cursor);
+        render t st
+      end;
       loop ()
 
     | Terminal.Unknown ->

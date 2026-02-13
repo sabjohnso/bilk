@@ -41,6 +41,7 @@ type key =
   | Alt_r              (** Alt-r — raise (paredit) *)
   | Alt_open_paren     (** Alt-( — wrap round (paredit) *)
   | Alt_9              (** Alt-9 — wrap round (paredit, alternative) *)
+  | Shift_tab          (** Shift-Tab — re-indent all (paredit) *)
   | Unknown            (** Unrecognized sequence *)
 
 (** Opaque terminal state handle. *)

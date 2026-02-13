@@ -32,6 +32,7 @@ type key =
   | Alt_r
   | Alt_open_paren
   | Alt_9
+  | Shift_tab
   | Unknown
 
 type t = {
@@ -110,6 +111,7 @@ let decode_csi seq =
   | "1;3D" -> Alt_left
   | "1;5C" -> Ctrl_right
   | "1;5D" -> Ctrl_left
+  | "Z" -> Shift_tab
   | _ -> Unknown
 
 (* Parse key bytes — pure function for testing *)

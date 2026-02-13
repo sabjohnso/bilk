@@ -118,6 +118,11 @@ let test_alt_paredit_keys () =
   Alcotest.(check bool) "Alt-9" true
     (parse [0x1B; Char.code '9'] = Terminal.Alt_9)
 
+let test_shift_tab () =
+  (* Standard CSI Z (back tab) *)
+  Alcotest.(check bool) "Shift-Tab" true
+    (parse [0x1B; 0x5B; Char.code 'Z'] = Terminal.Shift_tab)
+
 let test_bare_escape () =
   Alcotest.(check bool) "bare ESC" true
     (parse [0x1B] = Terminal.Unknown)
@@ -143,6 +148,7 @@ let () =
       Alcotest.test_case "alt enter" `Quick test_alt_enter;
       Alcotest.test_case "ctrl arrows" `Quick test_ctrl_arrows;
       Alcotest.test_case "alt paredit keys" `Quick test_alt_paredit_keys;
+      Alcotest.test_case "shift tab" `Quick test_shift_tab;
       Alcotest.test_case "bare escape" `Quick test_bare_escape;
       Alcotest.test_case "empty input" `Quick test_empty_input;
     ];

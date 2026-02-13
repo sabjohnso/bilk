@@ -626,3 +626,63 @@ let compute_indent rt text cursor =
           else
             (* Data list (e.g. binding pairs) — align with first element *)
             col_of_pos text head_pos
+
+(* --- Re-indentation --- *)
+
+(* Byte offset of the start of row [row] (0-based) *)
+let row_start_for text row =
+  if row = 0 then 0
+  else
+    let pos = ref 0 in
+    let count = ref 0 in
+    let len = String.length text in
+    while !pos < len && !count < row do
+      if text.[!pos] = '\n' then incr count;
+      incr pos
+    done;
+    !pos
+
+(* Count leading space/tab characters starting at [pos] *)
+let leading_ws_count text pos =
+  let len = String.length text in
+  let p = ref pos in
+  while !p < len && (text.[!p] = ' ' || text.[!p] = '\t') do
+    incr p
+  done;
+  !p - pos
+
+let num_lines_of text =
+  let n = ref 1 in
+  String.iter (fun c -> if c = '\n' then incr n) text;
+  !n
+
+(* Re-indent a single row, adjusting [cursor]. *)
+let indent_row rt text cursor row =
+  let rs = row_start_for text row in
+  let old_ws = leading_ws_count text rs in
+  let desired = if row = 0 then 0 else compute_indent rt text rs in
+  if desired = old_ws then { text; cursor }
+  else
+    let len = String.length text in
+    let before = String.sub text 0 rs in
+    let after = String.sub text (rs + old_ws) (len - rs - old_ws) in
+    let new_text = before ^ String.make desired ' ' ^ after in
+    let delta = desired - old_ws in
+    let new_cursor =
+      if cursor < rs then cursor
+      else if cursor <= rs + old_ws then rs + desired
+      else cursor + delta
+    in
+    { text = new_text; cursor = new_cursor }
+
+let indent_line rt text cursor =
+  let row = row_of_pos text cursor in
+  indent_row rt text cursor row
+
+let indent_all rt text cursor =
+  let nrows = num_lines_of text in
+  let r = ref { text; cursor } in
+  for row = 1 to nrows - 1 do
+    r := indent_row rt !r.text !r.cursor row
+  done;
+  !r
