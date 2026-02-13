@@ -804,8 +804,11 @@ let make_default_cmd () =
             `P "Use $(b,wile pkg) to manage local packages.";
             `P "Use $(b,wile venv) to create a virtual environment.";
             `P "Use $(b,wile ext) to manage native extensions.";
+            `P "Use $(b,wile build) to build libraries from a package.";
+            `P "Use $(b,wile test) to discover and run Scheme test files.";
             `P "Use $(b,wile debug) to debug a Scheme program via DAP.";
             `P "Use $(b,wile lsp) to start the Language Server Protocol server.";
+            `P "Use $(b,wile profile) to profile a Scheme program.";
             `S "ENVIRONMENT";
             `P "$(b,WILE_VENV) — path to active virtual environment \
                 (its $(b,lib/) directory is searched for libraries).";
