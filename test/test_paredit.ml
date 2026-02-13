@@ -308,8 +308,19 @@ let test_indent_begin () =
     (Paredit.compute_indent rt "(begin" 6)
 
 let test_indent_cond () =
+  (* No clauses yet — standard indent *)
   Alcotest.(check int) "cond clause" 2
-    (Paredit.compute_indent rt "(cond" 5)
+    (Paredit.compute_indent rt "(cond" 5);
+  (* First clause on same line — align with it *)
+  Alcotest.(check int) "cond align with first clause" 6
+    (Paredit.compute_indent rt "(cond ((= x 0) 1)" 18);
+  (* First clause on next line — body indent *)
+  Alcotest.(check int) "cond next-line clause" 2
+    (Paredit.compute_indent rt "(cond\n  ((= x 0) 1)" 20);
+  (* Nested: both styles should align clauses consistently *)
+  let text = "(define (foo x)\n  (cond ((= x 0) 1)" in
+  Alcotest.(check int) "nested cond align" 8
+    (Paredit.compute_indent rt text (String.length text))
 
 let test_indent_call_align () =
   (* (foo bar → align with first arg "bar" at col 5 *)

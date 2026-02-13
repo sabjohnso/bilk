@@ -528,7 +528,7 @@ let raise_sexp rt text cursor =
 (* --- Indentation --- *)
 
 let body_indent_forms = [
-  "begin"; "when"; "unless"; "cond"; "case"; "do";
+  "begin"; "when"; "unless"; "case"; "do";
   "guard"; "syntax-rules"; "parameterize";
   "with-exception-handler"; "dynamic-wind";
   "call-with-current-continuation"; "call/cc";
