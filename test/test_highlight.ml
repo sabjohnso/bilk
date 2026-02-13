@@ -156,6 +156,58 @@ let test_semantic_roundtrip () =
   Alcotest.(check string) "roundtrip"
     text (Highlight.strip_ansi highlighted)
 
+(* --- Datum comment highlighting --- *)
+
+let comment_ansi = Highlight.style_to_ansi theme.comment_style
+let keyword_ansi = Highlight.style_to_ansi theme.keyword_style
+let number_ansi = Highlight.style_to_ansi theme.number_style
+
+let test_datum_comment_atom () =
+  (* #; hello world — "hello" should be comment-styled, "world" should not *)
+  let text = "#; hello world" in
+  let result = Highlight.highlight_line theme rt text (-1) in
+  Alcotest.(check string) "roundtrip" text (Highlight.strip_ansi result);
+  (* Split on "hello" — the ansi code before it should be comment style *)
+  (* "world" should get symbol_style, not comment_style *)
+  (* Check: the keyword for "hello" is preceded by comment ansi *)
+  let idx_hello = 3 in  (* byte offset of "hello" *)
+  (* Find the ANSI code applied right before byte offset 3 *)
+  let _ = idx_hello in
+  (* Simpler check: result should contain comment-styled "hello" *)
+  Alcotest.(check bool) "hello comment styled"
+    true (contains_substring result (comment_ansi ^ "hello"))
+
+let test_datum_comment_list () =
+  (* #; (define x 42) — "define" should NOT get keyword style *)
+  let text = "#; (define x 42)" in
+  let result = Highlight.highlight_line theme rt text (-1) in
+  Alcotest.(check string) "roundtrip" text (Highlight.strip_ansi result);
+  (* "define" should NOT have keyword coloring *)
+  Alcotest.(check bool) "no keyword style"
+    false (contains_substring result (keyword_ansi ^ "define"));
+  (* "42" should NOT have number coloring *)
+  Alcotest.(check bool) "no number style"
+    false (contains_substring result (number_ansi ^ "42"))
+
+let test_datum_comment_inline () =
+  (* (+ #; 1 2) — "1" should be comment-styled, "2" should be number-styled *)
+  let text = "(+ #; 1 2)" in
+  let result = Highlight.highlight_line theme rt text (-1) in
+  Alcotest.(check string) "roundtrip" text (Highlight.strip_ansi result);
+  Alcotest.(check bool) "1 comment styled"
+    true (contains_substring result (comment_ansi ^ "1"));
+  Alcotest.(check bool) "2 number styled"
+    true (contains_substring result (number_ansi ^ "2"))
+
+let test_datum_comment_quoted () =
+  (* #; '(1 2) x — the quote and list should be comment-styled *)
+  let text = "#; '(1 2) x" in
+  let result = Highlight.highlight_line theme rt text (-1) in
+  Alcotest.(check string) "roundtrip" text (Highlight.strip_ansi result);
+  (* "1" inside the quoted list should NOT have number style *)
+  Alcotest.(check bool) "no number style for 1"
+    false (contains_substring result (number_ansi ^ "1"))
+
 let () =
   Alcotest.run "Highlight" [
     "highlighting", [
@@ -183,5 +235,11 @@ let () =
       Alcotest.test_case "cursor bold" `Quick test_cursor_on_identifier_bold;
       Alcotest.test_case "cursor binding bold" `Quick test_cursor_binding_bold;
       Alcotest.test_case "semantic roundtrip" `Quick test_semantic_roundtrip;
+    ];
+    "datum comment", [
+      Alcotest.test_case "atom" `Quick test_datum_comment_atom;
+      Alcotest.test_case "list" `Quick test_datum_comment_list;
+      Alcotest.test_case "inline" `Quick test_datum_comment_inline;
+      Alcotest.test_case "quoted" `Quick test_datum_comment_quoted;
     ];
   ]

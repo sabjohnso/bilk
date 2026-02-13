@@ -336,6 +336,58 @@ let find_cursor_binding (tokens : Tokenizer.token list) text cursor_pos marks =
            | None -> Some (ct.span.start, ct.span.stop, None))
         | None -> Some (ct.span.start, ct.span.stop, None)
 
+(* --- Datum comment range detection --- *)
+
+(* Compute byte ranges of expressions commented out by #;.
+   For each Datum_comment token, the following datum (including any
+   quote/unquote prefix or nested #;) is returned as a (start, stop)
+   byte range.  These tokens should be rendered with comment_style. *)
+let datum_comment_ranges (tokens : Tokenizer.token list) =
+  let arr = Array.of_list tokens in
+  let n = Array.length arr in
+  let ranges = ref [] in
+  let kind i = arr.(i).Tokenizer.kind in
+  let skip_ws i =
+    let j = ref i in
+    while !j < n && kind !j = Tokenizer.Whitespace do incr j done;
+    !j
+  in
+  (* Return the token index one past the end of the datum starting at i.
+     Assumes i points to the first non-whitespace token of the datum. *)
+  let rec skip_datum i =
+    if i >= n then i
+    else match kind i with
+    | Tokenizer.Paren_open ->
+      let depth = ref 1 in
+      let j = ref (i + 1) in
+      while !j < n && !depth > 0 do
+        (if kind !j = Tokenizer.Paren_open then incr depth
+         else if kind !j = Tokenizer.Paren_close then decr depth);
+        incr j
+      done;
+      !j
+    | Tokenizer.Quote_shorthand ->
+      skip_datum (skip_ws (i + 1))
+    | Tokenizer.Datum_comment ->
+      let after_inner = skip_datum (skip_ws (i + 1)) in
+      skip_datum (skip_ws after_inner)
+    | _ -> i + 1
+  in
+  let i = ref 0 in
+  while !i < n do
+    if kind !i = Tokenizer.Datum_comment then begin
+      let datum_start = skip_ws (!i + 1) in
+      let datum_end = skip_datum datum_start in
+      if datum_start < n && datum_end > datum_start then begin
+        let start_byte = arr.(datum_start).Tokenizer.span.start in
+        let end_byte = arr.(datum_end - 1).Tokenizer.span.stop in
+        ranges := (start_byte, end_byte) :: !ranges
+      end
+    end;
+    incr i
+  done;
+  !ranges
+
 (* --- Highlighting --- *)
 
 let highlight_line theme rt text cursor_pos =
@@ -358,10 +410,22 @@ let highlight_line theme rt text cursor_pos =
     | Some (_, _, Some (bs, be)) -> start = bs && stop = be
     | _ -> false
   in
+  let dc_ranges = datum_comment_ranges tokens in
+  let in_datum_comment pos =
+    List.exists (fun (s, e) -> pos >= s && pos < e) dc_ranges
+  in
   let buf = Buffer.create (String.length text * 2) in
   let depth = ref 0 in
   List.iter (fun (tok : Tokenizer.token) ->
-    let base_style = match tok.kind with
+    let base_style =
+      if in_datum_comment tok.span.start then begin
+        (* Still track paren depth for tokens inside datum comments *)
+        (match tok.kind with
+         | Tokenizer.Paren_open -> incr depth
+         | Tokenizer.Paren_close -> if !depth > 0 then decr depth
+         | _ -> ());
+        theme.comment_style
+      end else match tok.kind with
       | Tokenizer.Paren_open ->
         let d = !depth in
         incr depth;
