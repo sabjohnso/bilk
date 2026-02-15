@@ -55,11 +55,13 @@ val to_list : t -> string list
 
 (** {1 File I/O} *)
 
-(** [save_to_file t path] writes all entries to [path], one per line.
-    Creates the file if it does not exist, overwrites if it does. *)
+(** [save_to_file t path] writes all entries to [path], one escaped line
+    per entry. Newlines within entries are escaped as [\n] and backslashes
+    as [\\]. Creates the file if it does not exist, overwrites if it does. *)
 val save_to_file : t -> string -> unit
 
-(** [load_from_file t path] loads entries from [path] (one per line) and
-    appends them to the history, respecting [max_length]. Silently does
-    nothing if the file does not exist. *)
+(** [load_from_file t path] loads entries from [path] (one escaped line
+    per entry), unescaping [\n] and [\\], and appends them to the history,
+    respecting [max_length]. Silently does nothing if the file does not
+    exist. *)
 val load_from_file : t -> string -> unit

@@ -169,6 +169,36 @@ let test_save_load_roundtrip () =
     History.load_from_file h2 tmp;
     list_eq "round-trip" ["alpha"; "beta"; "gamma"] (History.to_list h2))
 
+let test_save_load_multiline () =
+  let tmp = Filename.temp_file "bilk_hist_test" ".txt" in
+  Fun.protect ~finally:(fun () -> Sys.remove tmp) (fun () ->
+    let h1 = History.create () in
+    History.add h1 "(define foo\n  (+ 1 2))";
+    History.add h1 "(display \"hello\")";
+    History.add h1 "(let ((x 1)\n      (y 2))\n  (+ x y))";
+    History.save_to_file h1 tmp;
+    let h2 = History.create () in
+    History.load_from_file h2 tmp;
+    Alcotest.(check int) "3 entries" 3 (History.length h2);
+    list_eq "multi-line round-trip"
+      ["(define foo\n  (+ 1 2))";
+       "(display \"hello\")";
+       "(let ((x 1)\n      (y 2))\n  (+ x y))"]
+      (History.to_list h2))
+
+let test_save_load_backslash () =
+  let tmp = Filename.temp_file "bilk_hist_test" ".txt" in
+  Fun.protect ~finally:(fun () -> Sys.remove tmp) (fun () ->
+    let h1 = History.create () in
+    History.add h1 "hello\\nworld";
+    History.add h1 "back\\\\slash";
+    History.save_to_file h1 tmp;
+    let h2 = History.create () in
+    History.load_from_file h2 tmp;
+    list_eq "backslash round-trip"
+      ["hello\\nworld"; "back\\\\slash"]
+      (History.to_list h2))
+
 let test_load_nonexistent () =
   let h = History.create () in
   History.load_from_file h "/nonexistent/path/that/does/not/exist";
@@ -188,6 +218,27 @@ let test_load_respects_max_length () =
     History.load_from_file h2 tmp;
     Alcotest.(check int) "capped at 3" 3 (History.length h2);
     list_eq "newest 3" ["three"; "four"; "five"] (History.to_list h2))
+
+(* --- Property tests --- *)
+
+let entry_gen =
+  QCheck2.Gen.(string_size ~gen:(oneof_list ['a';'z';'\\';'\n';' ';'(';')'])
+                 (int_range 1 80))
+
+let prop_save_load_roundtrip =
+  QCheck2.Test.make ~name:"save/load roundtrip preserves arbitrary entries"
+    ~count:200
+    QCheck2.Gen.(list_size (int_range 1 20) entry_gen)
+    (fun entries ->
+       let tmp = Filename.temp_file "bilk_hist_prop" ".txt" in
+       Fun.protect ~finally:(fun () -> Sys.remove tmp) (fun () ->
+         let h1 = History.create () in
+         List.iter (History.add h1) entries;
+         let expected = History.to_list h1 in
+         History.save_to_file h1 tmp;
+         let h2 = History.create () in
+         History.load_from_file h2 tmp;
+         History.to_list h2 = expected))
 
 let () =
   Alcotest.run "History" [
@@ -218,7 +269,12 @@ let () =
     ];
     "file I/O", [
       Alcotest.test_case "save/load roundtrip" `Quick test_save_load_roundtrip;
+      Alcotest.test_case "save/load multiline" `Quick test_save_load_multiline;
+      Alcotest.test_case "save/load backslash" `Quick test_save_load_backslash;
       Alcotest.test_case "load nonexistent" `Quick test_load_nonexistent;
       Alcotest.test_case "load respects max length" `Quick test_load_respects_max_length;
+    ];
+    "properties", [
+      QCheck_alcotest.to_alcotest prop_save_load_roundtrip;
     ];
   ]

@@ -108,11 +108,39 @@ let next_matching t prefix =
     end
   end
 
+let escape_entry s =
+  let buf = Buffer.create (String.length s) in
+  String.iter (fun c ->
+    match c with
+    | '\\' -> Buffer.add_string buf "\\\\"
+    | '\n' -> Buffer.add_string buf "\\n"
+    | c -> Buffer.add_char buf c
+  ) s;
+  Buffer.contents buf
+
+let unescape_entry s =
+  let len = String.length s in
+  let buf = Buffer.create len in
+  let i = ref 0 in
+  while !i < len do
+    if s.[!i] = '\\' && !i + 1 < len then begin
+      (match s.[!i + 1] with
+       | '\\' -> Buffer.add_char buf '\\'
+       | 'n' -> Buffer.add_char buf '\n'
+       | c -> Buffer.add_char buf '\\'; Buffer.add_char buf c);
+      i := !i + 2
+    end else begin
+      Buffer.add_char buf s.[!i];
+      i := !i + 1
+    end
+  done;
+  Buffer.contents buf
+
 let save_to_file t path =
   let oc = open_out path in
   Fun.protect ~finally:(fun () -> close_out oc) (fun () ->
     for i = 0 to t.count - 1 do
-      output_string oc t.entries.(i);
+      output_string oc (escape_entry t.entries.(i));
       output_char oc '\n'
     done)
 
@@ -123,7 +151,7 @@ let load_from_file t path =
       try
         while true do
           let line = input_line ic in
-          add t line
+          add t (unescape_entry line)
         done
       with End_of_file -> ())
   end
