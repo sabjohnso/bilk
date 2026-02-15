@@ -48,19 +48,10 @@ let export_names lib =
 
 let compile_error loc msg = raise (Compiler.Compile_error (loc, msg))
 
-let rec syntax_to_proper_list s =
-  match s.Syntax.datum with
-  | Syntax.Nil -> Some []
-  | Syntax.Pair (car, cdr) ->
-    (match syntax_to_proper_list cdr with
-     | Some rest -> Some (car :: rest)
-     | None -> None)
-  | _ -> None
-
 (* --- Parsing --- *)
 
 let parse_library_name s =
-  match syntax_to_proper_list s with
+  match Syntax.to_proper_list s with
   | None -> compile_error s.loc "library name: expected a proper list"
   | Some parts ->
     if parts = [] then compile_error s.loc "library name: empty";
@@ -76,7 +67,7 @@ let parse_export_spec s =
   match s.Syntax.datum with
   | Syntax.Symbol name -> Export_id name
   | Syntax.Pair _ ->
-    (match syntax_to_proper_list s with
+    (match Syntax.to_proper_list s with
      | Some [ { datum = Syntax.Symbol "rename"; _ };
               { datum = Syntax.Symbol internal; _ };
               { datum = Syntax.Symbol external_; _ } ] ->
@@ -87,7 +78,7 @@ let parse_export_spec s =
 let rec parse_import_set s =
   match s.Syntax.datum with
   | Syntax.Pair _ ->
-    (match syntax_to_proper_list s with
+    (match Syntax.to_proper_list s with
      | None -> compile_error s.loc "import set: expected proper list"
      | Some [] -> compile_error s.loc "import set: empty list"
      | Some (head :: rest) ->
@@ -121,7 +112,7 @@ let rec parse_import_set s =
          (match rest with
           | inner :: (_ :: _ as pairs) ->
             let renames = List.map (fun p ->
-              match syntax_to_proper_list p with
+              match Syntax.to_proper_list p with
               | Some [ { datum = Syntax.Symbol from; _ };
                        { datum = Syntax.Symbol to_; _ } ] ->
                 (from, to_)

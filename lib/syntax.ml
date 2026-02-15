@@ -64,6 +64,15 @@ let rec from_datum loc (d : Datum.t) =
   in
   { loc; datum }
 
+let rec to_proper_list s =
+  match s.datum with
+  | Nil -> Some []
+  | Pair (car, cdr) ->
+    (match to_proper_list cdr with
+     | Some rest -> Some (car :: rest)
+     | None -> None)
+  | _ -> None
+
 let rec equal_datum a b =
   match (a.datum, b.datum) with
   | Bool x, Bool y -> x = y

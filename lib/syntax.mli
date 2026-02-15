@@ -45,6 +45,11 @@ val from_datum : Loc.t -> Datum.t -> t
     Nil, Eof).  Non-data values (Void, Primitive, Closure, etc.) are
     represented as opaque symbols. *)
 
+val to_proper_list : t -> t list option
+(** [to_proper_list s] returns [Some elems] if [s] is a proper list
+    (nil-terminated chain of pairs), or [None] if it is dotted or not
+    a pair/nil. *)
+
 (** {1 Equality} *)
 
 val equal_datum : t -> t -> bool

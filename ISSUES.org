@@ -3,7 +3,7 @@
 
 * Known Issues
 
-** TODO Issue 4: =imports_of_scm= already implemented — Phase 3 plan is stale
+** DONE Issue 4: =imports_of_scm= already implemented — Phase 3 plan is stale
 :PROPERTIES:
 :PRIORITY: C
 :END:
@@ -13,20 +13,15 @@ files" as a task, but [[file:lib/dep_graph.ml::let imports_of_scm][=Dep_graph.im
 during Phase 1. The plan should be updated to mark this task as complete and
 remove it from Phase 3's scope.
 
-** TODO Issue 5: =syntax_to_proper_list= duplicated across modules
+** DONE Issue 5: =syntax_to_proper_list= duplicated across modules
 :PROPERTIES:
 :PRIORITY: B
 :END:
 
-[[file:lib/dep_graph.ml::let rec syntax_to_proper_list][=Dep_graph.syntax_to_proper_list=]] duplicates
-[[file:lib/library.ml][=Library.syntax_to_proper_list=]] (which is not exported in the =.mli=).
-
-Options:
-- Export it from =Library.mli= and use it in =Dep_graph=.
-- Extract it to a shared =Syntax_util= module.
-
-The duplication is harmless today but will become a maintenance burden if the
-=Syntax.t= representation changes.
+Consolidated all 6 copies into [[file:lib/syntax.ml::let rec to_proper_list][=Syntax.to_proper_list=]] with tests in
+[[file:test/test_syntax.ml][=test_syntax.ml=]]. Deleted local definitions from =library.ml=,
+=package.ml=, =dep_graph.ml=, =instance.ml=, =repository.ml=, and
+=lockfile.ml=.
 
 ** TODO Issue 6: Duplicate imports produce duplicate DOT edges
 :PROPERTIES:
@@ -271,15 +266,12 @@ resolution.
 
 * Phase 9 (Remote Repositories) — Minor Issues
 
-** TODO Issue 26: =syntax_to_proper_list= duplicated in =repository.ml=
+** DONE Issue 26: =syntax_to_proper_list= duplicated in =repository.ml=
 :PROPERTIES:
 :PRIORITY: B
 :END:
 
-[[file:lib/repository.ml::let syntax_to_proper_list][=Repository.syntax_to_proper_list=]] is the same function already
-duplicated in [[file:lib/dep_graph.ml::let rec syntax_to_proper_list][=Dep_graph=]], [[file:lib/library.ml][=Library=]], and [[file:lib/package.ml::let rec syntax_to_proper_list][=Package=]].
-See Issue 5.  A shared =Syntax_util= module would eliminate all four
-copies.
+Resolved by Issue 5 — all copies consolidated into [[file:lib/syntax.ml::let rec to_proper_list][=Syntax.to_proper_list=]].
 
 ** TODO Issue 27: Repo names with special characters don't round-trip
 :PROPERTIES:

@@ -5282,16 +5282,6 @@ let intern inst name = Symbol.intern inst.symbols name
 
 (* --- Import processing --- *)
 
-let rec syntax_to_proper_list s =
-  match s.Syntax.datum with
-  | Syntax.Nil -> Some []
-  | Syntax.Pair (car, cdr) ->
-    (match syntax_to_proper_list cdr with
-     | Some rest -> Some (car :: rest)
-     | None -> None)
-  | _ -> None
-
-
 (* --- define-library processing --- *)
 
 let rec syntax_list_to_list s =
@@ -5478,11 +5468,11 @@ type top_level_form =
 let classify_top_level (expr : Syntax.t) =
   match expr.datum with
   | Syntax.Pair ({ datum = Syntax.Symbol "import"; _ }, rest) ->
-    (match syntax_to_proper_list rest with
+    (match Syntax.to_proper_list rest with
      | Some sets when sets <> [] -> Import sets
      | _ -> Expression)
   | Syntax.Pair ({ datum = Syntax.Symbol "define-library"; _ }, rest) ->
-    (match syntax_to_proper_list rest with
+    (match Syntax.to_proper_list rest with
      | Some (name :: decls) -> Define_library (name, decls)
      | _ -> Expression)
   | _ -> Expression

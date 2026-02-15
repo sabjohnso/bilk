@@ -326,18 +326,23 @@ let run_fasl path =
 
 let repl_help () =
   print_endline "REPL commands:";
-  print_endline "  ,help  ,h        Show this help";
-  print_endline "  ,quit  ,q        Exit the REPL";
-  print_endline "  ,load <file>     Load and evaluate a Scheme file";
-  print_endline "  ,env             List bound names in the global environment";
-  print_endline "  ,libs            List loaded/registered libraries";
-  print_endline "  ,available       List all discoverable libraries on disk";
-  print_endline "  ,exports <lib>   Show exports of a library (e.g. ,exports (scheme base))";
-  print_endline "  ,build           Build/rebuild stale libraries";
-  print_endline "  ,deps <lib>      Show dependency tree (e.g. ,deps (srfi 1))";
-  print_endline "  ,reload <lib>    Reload a library from source (e.g. ,reload (my lib))";
-  print_endline "  ,theme <name>    Switch theme (dark, light, none, or file path)";
-  print_endline "  ,paredit         Toggle paredit mode (structural editing)"
+  print_endline "  ,help  ,h            Show this help";
+  print_endline "  ,quit  ,q            Exit the REPL";
+  print_endline "  ,load <file>         Load and evaluate a Scheme file";
+  print_endline "  ,env                 List bound names in the global environment";
+  print_endline "  ,libs                List loaded/registered libraries";
+  print_endline "  ,available           List all discoverable libraries on disk";
+  print_endline "  ,exports <lib>       Show exports of a library (e.g. ,exports (scheme base))";
+  print_endline "  ,build               Build/rebuild stale libraries";
+  print_endline "  ,deps <lib>          Show dependency tree (e.g. ,deps (srfi 1))";
+  print_endline "  ,reload <lib>        Reload a library from source (e.g. ,reload (my lib))";
+  print_endline "  ,theme <name>        Switch theme (dark, light, none, or file path)";
+  print_endline "  ,paredit             Toggle paredit mode (structural editing)";
+  print_endline "  ,checkpoint <name>   Snapshot current state as a named checkpoint";
+  print_endline "  ,revert <name>       Restore state from a named checkpoint";
+  print_endline "  ,checkpoints         List all checkpoints";
+  print_endline "  ,save-session <file> Save all checkpoints to a binary file";
+  print_endline "  ,load-session <file> Load checkpoints from a binary file"
 
 let repl_env inst =
   let syms = Symbol.all inst.Instance.symbols in
@@ -569,15 +574,16 @@ let is_complete inst text =
   check ()
 
 let run_repl theme_name =
-  let inst = make_instance () in
-  inst.search_paths := Search_path.resolve ~base_dirs:[Sys.getcwd ()];
-  let pkg_info = setup_package inst (Sys.getcwd ()) in
+  let inst_ref = ref (make_instance ()) in
+  (!inst_ref).search_paths := Search_path.resolve ~base_dirs:[Sys.getcwd ()];
+  let pkg_info = setup_package !inst_ref (Sys.getcwd ()) in
   (match pkg_info with
    | Some (pkg, _) ->
      Printf.printf "Project: %s %s\n%!" pkg.Package.name
        (Semver.to_string pkg.version)
    | None -> ());
-  auto_build_from_package inst pkg_info;
+  auto_build_from_package !inst_ref pkg_info;
+  let session_ref = ref (Session.create ()) in
   Printf.printf "Bilk Scheme %s\nType ,help for REPL commands, Ctrl-D to exit.\n%!" version;
   let saved = load_config () in
   let initial_theme = match theme_name with
@@ -600,16 +606,18 @@ let run_repl theme_name =
   let highlight_fn text cursor =
     match !theme_ref with
     | None -> text
-    | Some theme -> Highlight.highlight_line theme inst.readtable text cursor
+    | Some theme -> Highlight.highlight_line theme (!inst_ref).readtable text cursor
   in
   let repl_commands =
     [",help"; ",h"; ",quit"; ",q"; ",load"; ",env"; ",libs";
      ",available"; ",exports"; ",build"; ",deps"; ",reload";
-     ",theme"; ",paredit"]
+     ",theme"; ",paredit"; ",checkpoint"; ",revert"; ",checkpoints";
+     ",save-session"; ",load-session"]
   in
   let cached_candidates = ref [] in
   let cache_gen = ref (-1) in
   let get_scheme_candidates () =
+    let inst = !inst_ref in
     let gen = List.length (Symbol.all inst.Instance.symbols) in
     if gen <> !cache_gen then begin
       let syms = Symbol.all inst.Instance.symbols in
@@ -658,10 +666,11 @@ let run_repl theme_name =
     | Some _ ->
       let w = Watch.create () in
       at_exit (fun () -> Watch.destroy w);
-      List.iter (Watch.add_directory w) !(inst.search_paths);
-      let rt = inst.Instance.readtable in
-      let builtins = Build.builtin_library_names inst in
+      List.iter (Watch.add_directory w) !((!inst_ref).search_paths);
+      let rt = (!inst_ref).Instance.readtable in
+      let builtins = Build.builtin_library_names !inst_ref in
       Some (fun () ->
+        let inst = !inst_ref in
         let events = Watch.poll w in
         if events <> [] then begin
           let search_paths = !(inst.search_paths) in
@@ -705,10 +714,10 @@ let run_repl theme_name =
     continuation_prompt = "  ... ";
     history_file;
     max_history = 1000;
-    is_complete = Some (is_complete inst);
+    is_complete = Some (fun text -> is_complete !inst_ref text);
     highlight = Some highlight_fn;
     paredit = Some paredit_ref;
-    readtable = Some inst.readtable;
+    readtable = Some (!inst_ref).readtable;
     complete = Some complete_fn;
     on_idle;
   } in
@@ -719,6 +728,7 @@ let run_repl theme_name =
     | _ -> print_endline (Datum.to_string v)
   in
   let eval_input input =
+    let inst = !inst_ref in
     let port = Port.of_string input in
     let rec eval_loop () =
       try
@@ -747,6 +757,110 @@ let run_repl theme_name =
     in
     eval_loop ()
   in
+  let setup_instance inst =
+    inst.Instance.search_paths := Search_path.resolve ~base_dirs:[Sys.getcwd ()];
+    (match pkg_info with
+     | Some (_pkg, pkg_dir) ->
+       let registry_root = Filename.concat pkg_dir ".bilk_packages" in
+       if Sys.file_exists registry_root then
+         inst.search_paths := registry_root :: !(inst.search_paths)
+     | None -> ())
+  in
+  let revert_checkpoint session name =
+    try
+      let new_inst = Session.revert session name in
+      setup_instance new_inst;
+      new_inst.Instance.fasl_cache := true;
+      inst_ref := new_inst;
+      Printf.printf "Reverted to checkpoint: %s\n%!" name
+    with
+    | Session.Session_error msg -> Printf.eprintf "Error: %s\n%!" msg
+    | Checkpoint.Checkpoint_error msg -> Printf.eprintf "Error: %s\n%!" msg
+  in
+  let handle_session_command trimmed =
+    if trimmed = ",checkpoints" then begin
+      let cps = Session.list_checkpoints !session_ref in
+      if cps = [] then
+        Printf.printf "No checkpoints.\n%!"
+      else
+        List.iter (fun name ->
+          Printf.printf "  %s\n%!" name
+        ) cps;
+      true
+    end else if String.length trimmed > 12
+                && String.sub trimmed 0 12 = ",checkpoint " then begin
+      let name = String.trim (String.sub trimmed 12 (String.length trimmed - 12)) in
+      if name = "" then
+        Printf.eprintf "Usage: ,checkpoint <name>\n%!"
+      else begin
+        try
+          Session.checkpoint !session_ref name !inst_ref;
+          Printf.printf "Checkpoint saved: %s\n%!" name
+        with Checkpoint.Checkpoint_error msg ->
+          Printf.eprintf "Error: %s\n%!" msg
+      end;
+      true
+    end else if trimmed = ",checkpoint" then begin
+      Printf.eprintf "Usage: ,checkpoint <name>\n%!";
+      true
+    end else if String.length trimmed > 8
+                && String.sub trimmed 0 8 = ",revert " then begin
+      let name = String.trim (String.sub trimmed 8 (String.length trimmed - 8)) in
+      if name = "" then
+        Printf.eprintf "Usage: ,revert <name>\n%!"
+      else
+        revert_checkpoint !session_ref name;
+      true
+    end else if trimmed = ",revert" then begin
+      Printf.eprintf "Usage: ,revert <name>\n%!";
+      true
+    end else if String.length trimmed > 14
+                && String.sub trimmed 0 14 = ",save-session " then begin
+      let path = String.trim (String.sub trimmed 14 (String.length trimmed - 14)) in
+      if path = "" then
+        Printf.eprintf "Usage: ,save-session <file>\n%!"
+      else begin
+        try
+          Session.save !session_ref path;
+          let nc = List.length (Session.list_checkpoints !session_ref) in
+          Printf.printf "Session saved: %s (%d checkpoint%s)\n%!"
+            path nc (if nc = 1 then "" else "s")
+        with Sys_error msg ->
+          Printf.eprintf "Error: %s\n%!" msg
+      end;
+      true
+    end else if trimmed = ",save-session" then begin
+      Printf.eprintf "Usage: ,save-session <file>\n%!";
+      true
+    end else if String.length trimmed > 14
+                && String.sub trimmed 0 14 = ",load-session " then begin
+      let path = String.trim (String.sub trimmed 14 (String.length trimmed - 14)) in
+      if path = "" then
+        Printf.eprintf "Usage: ,load-session <file>\n%!"
+      else begin
+        try
+          let loaded = Session.load path in
+          let cps = Session.list_checkpoints loaded in
+          let nc = List.length cps in
+          Printf.printf "Session loaded: %s (%d checkpoint%s)\n%!"
+            path nc (if nc = 1 then "" else "s");
+          (* Replace current session *)
+          session_ref := loaded;
+          (* Revert to latest checkpoint if any *)
+          match List.rev cps with
+          | latest :: _ -> revert_checkpoint !session_ref latest
+          | [] -> ()
+        with
+        | Session.Session_error msg -> Printf.eprintf "Error: %s\n%!" msg
+        | Sys_error msg -> Printf.eprintf "Error: %s\n%!" msg
+      end;
+      true
+    end else if trimmed = ",load-session" then begin
+      Printf.eprintf "Usage: ,load-session <file>\n%!";
+      true
+    end else
+      false
+  in
   let rec loop () =
     match Line_editor.read_input editor with
     | Line_editor.Interrupted ->
@@ -758,7 +872,16 @@ let run_repl theme_name =
       if trimmed = "" then
         loop ()
       else if trimmed.[0] = ',' then begin
-        handle_repl_command inst pkg_info theme_ref paredit_ref trimmed;
+        if not (handle_session_command trimmed) then begin
+          if String.length trimmed > 6 && String.sub trimmed 0 6 = ",load " then begin
+            let path = String.trim (String.sub trimmed 6 (String.length trimmed - 6)) in
+            if path <> "" then
+              repl_load !inst_ref path
+            else
+              Printf.eprintf "Usage: ,load <file>\n%!"
+          end else
+            handle_repl_command !inst_ref pkg_info theme_ref paredit_ref trimmed
+        end;
         loop ()
       end else begin
         Line_editor.history_add editor input;

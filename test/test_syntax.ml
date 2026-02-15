@@ -142,6 +142,38 @@ let test_syntax_from_datum_roundtrip () =
     cdr = Datum.Pair { car = Datum.Str (Bytes.of_string "hi"); cdr = Datum.Nil } } in
   check_datum "roundtrip" d (Syntax.to_datum (Syntax.from_datum loc1 d))
 
+let syn = Syntax.make loc1
+
+let check_syntax_list msg expected actual =
+  let pp_list fmt lst =
+    Format.fprintf fmt "[%a]"
+      (Format.pp_print_list ~pp_sep:(fun f () -> Format.fprintf f "; ") Syntax.pp)
+      lst
+  in
+  let list_testable =
+    Alcotest.testable pp_list (List.equal Syntax.equal_datum)
+  in
+  Alcotest.(check (option list_testable)) msg expected actual
+
+let test_to_proper_list_nil () =
+  check_syntax_list "nil" (Some []) (Syntax.to_proper_list (syn Syntax.Nil))
+
+let test_to_proper_list_proper () =
+  let a = syn (Syntax.Symbol "a") in
+  let b = syn (Syntax.Symbol "b") in
+  let c = syn (Syntax.Symbol "c") in
+  let lst = syn (Syntax.Pair (a, syn (Syntax.Pair (b, syn (Syntax.Pair (c, syn Syntax.Nil)))))) in
+  check_syntax_list "proper list" (Some [a; b; c]) (Syntax.to_proper_list lst)
+
+let test_to_proper_list_dotted () =
+  let a = syn (Syntax.Symbol "a") in
+  let b = syn (Syntax.Symbol "b") in
+  let dotted = syn (Syntax.Pair (a, b)) in
+  check_syntax_list "dotted" None (Syntax.to_proper_list dotted)
+
+let test_to_proper_list_atom () =
+  check_syntax_list "atom" None (Syntax.to_proper_list (syn (Syntax.Fixnum 42)))
+
 let test_syntax_pp () =
   let s = Syntax.make loc1 (Syntax.Symbol "hello") in
   Alcotest.(check string) "pp" "hello" (Syntax.to_string s);
@@ -166,5 +198,9 @@ let () =
        ; Alcotest.test_case "from_datum pair" `Quick test_syntax_from_datum_pair
        ; Alcotest.test_case "from_datum vector" `Quick test_syntax_from_datum_vector
        ; Alcotest.test_case "from_datum roundtrip" `Quick test_syntax_from_datum_roundtrip
+       ; Alcotest.test_case "to_proper_list nil" `Quick test_to_proper_list_nil
+       ; Alcotest.test_case "to_proper_list proper" `Quick test_to_proper_list_proper
+       ; Alcotest.test_case "to_proper_list dotted" `Quick test_to_proper_list_dotted
+       ; Alcotest.test_case "to_proper_list atom" `Quick test_to_proper_list_atom
        ])
     ]

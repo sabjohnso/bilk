@@ -20,15 +20,6 @@ let error msg = raise (Package_error msg)
 
 (* --- Syntax helpers --- *)
 
-let rec syntax_to_proper_list s =
-  match s.Syntax.datum with
-  | Syntax.Nil -> Some []
-  | Syntax.Pair (car, cdr) ->
-    (match syntax_to_proper_list cdr with
-     | Some rest -> Some (car :: rest)
-     | None -> None)
-  | _ -> None
-
 let expect_symbol s =
   match s.Syntax.datum with
   | Syntax.Symbol name -> name
@@ -42,7 +33,7 @@ let expect_string s =
 (* --- Dependency parsing --- *)
 
 let parse_constraint_pair s =
-  match syntax_to_proper_list s with
+  match Syntax.to_proper_list s with
   | Some [{ datum = Syntax.Symbol op_str; _ }; { datum = Syntax.Str ver_str; _ }] ->
     (try
        let op = Semver.parse_constraint op_str in
@@ -53,7 +44,7 @@ let parse_constraint_pair s =
   | _ -> error "dependency constraint: expected (op \"version\")"
 
 let parse_dependency s =
-  match syntax_to_proper_list s with
+  match Syntax.to_proper_list s with
   | Some [] -> error "dependency: empty"
   | Some (name_syn :: constraints) ->
     let dep_name = expect_symbol name_syn in
@@ -68,7 +59,7 @@ let parse_dependency s =
 (* --- Library name parsing --- *)
 
 let parse_lib_name s =
-  match syntax_to_proper_list s with
+  match Syntax.to_proper_list s with
   | None -> error "library name: expected a proper list"
   | Some parts ->
     if parts = [] then error "library name: empty";
@@ -88,7 +79,7 @@ let parse readtable path =
     try Reader.read_syntax readtable port
     with Reader.Read_error (_, msg) -> error (Printf.sprintf "%s: %s" path msg)
   in
-  match syntax_to_proper_list expr with
+  match Syntax.to_proper_list expr with
   | Some ({ datum = Syntax.Symbol "define-package"; _ } :: clauses) ->
     let name = ref None in
     let version = ref None in
@@ -99,7 +90,7 @@ let parse readtable path =
     let programs = ref None in
     let test_depends = ref None in
     List.iter (fun clause ->
-      match syntax_to_proper_list clause with
+      match Syntax.to_proper_list clause with
       | Some ({ datum = Syntax.Symbol key; _ } :: vals) ->
         (match key with
          | "name" ->

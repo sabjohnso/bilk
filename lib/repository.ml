@@ -96,27 +96,16 @@ let sync bilk_home repo =
 
 (* --- Index --- *)
 
-let syntax_to_proper_list s =
-  let rec aux s =
-    match s.Syntax.datum with
-    | Syntax.Nil -> Some []
-    | Syntax.Pair (car, cdr) ->
-      (match aux cdr with
-       | Some rest -> Some (car :: rest)
-       | None -> None)
-    | _ -> None
-  in
-  aux s
 
 let parse_index readtable content =
   let port = Port.of_string content in
   let sexp = Reader.read_syntax readtable port in
-  match syntax_to_proper_list sexp with
+  match Syntax.to_proper_list sexp with
   | Some ({ Syntax.datum = Syntax.Symbol "repository"; _ } :: clauses) ->
     let name = ref None in
     let entries = ref [] in
     List.iter (fun clause ->
-      match syntax_to_proper_list clause with
+      match Syntax.to_proper_list clause with
       | Some ({ datum = Syntax.Symbol key; _ } :: vals) ->
         (match key with
          | "name" ->
@@ -125,7 +114,7 @@ let parse_index readtable content =
             | _ -> error "index: name: expected a single string")
          | "packages" ->
            entries := List.map (fun pkg_syn ->
-             match syntax_to_proper_list pkg_syn with
+             match Syntax.to_proper_list pkg_syn with
              | Some ({ datum = Syntax.Symbol pkg_name; _ } :: ver_syns) ->
                let versions = List.map (fun vs ->
                  match vs.Syntax.datum with

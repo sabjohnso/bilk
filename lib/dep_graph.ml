@@ -14,17 +14,6 @@ type sld_info = {
 exception Cycle_error of Library.library_name list list
 exception Resolve_error of Library.library_name * string
 
-(* --- Helpers --- *)
-
-let rec syntax_to_proper_list (s : Syntax.t) =
-  match s.datum with
-  | Syntax.Nil -> Some []
-  | Syntax.Pair (car, cdr) ->
-    (match syntax_to_proper_list cdr with
-     | Some rest -> Some (car :: rest)
-     | None -> None)
-  | _ -> None
-
 (* --- Import extraction --- *)
 
 let rec base_library_name = function
@@ -47,7 +36,7 @@ let rec extract_imports_from_decls decls =
   List.concat_map extract_imports_from_decl decls
 
 and extract_imports_from_decl (decl : Syntax.t) =
-  match syntax_to_proper_list decl with
+  match Syntax.to_proper_list decl with
   | Some ({ datum = Syntax.Symbol "import"; _ } :: import_sets) ->
     extract_imports_from_import_sets import_sets
   | Some ({ datum = Syntax.Symbol "cond-expand"; _ } :: clauses) ->
@@ -58,7 +47,7 @@ and extract_imports_from_cond_expand clauses =
   (* For static analysis, extract imports from ALL branches.
      Each clause is (feature-req decl ...) or (else decl ...). *)
   List.concat_map (fun (clause : Syntax.t) ->
-    match syntax_to_proper_list clause with
+    match Syntax.to_proper_list clause with
     | Some (_ :: decls) ->
       (* Skip the feature-requirement (first element), process the rest
          as declarations. The first element is either a feature-req
@@ -71,7 +60,7 @@ let parse_sld_file rt path =
   (* Parse a .sld file and return (declared_name, declarations). *)
   let port = Port.of_file path in
   let expr = Reader.read_syntax rt port in
-  match syntax_to_proper_list expr with
+  match Syntax.to_proper_list expr with
   | Some ({ datum = Syntax.Symbol "define-library"; _ } :: name_syn :: decls) ->
     let name = Library.parse_library_name name_syn in
     (name, decls)
@@ -93,7 +82,7 @@ let imports_of_scm rt path =
     match expr.datum with
     | Syntax.Eof -> List.rev acc
     | _ ->
-      match syntax_to_proper_list expr with
+      match Syntax.to_proper_list expr with
       | Some ({ datum = Syntax.Symbol "import"; _ } :: import_sets) ->
         let names = extract_imports_from_import_sets import_sets in
         read_imports (List.rev_append names acc)

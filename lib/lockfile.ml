@@ -25,29 +25,18 @@ let lockfile_path project_dir =
 
 (* --- S-expression helpers --- *)
 
-let syntax_to_proper_list s =
-  let rec aux s =
-    match s.Syntax.datum with
-    | Syntax.Nil -> Some []
-    | Syntax.Pair (car, cdr) ->
-      (match aux cdr with
-       | Some rest -> Some (car :: rest)
-       | None -> None)
-    | _ -> None
-  in
-  aux s
 
 (* --- Parse --- *)
 
 let parse readtable path =
   let port = Port.of_file path in
   let sexp = Reader.read_syntax readtable port in
-  match syntax_to_proper_list sexp with
+  match Syntax.to_proper_list sexp with
   | Some ({ Syntax.datum = Syntax.Symbol "lock"; _ } :: clauses) ->
     let created = ref None in
     let packages = ref [] in
     List.iter (fun clause ->
-      match syntax_to_proper_list clause with
+      match Syntax.to_proper_list clause with
       | Some ({ datum = Syntax.Symbol key; _ } :: vals) ->
         (match key with
          | "created" ->
@@ -56,13 +45,13 @@ let parse readtable path =
             | _ -> error "created: expected a single string")
          | "packages" ->
            packages := List.map (fun pkg_syn ->
-             match syntax_to_proper_list pkg_syn with
+             match Syntax.to_proper_list pkg_syn with
              | Some ({ datum = Syntax.Symbol pkg_name; _ }
                      :: { datum = Syntax.Str ver_str; _ }
                      :: rest) ->
                let sha256 = match rest with
                  | [hash_clause] ->
-                   (match syntax_to_proper_list hash_clause with
+                   (match Syntax.to_proper_list hash_clause with
                     | Some [{ datum = Syntax.Symbol "sha256"; _ };
                             { datum = Syntax.Str hash; _ }] -> hash
                     | _ -> error "expected (sha256 \"...\")")
