@@ -493,6 +493,38 @@ let test_indent_no_false_wildcard () =
   Alcotest.(check int) "for-each aligns" 10
     (Paredit.compute_indent rt "(for-each arg1" 14)
 
+(* === indent_from === *)
+
+let test_indent_from_leaves_above () =
+  (* indent_from row 2 should leave rows 0 and 1 untouched *)
+  let text = "  (define (foo x)\n    (if #t\n1\n2))" in
+  let result = Paredit.indent_from rt text 0 2 in
+  (* Row 0: untouched ("  (define (foo x)") *)
+  (* Row 1: untouched ("    (if #t") *)
+  (* Row 2: re-indent 1 -> align with #t at col 8 *)
+  (* Row 3: re-indent 2) -> align with #t at col 8 *)
+  check_edit "leaves above"
+    "  (define (foo x)\n    (if #t\n        1\n        2))" 0 result
+
+let test_indent_from_basic () =
+  (* indent_from row 1 behaves like indent_all (both skip row 0) *)
+  let text = "(define (foo x)\n(+ x 1))" in
+  let result = Paredit.indent_from rt text 0 1 in
+  check_edit "from row 1"
+    "(define (foo x)\n  (+ x 1))" 0 result
+
+let test_indent_from_after_newline () =
+  (* Simulate Enter: newline inserted mid-expression, then indent_from
+     on the new line re-indents it and all lines below *)
+  let text = "(define (foo x)\n\n  (+ x 1))" in
+  (* Row 0: (define (foo x))
+     Row 1: (empty — new line)
+     Row 2: (+ x 1))  — was row 1 before newline insertion *)
+  let cursor = 16 in  (* cursor at start of row 1 *)
+  let result = Paredit.indent_from rt text cursor 1 in
+  check_edit "after newline"
+    "(define (foo x)\n  \n  (+ x 1))" 18 result
+
 let () =
   Alcotest.run "Paredit" [
     "navigation", [
@@ -598,5 +630,8 @@ let () =
       Alcotest.test_case "indent all multiple" `Quick test_indent_all_multiple;
       Alcotest.test_case "indent all skips row 0" `Quick test_indent_all_skips_row0;
       Alcotest.test_case "indent all compose" `Quick test_indent_all_compose;
+      Alcotest.test_case "indent from leaves above" `Quick test_indent_from_leaves_above;
+      Alcotest.test_case "indent from basic" `Quick test_indent_from_basic;
+      Alcotest.test_case "indent from after newline" `Quick test_indent_from_after_newline;
     ];
   ]

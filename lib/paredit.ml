@@ -679,10 +679,13 @@ let indent_line rt text cursor =
   let row = row_of_pos text cursor in
   indent_row rt text cursor row
 
-let indent_all rt text cursor =
+let indent_from rt text cursor from_row =
   let nrows = num_lines_of text in
   let r = ref { text; cursor } in
-  for row = 1 to nrows - 1 do
+  for row = from_row to nrows - 1 do
     r := indent_row rt !r.text !r.cursor row
   done;
   !r
+
+let indent_all rt text cursor =
+  indent_from rt text cursor 1

@@ -100,6 +100,10 @@ val compute_indent : Readtable.t -> string -> int -> int
     Other rows use {!compute_indent}. *)
 val indent_line : Readtable.t -> string -> int -> edit_result
 
+(** [indent_from rt text cursor from_row] re-indents lines from [from_row]
+    to the end of [text], leaving rows above [from_row] untouched. *)
+val indent_from : Readtable.t -> string -> int -> int -> edit_result
+
 (** [indent_all rt text cursor] re-indents all lines in [text] from top
     to bottom, adjusting the cursor position. *)
 val indent_all : Readtable.t -> string -> int -> edit_result
