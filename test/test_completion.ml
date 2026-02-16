@@ -95,6 +95,128 @@ let test_format_columns_empty () =
   let result = Completion.format_columns ~width:80 [] in
   Alcotest.(check string) "empty" "" result
 
+(* should_complete_at *)
+
+let test_should_complete_after_ident () =
+  Alcotest.(check bool) "after letter" true
+    (Completion.should_complete_at "def" 3)
+
+let test_should_complete_empty () =
+  Alcotest.(check bool) "empty string" false
+    (Completion.should_complete_at "" 0)
+
+let test_should_complete_line_start () =
+  Alcotest.(check bool) "cursor at 0" false
+    (Completion.should_complete_at "def" 0)
+
+let test_should_complete_after_space () =
+  Alcotest.(check bool) "after space" false
+    (Completion.should_complete_at "foo " 4)
+
+let test_should_complete_after_paren () =
+  Alcotest.(check bool) "after open paren" false
+    (Completion.should_complete_at "(" 1)
+
+let test_should_complete_after_newline () =
+  Alcotest.(check bool) "after newline" false
+    (Completion.should_complete_at "foo\n" 4)
+
+let test_should_complete_after_comma () =
+  Alcotest.(check bool) "after comma (REPL cmd)" true
+    (Completion.should_complete_at ",hel" 4)
+
+(* match_library_name *)
+
+let all_libs = [
+  ["scheme"; "base"];
+  ["scheme"; "write"];
+  ["scheme"; "read"];
+  ["scheme"; "case-lambda"];
+  ["srfi"; "1"];
+  ["srfi"; "13"];
+  ["bilk"; "test"];
+]
+
+let test_match_library_scheme_b () =
+  let result = Completion.match_library_name ["scheme"] "b" all_libs in
+  Alcotest.(check (list (list string))) "scheme b"
+    [["scheme"; "base"]] result
+
+let test_match_library_scheme_empty () =
+  let result = Completion.match_library_name ["scheme"] "" all_libs in
+  Alcotest.(check int) "scheme *" 4 (List.length result)
+
+let test_match_library_empty_parts () =
+  let result = Completion.match_library_name [] "s" all_libs in
+  (* scheme (4 entries) + srfi (2 entries) = 6 *)
+  Alcotest.(check int) "s*" 6 (List.length result)
+
+let test_match_library_no_match () =
+  let result = Completion.match_library_name ["zzz"] "a" all_libs in
+  Alcotest.(check (list (list string))) "no match" [] result
+
+let test_format_library_name () =
+  Alcotest.(check string) "format"
+    "(scheme base)" (Completion.format_library_name ["scheme"; "base"])
+
+(* complete_path *)
+
+let with_tmpdir f =
+  let dir = Filename.temp_dir "bilk_test" "" in
+  let rec cleanup d =
+    Array.iter (fun name ->
+      let path = Filename.concat d name in
+      if Sys.is_directory path then begin
+        cleanup path; Sys.rmdir path
+      end else
+        Sys.remove path
+    ) (Sys.readdir d)
+  in
+  Fun.protect ~finally:(fun () -> cleanup dir; Sys.rmdir dir)
+    (fun () -> f dir)
+
+let mkdir path = Sys.command ("mkdir -p " ^ Filename.quote path) |> ignore
+
+let test_complete_path_basic () =
+  with_tmpdir (fun dir ->
+    let f = open_out (Filename.concat dir "hello.scm") in
+    close_out f;
+    let f = open_out (Filename.concat dir "help.txt") in
+    close_out f;
+    let results = Completion.complete_path (dir ^ "/hel") in
+    Alcotest.(check int) "two matches" 2 (List.length results);
+    Alcotest.(check bool) "has hello.scm" true
+      (List.mem (dir ^ "/hello.scm") results);
+    Alcotest.(check bool) "has help.txt" true
+      (List.mem (dir ^ "/help.txt") results))
+
+let test_complete_path_nonexistent_dir () =
+  let results = Completion.complete_path "/nonexistent_dir_xyz/foo" in
+  Alcotest.(check (list string)) "empty" [] results
+
+let test_complete_path_dir_gets_slash () =
+  with_tmpdir (fun dir ->
+    mkdir (Filename.concat dir "subdir");
+    let results = Completion.complete_path (dir ^ "/sub") in
+    Alcotest.(check (list string)) "dir with slash"
+      [dir ^ "/subdir/"] results)
+
+let test_complete_path_subdir () =
+  with_tmpdir (fun dir ->
+    mkdir (Filename.concat dir "sub");
+    let f = open_out (Filename.concat dir "sub/foo.scm") in
+    close_out f;
+    let results = Completion.complete_path (dir ^ "/sub/fo") in
+    Alcotest.(check (list string)) "subdir match"
+      [dir ^ "/sub/foo.scm"] results)
+
+let test_complete_path_empty_prefix () =
+  with_tmpdir (fun dir ->
+    let f = open_out (Filename.concat dir "a.txt") in
+    close_out f;
+    let results = Completion.complete_path (dir ^ "/") in
+    Alcotest.(check bool) "has entries" true (List.length results > 0))
+
 (* --- QCheck property tests --- *)
 
 let ident_char_gen =
@@ -144,6 +266,29 @@ let prop_find_matches_all_start_with_prefix =
          String.sub s 0 plen = prefix
        ) result)
 
+let prop_should_complete_iff_extract_nonempty =
+  QCheck2.Test.make ~count:200
+    ~name:"should_complete_at iff extract_prefix returns non-empty"
+    QCheck2.Gen.(pair
+      (string_size (int_range 0 40))
+      (int_range 0 40))
+    (fun (text, cursor) ->
+       let cursor = min cursor (String.length text) in
+       let should = Completion.should_complete_at text cursor in
+       let (prefix, _) = Completion.extract_prefix text cursor in
+       should = (prefix <> ""))
+
+let prop_complete_path_results_start_with_prefix =
+  QCheck2.Test.make ~count:100
+    ~name:"complete_path results start with input prefix"
+    QCheck2.Gen.(return "/tmp/")
+    (fun dir ->
+       let results = Completion.complete_path dir in
+       List.for_all (fun r ->
+         String.length r >= String.length dir &&
+         String.sub r 0 (String.length dir) = dir
+       ) results)
+
 let prop_format_columns_contains_all =
   QCheck2.Test.make ~count:200
     ~name:"format_columns contains every candidate"
@@ -188,11 +333,36 @@ let () =
        [ Alcotest.test_case "basic" `Quick test_format_columns_basic
        ; Alcotest.test_case "empty" `Quick test_format_columns_empty
        ])
+    ; ("match_library_name",
+       [ Alcotest.test_case "scheme b" `Quick test_match_library_scheme_b
+       ; Alcotest.test_case "scheme empty" `Quick test_match_library_scheme_empty
+       ; Alcotest.test_case "empty parts" `Quick test_match_library_empty_parts
+       ; Alcotest.test_case "no match" `Quick test_match_library_no_match
+       ; Alcotest.test_case "format name" `Quick test_format_library_name
+       ])
+    ; ("complete_path",
+       [ Alcotest.test_case "basic" `Quick test_complete_path_basic
+       ; Alcotest.test_case "nonexistent" `Quick test_complete_path_nonexistent_dir
+       ; Alcotest.test_case "dir slash" `Quick test_complete_path_dir_gets_slash
+       ; Alcotest.test_case "subdir" `Quick test_complete_path_subdir
+       ; Alcotest.test_case "empty prefix" `Quick test_complete_path_empty_prefix
+       ])
+    ; ("should_complete_at",
+       [ Alcotest.test_case "after ident" `Quick test_should_complete_after_ident
+       ; Alcotest.test_case "empty" `Quick test_should_complete_empty
+       ; Alcotest.test_case "line start" `Quick test_should_complete_line_start
+       ; Alcotest.test_case "after space" `Quick test_should_complete_after_space
+       ; Alcotest.test_case "after paren" `Quick test_should_complete_after_paren
+       ; Alcotest.test_case "after newline" `Quick test_should_complete_after_newline
+       ; Alcotest.test_case "after comma" `Quick test_should_complete_after_comma
+       ])
     ; ("properties",
        List.map QCheck_alcotest.to_alcotest
          [ prop_common_prefix_is_prefix
          ; prop_find_matches_subset
          ; prop_find_matches_all_start_with_prefix
          ; prop_format_columns_contains_all
+         ; prop_complete_path_results_start_with_prefix
+         ; prop_should_complete_iff_extract_nonempty
          ])
     ]

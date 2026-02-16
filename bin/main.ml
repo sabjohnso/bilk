@@ -633,10 +633,62 @@ let run_repl theme_name =
     end;
     !cached_candidates
   in
+  let get_library_names () =
+    let inst = !inst_ref in
+    let loaded = Library.list_all inst.Instance.libraries in
+    List.map (fun (l : Library.t) -> l.name) loaded
+  in
+  let apply_matches ~width text cursor start matches =
+    match matches with
+    | [] -> Line_editor.No_completions
+    | [single] ->
+      let before = String.sub text 0 start in
+      let after = String.sub text cursor (String.length text - cursor) in
+      Line_editor.Single (before ^ single ^ after,
+                          start + String.length single)
+    | _ ->
+      let cp = Completion.common_prefix matches in
+      let before = String.sub text 0 start in
+      let after = String.sub text cursor (String.length text - cursor) in
+      let display = Completion.format_columns ~width matches in
+      Line_editor.Multiple (before ^ cp ^ after,
+                            start + String.length cp, display)
+  in
   let complete_fn text cursor ~width =
-    let (prefix, start) = Completion.extract_prefix text cursor in
-    if prefix = "" then Line_editor.No_completions
-    else
+    let rt = (!inst_ref).Instance.readtable in
+    match Completion_context.detect rt text cursor with
+    | Completion_context.No_context ->
+      Line_editor.No_completions
+    | Completion_context.String_literal (content, start) ->
+      let matches = Completion.complete_path content in
+      apply_matches ~width text cursor start matches
+    | Completion_context.Repl_command_arg (cmd, arg, start) ->
+      let matches = match cmd with
+        | ",load" | ",save-session" | ",load-session" ->
+          Completion.complete_path arg
+        | ",theme" ->
+          Completion.find_matches arg ["dark"; "light"; "none"]
+        | ",reload" | ",exports" | ",deps" ->
+          let lib_names = get_library_names () in
+          let formatted = List.map Completion.format_library_name lib_names in
+          Completion.find_matches arg formatted
+        | ",revert" | ",checkpoint" ->
+          let names = Session.list_checkpoints !session_ref in
+          Completion.find_matches arg names
+        | _ -> []
+      in
+      apply_matches ~width text cursor start matches
+    | Completion_context.Import_library (parts, prefix, start) ->
+      let lib_names = get_library_names () in
+      let matching = Completion.match_library_name parts prefix lib_names in
+      let next_parts = List.filter_map (fun name ->
+        let n = List.length parts in
+        if List.length name > n then Some (List.nth name n)
+        else None
+      ) matching in
+      let unique = List.sort_uniq String.compare next_parts in
+      apply_matches ~width text cursor start unique
+    | Completion_context.Identifier (prefix, start) ->
       let candidates =
         if String.length prefix > 0 && prefix.[0] = ',' then
           repl_commands
@@ -644,22 +696,7 @@ let run_repl theme_name =
           get_scheme_candidates ()
       in
       let matches = Completion.find_matches prefix candidates in
-      match matches with
-      | [] -> Line_editor.No_completions
-      | [single] ->
-        let before = String.sub text 0 start in
-        let after = String.sub text cursor (String.length text - cursor) in
-        let new_text = before ^ single ^ after in
-        let new_cursor = start + String.length single in
-        Line_editor.Single (new_text, new_cursor)
-      | _ ->
-        let cp = Completion.common_prefix matches in
-        let before = String.sub text 0 start in
-        let after = String.sub text cursor (String.length text - cursor) in
-        let new_text = before ^ cp ^ after in
-        let new_cursor = start + String.length cp in
-        let display = Completion.format_columns ~width matches in
-        Line_editor.Multiple (new_text, new_cursor, display)
+      apply_matches ~width text cursor start matches
   in
   let on_idle = match pkg_info with
     | None -> None
@@ -2054,6 +2091,105 @@ let make_profile_cmd () =
   in
   Cmd.v info term
 
+(* --- Remote REPL: serve / attach --- *)
+
+let run_serve port scrollback_size auto_checkpoint name =
+  let config = {
+    Repl_server.port;
+    scrollback_size;
+    auto_checkpoint;
+    name;
+  } in
+  let server = Repl_server.create config in
+  Printf.printf "Bilk REPL server '%s' listening on port %d\n%!" name port;
+  (try Repl_server.run server
+   with e ->
+     Repl_server.shutdown server;
+     raise e);
+  0
+
+let make_serve_cmd () =
+  let open Cmdliner in
+  let port_opt =
+    Arg.(value & opt int 7890 &
+         info ["port"; "p"] ~docv:"PORT"
+           ~doc:"TCP port to listen on (default 7890).")
+  in
+  let scrollback_opt =
+    Arg.(value & opt int 65536 &
+         info ["scrollback"] ~docv:"BYTES"
+           ~doc:"Scrollback buffer size in bytes (default 64KB).")
+  in
+  let auto_checkpoint_opt =
+    Arg.(value & flag &
+         info ["auto-checkpoint"]
+           ~doc:"Automatically checkpoint on client disconnect.")
+  in
+  let name_opt =
+    Arg.(value & opt string "default" &
+         info ["name"] ~docv:"NAME"
+           ~doc:"Session name (default 'default').")
+  in
+  let cmd port scrollback auto_checkpoint name =
+    exit (run_serve port scrollback auto_checkpoint name)
+  in
+  let term = Term.(const cmd $ port_opt $ scrollback_opt
+                   $ auto_checkpoint_opt $ name_opt) in
+  let info =
+    Cmd.info "serve" ~version
+      ~doc:"Start a remote REPL server"
+      ~man:[`S "DESCRIPTION";
+            `P "Starts a persistent REPL server that clients can connect \
+                to with $(b,bilk attach). The server holds the Scheme \
+                instance, line editor, and scrollback buffer. Clients \
+                that disconnect can reconnect and see previous output."]
+  in
+  Cmd.v info term
+
+let run_attach host port =
+  let config = { Repl_client.host; port } in
+  (try Repl_client.connect config
+   with
+   | Unix.Unix_error (err, _, _) ->
+     Printf.eprintf "Connection failed: %s\n%!" (Unix.error_message err);
+     exit 1
+   | Repl_protocol.Protocol_error msg ->
+     Printf.eprintf "Protocol error: %s\n%!" msg;
+     exit 1);
+  0
+
+let make_attach_cmd () =
+  let open Cmdliner in
+  let target_arg =
+    Arg.(required & pos 0 (some string) None &
+         info [] ~docv:"HOST:PORT"
+           ~doc:"Server address in HOST:PORT format \
+                 (e.g., localhost:7890).")
+  in
+  let cmd target =
+    match String.split_on_char ':' target with
+    | [host; port_str] ->
+      (match int_of_string_opt port_str with
+       | Some port -> exit (run_attach host port)
+       | None ->
+         Printf.eprintf "Invalid port: %s\n%!" port_str;
+         exit 1)
+    | _ ->
+      Printf.eprintf "Expected HOST:PORT format (e.g., localhost:7890)\n%!";
+      exit 1
+  in
+  let term = Term.(const cmd $ target_arg) in
+  let info =
+    Cmd.info "attach" ~version
+      ~doc:"Connect to a remote REPL server"
+      ~man:[`S "DESCRIPTION";
+            `P "Connects to a running REPL server started with \
+                $(b,bilk serve). Enters raw terminal mode and relays \
+                keystrokes to the server. On reconnect, previous \
+                output is replayed from the server's scrollback buffer."]
+  in
+  Cmd.v info term
+
 (* Manual subcommand dispatch to avoid Cmd.group intercepting positional
    file arguments (e.g. "bilk file.scm") as unknown subcommand names. *)
 let () =
@@ -2121,6 +2257,18 @@ let () =
         Array.sub Sys.argv 2 (argc - 2)
       ] in
       exit (Cmd.eval ~argv (make_profile_cmd ()))
+    | "serve" ->
+      let argv = Array.concat [
+        [| Sys.argv.(0) |];
+        Array.sub Sys.argv 2 (argc - 2)
+      ] in
+      exit (Cmd.eval ~argv (make_serve_cmd ()))
+    | "attach" ->
+      let argv = Array.concat [
+        [| Sys.argv.(0) |];
+        Array.sub Sys.argv 2 (argc - 2)
+      ] in
+      exit (Cmd.eval ~argv (make_attach_cmd ()))
     | arg when String.length arg > 0 && arg.[0] <> '-' ->
       let script_args = Array.to_list (Array.sub Sys.argv 2 (argc - 2)) in
       exit (run_file arg script_args)

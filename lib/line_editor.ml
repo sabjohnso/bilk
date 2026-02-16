@@ -708,7 +708,9 @@ let read_input t =
       loop ()
 
     | Terminal.Tab ->
-      if paredit_active t then begin
+      if paredit_active t
+         && not (Completion.should_complete_at (content_string st) st.cursor)
+      then begin
         let text = content_string st in
         let rt = get_readtable t in
         apply_paredit_result st (Paredit.indent_line rt text st.cursor);
