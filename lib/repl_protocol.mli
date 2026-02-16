@@ -52,6 +52,11 @@ val read_server_msg : string -> int -> server_msg * int
     at [offset]. Returns [(msg, next_offset)].
     @raise Protocol_error on malformed data. *)
 
+val max_frame_size : int
+(** Maximum allowed frame payload size (16 MiB).
+    Frames exceeding this are rejected with {!Protocol_error}. *)
+
 val frame_available : string -> int -> bool
 (** [frame_available data offset] returns [true] if a complete frame
-    is available at [offset] in [data]. *)
+    is available at [offset] in [data].
+    @raise Protocol_error if the payload length exceeds {!max_frame_size}. *)

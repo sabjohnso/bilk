@@ -96,6 +96,8 @@ let write_server_msg buf = function
   | Session_deny ->
     write_frame buf 0x88 (fun _ -> ())
 
+let max_frame_size = 16 * 1024 * 1024  (* 16 MiB *)
+
 (* --- Frame reading --- *)
 
 let frame_available data offset =
@@ -103,7 +105,10 @@ let frame_available data offset =
   if offset + 4 > len then false
   else begin
     let payload_len = read_u32 data offset in
-    offset + 4 + payload_len <= len
+    if payload_len > max_frame_size then
+      raise (Protocol_error "frame too large")
+    else
+      offset + 4 + payload_len <= len
   end
 
 let read_client_msg data offset =

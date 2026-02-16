@@ -140,6 +140,43 @@ let test_frame_length () =
     (String.length bytes - 4)
     payload_len
 
+(* --- Max frame size tests --- *)
+
+let encode_u32 n =
+  let buf = Bytes.create 4 in
+  Bytes.set buf 0 (Char.chr ((n lsr 24) land 0xff));
+  Bytes.set buf 1 (Char.chr ((n lsr 16) land 0xff));
+  Bytes.set buf 2 (Char.chr ((n lsr 8) land 0xff));
+  Bytes.set buf 3 (Char.chr (n land 0xff));
+  Bytes.to_string buf
+
+let test_oversized_frame_raises () =
+  let data = encode_u32 (Repl_protocol.max_frame_size + 1) in
+  Alcotest.check_raises "oversized frame"
+    (Repl_protocol.Protocol_error "frame too large")
+    (fun () -> ignore (Repl_protocol.frame_available data 0))
+
+let test_oversized_server_frame_raises () =
+  (* frame_available is direction-agnostic; verify with server-style data *)
+  let payload_len = Repl_protocol.max_frame_size + 100 in
+  let data = encode_u32 payload_len in
+  Alcotest.check_raises "oversized server frame"
+    (Repl_protocol.Protocol_error "frame too large")
+    (fun () -> ignore (Repl_protocol.frame_available data 0))
+
+let test_at_limit_no_error () =
+  (* Exactly max_frame_size: no Protocol_error, just returns false
+     because the data is too short to hold the full payload *)
+  let data = encode_u32 Repl_protocol.max_frame_size in
+  let result = Repl_protocol.frame_available data 0 in
+  Alcotest.(check bool) "at-limit returns false (incomplete)" false result
+
+let test_huge_payload_len_raises () =
+  let data = encode_u32 0x7FFF_FFFF in
+  Alcotest.check_raises "huge payload len"
+    (Repl_protocol.Protocol_error "frame too large")
+    (fun () -> ignore (Repl_protocol.frame_available data 0))
+
 (* --- Properties --- *)
 
 let prop_client_roundtrip =
@@ -192,6 +229,19 @@ let prop_server_roundtrip =
        let (decoded, consumed) = Repl_protocol.read_server_msg bytes 0 in
        decoded = msg && consumed = String.length bytes)
 
+let prop_oversized_frame_raises =
+  QCheck2.Test.make ~count:200
+    ~name:"oversized payload_len always raises Protocol_error"
+    QCheck2.Gen.(int_range
+                   (Repl_protocol.max_frame_size + 1)
+                   0x7FFF_FFFF)
+    (fun payload_len ->
+       let data = encode_u32 payload_len in
+       try
+         ignore (Repl_protocol.frame_available data 0);
+         false  (* should have raised *)
+       with Repl_protocol.Protocol_error "frame too large" -> true)
+
 let () =
   Alcotest.run "Repl_protocol"
     [ ("client_roundtrip",
@@ -218,9 +268,20 @@ let () =
     ; ("frame",
        [ Alcotest.test_case "length" `Quick test_frame_length
        ])
+    ; ("max_frame_size",
+       [ Alcotest.test_case "oversized raises" `Quick
+           test_oversized_frame_raises
+       ; Alcotest.test_case "oversized server raises" `Quick
+           test_oversized_server_frame_raises
+       ; Alcotest.test_case "at limit no error" `Quick
+           test_at_limit_no_error
+       ; Alcotest.test_case "huge payload raises" `Quick
+           test_huge_payload_len_raises
+       ])
     ; ("properties",
        List.map QCheck_alcotest.to_alcotest
          [ prop_client_roundtrip
          ; prop_server_roundtrip
+         ; prop_oversized_frame_raises
          ])
     ]

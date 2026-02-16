@@ -711,7 +711,7 @@ arbitrary files accessible to the server process.
 - Tests: [[file:test/test_session_store.ml][test_session_store.ml]] (12 tests),
   [[file:test/test_repl_server.ml][test_repl_server.ml]] named_sessions + path_restriction groups.
 
-*** TODO Issue 64: No max frame size in protocol
+*** DONE Issue 64: No max frame size in protocol
 :PROPERTIES:
 :PRIORITY: A
 :CATEGORY: security
@@ -722,13 +722,16 @@ a 4GB payload, causing out-of-memory. The ~frame_available~ function
 also risks integer overflow when ~offset + 4 + payload_len~ wraps on
 63-bit OCaml ints.
 
-**** Plan
-- Add ~max_frame_size~ constant (e.g. 16 MiB)
-- Reject frames exceeding ~max_frame_size~ in ~read_client_msg~ /
-  ~read_server_msg~ with a protocol error
-- Guard ~frame_available~ against integer overflow: check
-  ~payload_len > max_frame_size~ before arithmetic
-- Write tests: oversized frame header rejected, boundary values handled
+**** Resolution
+- Added ~max_frame_size~ constant (16 MiB) exposed in [[file:lib/repl_protocol.mli][repl_protocol.mli]]
+- ~frame_available~ now checks ~payload_len > max_frame_size~ before
+  the addition, raising ~Protocol_error "frame too large"~ — this
+  eliminates the integer overflow risk since 16 MiB + any realistic
+  offset fits in 63-bit OCaml ints
+- ~read_client_msg~ / ~read_server_msg~ already call ~frame_available~
+  first, so the guard propagates to all deserialization paths
+- Tests: 4 example tests + 1 QCheck2 property test in
+  [[file:test/test_repl_protocol.ml][test_repl_protocol.ml]] ~max_frame_size~ group
 
 *** DONE Issue 65: Flag injection via ~serve_args~ in SSH connect
 :PROPERTIES:
