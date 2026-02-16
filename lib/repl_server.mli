@@ -1,8 +1,8 @@
 (** REPL server for remote connections.
 
     Manages an Instance.t, line editor, scrollback buffer, and TCP
-    connections. The server holds all state — clients are thin relays
-    that forward keystrokes and receive terminal output. *)
+    connections. The server evaluates expressions from smart clients
+    and sends back results, errors, and output. *)
 
 (** Server configuration. *)
 type config = {

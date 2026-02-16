@@ -1,14 +1,22 @@
 type client_msg =
-  | Key_input of string
-  | Resize of int * int
-  | Ping
+  | Eval of string
+  | Complete of string
+  | Interrupt
+  | Input of string
+  | Resume of string
   | Disconnect
+
+type status = Ready | Busy
 
 type server_msg =
   | Output of string
-  | Pong
-  | Scrollback of string
-  | Server_exit
+  | Result of string
+  | Error of string
+  | Completions of string list
+  | Read_request of string
+  | Status of status
+  | Session_ok
+  | Session_deny
 
 exception Protocol_error of string
 
@@ -48,30 +56,45 @@ let read_bytes data off =
 let write_frame buf tag payload_fn =
   let payload = Buffer.create 64 in
   payload_fn payload;
-  let payload_len = Buffer.length payload + 1 in (* +1 for tag byte *)
+  let payload_len = Buffer.length payload + 1 in
   write_u32 buf payload_len;
   Buffer.add_char buf (Char.chr tag);
   Buffer.add_buffer buf payload
 
 let write_client_msg buf = function
-  | Key_input s ->
+  | Eval s ->
     write_frame buf 0x01 (fun p -> write_bytes p s)
-  | Resize (rows, cols) ->
-    write_frame buf 0x02 (fun p -> write_u16 p rows; write_u16 p cols)
-  | Ping ->
+  | Complete s ->
+    write_frame buf 0x02 (fun p -> write_bytes p s)
+  | Interrupt ->
     write_frame buf 0x03 (fun _ -> ())
+  | Input s ->
+    write_frame buf 0x04 (fun p -> write_bytes p s)
+  | Resume s ->
+    write_frame buf 0x05 (fun p -> write_bytes p s)
   | Disconnect ->
-    write_frame buf 0x04 (fun _ -> ())
+    write_frame buf 0x06 (fun _ -> ())
 
 let write_server_msg buf = function
   | Output s ->
     write_frame buf 0x81 (fun p -> write_bytes p s)
-  | Pong ->
-    write_frame buf 0x82 (fun _ -> ())
-  | Scrollback s ->
+  | Result s ->
+    write_frame buf 0x82 (fun p -> write_bytes p s)
+  | Error s ->
     write_frame buf 0x83 (fun p -> write_bytes p s)
-  | Server_exit ->
-    write_frame buf 0x84 (fun _ -> ())
+  | Completions lst ->
+    write_frame buf 0x84 (fun p ->
+      write_u16 p (List.length lst);
+      List.iter (fun s -> write_bytes p s) lst)
+  | Read_request s ->
+    write_frame buf 0x85 (fun p -> write_bytes p s)
+  | Status st ->
+    write_frame buf 0x86 (fun p ->
+      Buffer.add_char p (match st with Ready -> '\x00' | Busy -> '\x01'))
+  | Session_ok ->
+    write_frame buf 0x87 (fun _ -> ())
+  | Session_deny ->
+    write_frame buf 0x88 (fun _ -> ())
 
 (* --- Frame reading --- *)
 
@@ -94,13 +117,18 @@ let read_client_msg data offset =
   let msg = match tag with
     | 0x01 ->
       let (s, _) = read_bytes data body_off in
-      Key_input s
+      Eval s
     | 0x02 ->
-      let rows = read_u16 data body_off in
-      let cols = read_u16 data (body_off + 2) in
-      Resize (rows, cols)
-    | 0x03 -> Ping
-    | 0x04 -> Disconnect
+      let (s, _) = read_bytes data body_off in
+      Complete s
+    | 0x03 -> Interrupt
+    | 0x04 ->
+      let (s, _) = read_bytes data body_off in
+      Input s
+    | 0x05 ->
+      let (s, _) = read_bytes data body_off in
+      Resume s
+    | 0x06 -> Disconnect
     | _ -> raise (Protocol_error (Printf.sprintf "unknown client tag 0x%02x" tag))
   in
   (msg, next)
@@ -117,11 +145,29 @@ let read_server_msg data offset =
     | 0x81 ->
       let (s, _) = read_bytes data body_off in
       Output s
-    | 0x82 -> Pong
+    | 0x82 ->
+      let (s, _) = read_bytes data body_off in
+      Result s
     | 0x83 ->
       let (s, _) = read_bytes data body_off in
-      Scrollback s
-    | 0x84 -> Server_exit
+      Error s
+    | 0x84 ->
+      let count = read_u16 data body_off in
+      let off = ref (body_off + 2) in
+      let lst = List.init count (fun _ ->
+        let (s, next) = read_bytes data !off in
+        off := next;
+        s)
+      in
+      Completions lst
+    | 0x85 ->
+      let (s, _) = read_bytes data body_off in
+      Read_request s
+    | 0x86 ->
+      let b = Char.code data.[body_off] in
+      Status (if b = 0 then Ready else Busy)
+    | 0x87 -> Session_ok
+    | 0x88 -> Session_deny
     | _ -> raise (Protocol_error (Printf.sprintf "unknown server tag 0x%02x" tag))
   in
   (msg, next)

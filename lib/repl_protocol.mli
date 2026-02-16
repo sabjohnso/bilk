@@ -3,22 +3,31 @@
     Length-prefixed frames with a 1-byte tag. Frame format:
     [\[u32 payload_length\]\[u8 tag\]\[payload...\]]
 
-    Client and server message types are disjoint — tags 0x01-0x04
-    for client messages, 0x81-0x84 for server messages. *)
+    Client and server message types are disjoint — tags 0x01-0x06
+    for client messages, 0x81-0x88 for server messages. *)
 
 (** Messages sent from client to server. *)
 type client_msg =
-  | Key_input of string   (** Raw keystroke bytes. *)
-  | Resize of int * int   (** Terminal rows, cols. *)
-  | Ping                  (** Keep-alive. *)
-  | Disconnect            (** Clean disconnect. *)
+  | Eval of string         (** Complete expression to evaluate. *)
+  | Complete of string     (** Prefix to complete. *)
+  | Interrupt              (** Interrupt current evaluation. *)
+  | Input of string        (** Response to a read request. *)
+  | Resume of string       (** Session token for resumption. *)
+  | Disconnect             (** Clean disconnect. *)
+
+(** Server readiness status. *)
+type status = Ready | Busy
 
 (** Messages sent from server to client. *)
 type server_msg =
-  | Output of string      (** Raw ANSI terminal output. *)
-  | Pong                  (** Keep-alive response. *)
-  | Scrollback of string  (** Full replay on reconnect. *)
-  | Server_exit           (** Server shutting down. *)
+  | Output of string         (** Terminal output (prompts, print, etc). *)
+  | Result of string         (** Evaluation result value. *)
+  | Error of string          (** Evaluation error message. *)
+  | Completions of string list  (** Completion candidates. *)
+  | Read_request of string   (** Prompt for user input (read). *)
+  | Status of status         (** Server readiness status. *)
+  | Session_ok               (** Session resume accepted. *)
+  | Session_deny             (** Session resume denied. *)
 
 (** {1 Serialization} *)
 

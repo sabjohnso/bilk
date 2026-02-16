@@ -15,15 +15,11 @@ let test_server_survives_disconnect () =
     name = "test";
   } in
   let server = Repl_server.create config in
-  (* Simulate a client connecting via socketpair *)
   let (client_fd, server_fd) = Unix.socketpair Unix.PF_UNIX Unix.SOCK_STREAM 0 in
   Repl_server.accept_client server server_fd;
-  (* Close the client side — simulates disconnect *)
   Unix.close client_fd;
-  (* Server should still be alive *)
   let alive = Repl_server.is_alive server in
   Alcotest.(check bool) "server still alive" true alive;
-  (* Shutdown closes the server_fd *)
   Repl_server.shutdown server
 
 (* --- Scrollback replay on reconnect --- *)
@@ -36,9 +32,7 @@ let test_scrollback_replay () =
     name = "test";
   } in
   let server = Repl_server.create config in
-  (* First client writes some output *)
   Repl_server.append_output server "hello world\n";
-  (* Simulate reconnect — scrollback should be available *)
   let sb = Repl_server.get_scrollback server in
   Alcotest.(check string) "scrollback" "hello world\n" sb;
   Repl_server.shutdown server
@@ -65,7 +59,6 @@ let test_keepalive_state () =
   let server = Repl_server.create config in
   let (_, server_fd) = Unix.socketpair Unix.PF_UNIX Unix.SOCK_STREAM 0 in
   Repl_server.accept_client server server_fd;
-  (* Server should be alive after accepting *)
   Alcotest.(check bool) "alive after accept" true
     (Repl_server.is_alive server);
   Repl_server.shutdown server

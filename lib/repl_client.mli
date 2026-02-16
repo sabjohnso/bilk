@@ -1,7 +1,9 @@
-(** REPL client — thin terminal relay.
+(** REPL client — smart client stub.
 
-    Connects to a remote REPL server, enters raw terminal mode locally,
-    and relays keystrokes to the server and terminal output back. *)
+    Connects to a remote REPL server and relays expressions for
+    evaluation. Currently a transitional implementation that wraps
+    stdin reads as Eval messages; will be replaced with a full
+    local REPL UI in a later phase. *)
 
 (** Client configuration. *)
 type config = {
@@ -14,5 +16,5 @@ type config = {
 
 val connect : config -> unit
 (** [connect config] connects to the server and runs the relay loop.
-    Blocks until the server sends [Server_exit] or the connection is lost.
-    Enters and exits raw terminal mode. *)
+    Blocks until the server sends [Session_deny] or the connection
+    is lost. *)

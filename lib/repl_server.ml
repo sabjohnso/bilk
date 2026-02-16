@@ -16,9 +16,6 @@ type t = {
   mutable last_pong : float;
 }
 
-let ping_interval = 30.0
-let pong_timeout = 60.0
-
 let create config =
   { config;
     scrollback = Scrollback.create ~max_bytes:config.scrollback_size;
@@ -45,24 +42,6 @@ let clear_scrollback t =
 
 let is_alive t = t.alive
 
-let send_server_exit t =
-  match t.client_fd with
-  | None -> ()
-  | Some fd ->
-    let buf = Buffer.create 32 in
-    Repl_protocol.write_server_msg buf Repl_protocol.Server_exit;
-    let data = Buffer.contents buf in
-    (try ignore (Unix.write_substring fd data 0 (String.length data))
-     with Unix.Unix_error _ -> ())
-
-let shutdown t =
-  t.alive <- false;
-  send_server_exit t;
-  Option.iter (fun fd ->
-    (try Unix.close fd with Unix.Unix_error _ -> ())
-  ) t.client_fd;
-  t.client_fd <- None
-
 let send_to_client t msg =
   match t.client_fd with
   | None -> ()
@@ -74,6 +53,13 @@ let send_to_client t msg =
        ignore (Unix.write_substring fd data 0 (String.length data))
      with Unix.Unix_error _ ->
        t.client_fd <- None)
+
+let shutdown t =
+  t.alive <- false;
+  Option.iter (fun fd ->
+    (try Unix.close fd with Unix.Unix_error _ -> ())
+  ) t.client_fd;
+  t.client_fd <- None
 
 let relay_output t s =
   append_output t s;
@@ -99,23 +85,28 @@ let disconnect_client t =
 
 let handle_client_msg t msg =
   match msg with
-  | Repl_protocol.Ping ->
-    send_to_client t Repl_protocol.Pong
   | Repl_protocol.Disconnect ->
     disconnect_client t
-  | Repl_protocol.Key_input _s ->
+  | Repl_protocol.Eval _s ->
     ()
-  | Repl_protocol.Resize (_rows, _cols) ->
+  | Repl_protocol.Complete _s ->
     ()
+  | Repl_protocol.Interrupt ->
+    ()
+  | Repl_protocol.Input _s ->
+    ()
+  | Repl_protocol.Resume _s ->
+    ()
+
+let ping_interval = 30.0
+let pong_timeout = 60.0
 
 let check_keepalive t =
   let now = Unix.gettimeofday () in
-  (* Send ping periodically *)
   if t.client_fd <> None && now -. t.last_ping > ping_interval then begin
-    send_to_client t Repl_protocol.Pong;
+    send_to_client t (Repl_protocol.Status Repl_protocol.Ready);
     t.last_ping <- now
   end;
-  (* Check for pong timeout *)
   if t.client_fd <> None && t.last_pong > 0.0
      && now -. t.last_pong > pong_timeout then begin
     disconnect_client t
@@ -130,7 +121,6 @@ let run t =
   let session = Session.create () in
   t.inst <- Some inst;
   t.session <- Some session;
-  (* Install signal handlers *)
   let handle_signal _ =
     t.alive <- false
   in
@@ -157,7 +147,7 @@ let run t =
            t.last_pong <- Unix.gettimeofday ();
            let sb = get_scrollback t in
            if sb <> "" then
-             send_to_client t (Repl_protocol.Scrollback sb)
+             send_to_client t (Repl_protocol.Output sb)
          end else if Some fd = t.client_fd then begin
            let n = try Unix.read fd read_buf 0 4096
              with Unix.Unix_error _ -> 0
@@ -170,13 +160,9 @@ let run t =
              (try
                 while Repl_protocol.frame_available data !off do
                   let (msg, next) = Repl_protocol.read_client_msg data !off in
-                  (match msg with
-                   | Repl_protocol.Ping ->
-                     t.last_pong <- Unix.gettimeofday ()
-                   | _ -> ());
                   handle_client_msg t msg;
                   (match msg with
-                   | Repl_protocol.Key_input s ->
+                   | Repl_protocol.Eval s ->
                      (try
                         ignore (Unix.write_substring pipe_write s 0
                                   (String.length s))
@@ -203,9 +189,7 @@ let run t =
      (try Unix.close pipe_read with Unix.Unix_error _ -> ());
      (try Unix.close pipe_write with Unix.Unix_error _ -> ());
      (try Unix.close server_sock with Unix.Unix_error _ -> ());
-     send_server_exit t;
      raise e);
   (try Unix.close pipe_read with Unix.Unix_error _ -> ());
   (try Unix.close pipe_write with Unix.Unix_error _ -> ());
-  (try Unix.close server_sock with Unix.Unix_error _ -> ());
-  send_server_exit t
+  (try Unix.close server_sock with Unix.Unix_error _ -> ())
