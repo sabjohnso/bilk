@@ -32,6 +32,12 @@ type key =
   | Alt_r
   | Alt_open_paren
   | Alt_9
+  | Alt_ctrl_f
+  | Alt_ctrl_b
+  | Alt_ctrl_d
+  | Alt_ctrl_u
+  | Alt_ctrl_n
+  | Alt_ctrl_p
   | Shift_tab
   | Unknown
 
@@ -164,6 +170,18 @@ let parse_key_bytes buf len =
           Alt_open_paren
         else if b1 = Char.code '9' then
           Alt_9
+        else if b1 = 0x06 then
+          Alt_ctrl_f
+        else if b1 = 0x02 then
+          Alt_ctrl_b
+        else if b1 = 0x04 then
+          Alt_ctrl_d
+        else if b1 = 0x15 then
+          Alt_ctrl_u
+        else if b1 = 0x0E then
+          Alt_ctrl_n
+        else if b1 = 0x10 then
+          Alt_ctrl_p
         else
           Unknown
       end

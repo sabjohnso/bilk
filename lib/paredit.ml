@@ -189,6 +189,60 @@ let enclosing_paren rt text pos =
   ) tokens;
   !result
 
+(* --- Sexp navigation (edit_result) --- *)
+
+let navigate_forward rt text cursor =
+  match sexp_forward rt text cursor with
+  | Some pos -> { text; cursor = pos }
+  | None -> no_change text cursor
+
+let navigate_backward rt text cursor =
+  match sexp_backward rt text cursor with
+  | Some pos -> { text; cursor = pos }
+  | None -> no_change text cursor
+
+let forward_down rt text cursor =
+  let len = String.length text in
+  let tokens = Tokenizer.tokenize rt text in
+  let rec find = function
+    | [] -> no_change text cursor
+    | (tok : Tokenizer.token) :: rest ->
+      if tok.span.start < cursor then find rest
+      else
+        match tok.kind with
+        | Paren_open -> { text; cursor = tok.span.start + 1 }
+        | Whitespace -> find rest
+        | _ -> find rest  (* skip atoms looking for a list *)
+  in
+  if cursor >= len then no_change text cursor
+  else find tokens
+
+let backward_up rt text cursor =
+  match enclosing_paren rt text cursor with
+  | Some (open_pos, _) -> { text; cursor = open_pos }
+  | None -> no_change text cursor
+
+let forward_up rt text cursor =
+  match enclosing_paren rt text cursor with
+  | Some (_, close_pos) -> { text; cursor = close_pos + 1 }
+  | None -> no_change text cursor
+
+let backward_down rt text cursor =
+  let tokens = Tokenizer.tokenize rt text in
+  let rev_tokens = List.rev tokens in
+  let rec find = function
+    | [] -> no_change text cursor
+    | (tok : Tokenizer.token) :: rest ->
+      if tok.span.start >= cursor then find rest
+      else
+        match tok.kind with
+        | Paren_close -> { text; cursor = tok.span.start }
+        | Whitespace -> find rest
+        | _ -> find rest  (* skip atoms looking for a list *)
+  in
+  if cursor <= 0 then no_change text cursor
+  else find rev_tokens
+
 (* --- Balanced insertion --- *)
 
 let insert_open_paren text cursor =

@@ -79,6 +79,103 @@ let test_enclosing_paren_none () =
   let result = Paredit.enclosing_paren rt "a b c" 2 in
   Alcotest.(check (option (pair int int))) "none" None result
 
+(* === Sexp navigation (edit_result) === *)
+
+let test_navigate_forward_atom () =
+  let result = Paredit.navigate_forward rt "hello world" 0 in
+  check_edit "forward atom" "hello world" 5 result
+
+let test_navigate_forward_list () =
+  let result = Paredit.navigate_forward rt "(a b) c" 0 in
+  check_edit "forward list" "(a b) c" 5 result
+
+let test_navigate_forward_at_end () =
+  let result = Paredit.navigate_forward rt "(a b)" 5 in
+  check_edit "forward at end" "(a b)" 5 result
+
+let test_navigate_forward_at_close () =
+  (* Inside a list at the close paren — no sexp to move over *)
+  let result = Paredit.navigate_forward rt "(a b)" 4 in
+  check_edit "forward at close" "(a b)" 4 result
+
+let test_navigate_backward_atom () =
+  let result = Paredit.navigate_backward rt "hello world" 11 in
+  check_edit "backward atom" "hello world" 6 result
+
+let test_navigate_backward_list () =
+  let result = Paredit.navigate_backward rt "a (b c)" 7 in
+  check_edit "backward list" "a (b c)" 2 result
+
+let test_navigate_backward_at_start () =
+  let result = Paredit.navigate_backward rt "(a b)" 0 in
+  check_edit "backward at start" "(a b)" 0 result
+
+let test_navigate_backward_at_open () =
+  (* Inside a list at the open paren — no sexp to move over *)
+  let result = Paredit.navigate_backward rt "(a b)" 1 in
+  check_edit "backward at open" "(a b)" 1 result
+
+let test_forward_down_into_list () =
+  (* Cursor before a list — descend past the opening paren *)
+  let result = Paredit.forward_down rt "(a b) c" 0 in
+  check_edit "down into list" "(a b) c" 1 result
+
+let test_forward_down_nested () =
+  (* (a (b c) d) with cursor at 3 — before inner list, descend into it *)
+  let result = Paredit.forward_down rt "(a (b c) d)" 3 in
+  check_edit "down nested" "(a (b c) d)" 4 result
+
+let test_forward_down_skip_atoms () =
+  (* Cursor at an atom — skip to next list *)
+  let result = Paredit.forward_down rt "a (b c)" 0 in
+  check_edit "down skip atoms" "a (b c)" 3 result
+
+let test_forward_down_no_list () =
+  let result = Paredit.forward_down rt "a b c" 0 in
+  check_edit "down no list" "a b c" 0 result
+
+let test_backward_up_out_of_list () =
+  (* Cursor inside a list — move to opening paren *)
+  let result = Paredit.backward_up rt "(a b c)" 3 in
+  check_edit "up out of list" "(a b c)" 0 result
+
+let test_backward_up_nested () =
+  (* (a (b c) d) with cursor at 5 inside inner list *)
+  let result = Paredit.backward_up rt "(a (b c) d)" 5 in
+  check_edit "up nested" "(a (b c) d)" 3 result
+
+let test_backward_up_not_inside () =
+  let result = Paredit.backward_up rt "a b c" 2 in
+  check_edit "up not inside" "a b c" 2 result
+
+let test_forward_up_out_of_list () =
+  (* Cursor inside a list — move past closing paren *)
+  let result = Paredit.forward_up rt "(a b c)" 3 in
+  check_edit "fwd up out" "(a b c)" 7 result
+
+let test_forward_up_nested () =
+  (* (a (b c) d) with cursor at 5 inside inner list *)
+  let result = Paredit.forward_up rt "(a (b c) d)" 5 in
+  check_edit "fwd up nested" "(a (b c) d)" 8 result
+
+let test_forward_up_not_inside () =
+  let result = Paredit.forward_up rt "a b c" 2 in
+  check_edit "fwd up not inside" "a b c" 2 result
+
+let test_backward_down_into_list () =
+  (* Cursor after a list — descend before closing paren *)
+  let result = Paredit.backward_down rt "(a b) c" 5 in
+  check_edit "bwd down into list" "(a b) c" 4 result
+
+let test_backward_down_nested () =
+  (* (a (b c) d) with cursor at 8 — after inner list *)
+  let result = Paredit.backward_down rt "(a (b c) d)" 8 in
+  check_edit "bwd down nested" "(a (b c) d)" 7 result
+
+let test_backward_down_no_list () =
+  let result = Paredit.backward_down rt "a b c" 3 in
+  check_edit "bwd down no list" "a b c" 3 result
+
 (* === Balanced insertion === *)
 
 let test_insert_open_paren () =
@@ -545,6 +642,27 @@ let () =
       Alcotest.test_case "enclosing paren" `Quick test_enclosing_paren;
       Alcotest.test_case "enclosing paren nested" `Quick test_enclosing_paren_nested;
       Alcotest.test_case "enclosing paren none" `Quick test_enclosing_paren_none;
+      Alcotest.test_case "navigate forward atom" `Quick test_navigate_forward_atom;
+      Alcotest.test_case "navigate forward list" `Quick test_navigate_forward_list;
+      Alcotest.test_case "navigate forward at end" `Quick test_navigate_forward_at_end;
+      Alcotest.test_case "navigate forward at close" `Quick test_navigate_forward_at_close;
+      Alcotest.test_case "navigate backward atom" `Quick test_navigate_backward_atom;
+      Alcotest.test_case "navigate backward list" `Quick test_navigate_backward_list;
+      Alcotest.test_case "navigate backward at start" `Quick test_navigate_backward_at_start;
+      Alcotest.test_case "navigate backward at open" `Quick test_navigate_backward_at_open;
+      Alcotest.test_case "forward down into list" `Quick test_forward_down_into_list;
+      Alcotest.test_case "forward down nested" `Quick test_forward_down_nested;
+      Alcotest.test_case "forward down skip atoms" `Quick test_forward_down_skip_atoms;
+      Alcotest.test_case "forward down no list" `Quick test_forward_down_no_list;
+      Alcotest.test_case "backward up out" `Quick test_backward_up_out_of_list;
+      Alcotest.test_case "backward up nested" `Quick test_backward_up_nested;
+      Alcotest.test_case "backward up not inside" `Quick test_backward_up_not_inside;
+      Alcotest.test_case "forward up out" `Quick test_forward_up_out_of_list;
+      Alcotest.test_case "forward up nested" `Quick test_forward_up_nested;
+      Alcotest.test_case "forward up not inside" `Quick test_forward_up_not_inside;
+      Alcotest.test_case "backward down into list" `Quick test_backward_down_into_list;
+      Alcotest.test_case "backward down nested" `Quick test_backward_down_nested;
+      Alcotest.test_case "backward down no list" `Quick test_backward_down_no_list;
     ];
     "balanced insertion", [
       Alcotest.test_case "insert open paren" `Quick test_insert_open_paren;

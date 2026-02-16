@@ -41,6 +41,12 @@ type key =
   | Alt_r              (** Alt-r — raise (paredit) *)
   | Alt_open_paren     (** Alt-( — wrap round (paredit) *)
   | Alt_9              (** Alt-9 — wrap round (paredit, alternative) *)
+  | Alt_ctrl_f         (** C-M-f — forward sexp (paredit) *)
+  | Alt_ctrl_b         (** C-M-b — backward sexp (paredit) *)
+  | Alt_ctrl_d         (** C-M-d — forward down into list (paredit) *)
+  | Alt_ctrl_u         (** C-M-u — backward up out of list (paredit) *)
+  | Alt_ctrl_n         (** C-M-n — forward up out of list (paredit) *)
+  | Alt_ctrl_p         (** C-M-p — backward down into list (paredit) *)
   | Shift_tab          (** Shift-Tab — re-indent all (paredit) *)
   | Unknown            (** Unrecognized sequence *)
 

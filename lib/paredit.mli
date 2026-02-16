@@ -35,6 +35,32 @@ val sexp_backward : Readtable.t -> string -> int -> int option
     of the innermost enclosing parentheses around [pos], or [None]. *)
 val enclosing_paren : Readtable.t -> string -> int -> (int * int) option
 
+(** {1 Sexp navigation} *)
+
+(** [navigate_forward rt text cursor] moves the cursor past the next
+    s-expression. No-op if no sexp follows. *)
+val navigate_forward : Readtable.t -> string -> int -> edit_result
+
+(** [navigate_backward rt text cursor] moves the cursor before the
+    previous s-expression. No-op if no sexp precedes. *)
+val navigate_backward : Readtable.t -> string -> int -> edit_result
+
+(** [forward_down rt text cursor] descends into the next list by moving
+    past its opening delimiter. No-op if no list follows. *)
+val forward_down : Readtable.t -> string -> int -> edit_result
+
+(** [backward_up rt text cursor] ascends out of the current list by
+    moving to its opening delimiter. No-op if not inside a list. *)
+val backward_up : Readtable.t -> string -> int -> edit_result
+
+(** [forward_up rt text cursor] ascends out of the current list by
+    moving past its closing delimiter. No-op if not inside a list. *)
+val forward_up : Readtable.t -> string -> int -> edit_result
+
+(** [backward_down rt text cursor] descends into the previous list by
+    moving before its closing delimiter. No-op if no list precedes. *)
+val backward_down : Readtable.t -> string -> int -> edit_result
+
 (** {1 Balanced insertion} *)
 
 (** [insert_open_paren text cursor] inserts ["()"] and places cursor between. *)

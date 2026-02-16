@@ -726,6 +726,60 @@ let read_input t =
       end;
       loop ()
 
+    | Terminal.Alt_ctrl_f ->
+      if paredit_active t then begin
+        let text = content_string st in
+        let rt = get_readtable t in
+        apply_paredit_result st (Paredit.navigate_forward rt text st.cursor);
+        render t st
+      end;
+      loop ()
+
+    | Terminal.Alt_ctrl_b ->
+      if paredit_active t then begin
+        let text = content_string st in
+        let rt = get_readtable t in
+        apply_paredit_result st (Paredit.navigate_backward rt text st.cursor);
+        render t st
+      end;
+      loop ()
+
+    | Terminal.Alt_ctrl_d ->
+      if paredit_active t then begin
+        let text = content_string st in
+        let rt = get_readtable t in
+        apply_paredit_result st (Paredit.forward_down rt text st.cursor);
+        render t st
+      end;
+      loop ()
+
+    | Terminal.Alt_ctrl_u ->
+      if paredit_active t then begin
+        let text = content_string st in
+        let rt = get_readtable t in
+        apply_paredit_result st (Paredit.backward_up rt text st.cursor);
+        render t st
+      end;
+      loop ()
+
+    | Terminal.Alt_ctrl_n ->
+      if paredit_active t then begin
+        let text = content_string st in
+        let rt = get_readtable t in
+        apply_paredit_result st (Paredit.forward_up rt text st.cursor);
+        render t st
+      end;
+      loop ()
+
+    | Terminal.Alt_ctrl_p ->
+      if paredit_active t then begin
+        let text = content_string st in
+        let rt = get_readtable t in
+        apply_paredit_result st (Paredit.backward_down rt text st.cursor);
+        render t st
+      end;
+      loop ()
+
     | Terminal.Unknown ->
       loop ()
   in
