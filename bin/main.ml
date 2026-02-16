@@ -2149,8 +2149,12 @@ let make_serve_cmd () =
   in
   Cmd.v info term
 
-let run_attach host port =
-  let config = { Repl_client.host; port } in
+let run_attach host port theme paredit =
+  let config : Repl_client.config = {
+    host; port; theme;
+    history_file;
+    paredit;
+  } in
   (try Repl_client.connect config
    with
    | Unix.Unix_error (err, _, _) ->
@@ -2169,11 +2173,22 @@ let make_attach_cmd () =
            ~doc:"Server address in HOST:PORT format \
                  (e.g., localhost:7890).")
   in
-  let cmd target =
+  let theme_opt =
+    Arg.(value & opt (some string) None &
+         info ["theme"] ~docv:"THEME"
+           ~doc:"Color theme: $(b,dark) (default), $(b,light), $(b,none), \
+                 or a file path.")
+  in
+  let paredit_opt =
+    Arg.(value & flag &
+         info ["paredit"]
+           ~doc:"Enable paredit mode for structural editing.")
+  in
+  let cmd target theme paredit =
     match String.split_on_char ':' target with
     | [host; port_str] ->
       (match int_of_string_opt port_str with
-       | Some port -> exit (run_attach host port)
+       | Some port -> exit (run_attach host port theme paredit)
        | None ->
          Printf.eprintf "Invalid port: %s\n%!" port_str;
          exit 1)
@@ -2181,15 +2196,15 @@ let make_attach_cmd () =
       Printf.eprintf "Expected HOST:PORT format (e.g., localhost:7890)\n%!";
       exit 1
   in
-  let term = Term.(const cmd $ target_arg) in
+  let term = Term.(const cmd $ target_arg $ theme_opt $ paredit_opt) in
   let info =
     Cmd.info "attach" ~version
       ~doc:"Connect to a remote REPL server"
       ~man:[`S "DESCRIPTION";
             `P "Connects to a running REPL server started with \
-                $(b,bilk serve). Enters raw terminal mode and relays \
-                keystrokes to the server. On reconnect, previous \
-                output is replayed from the server's scrollback buffer."]
+                $(b,bilk serve). Runs the full REPL UI locally (line \
+                editor, paredit, highlighting, completion) and sends \
+                expressions to the server for evaluation."]
   in
   Cmd.v info term
 
