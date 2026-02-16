@@ -39,3 +39,19 @@ val scan_for_connect : string list -> (connect_info, connect_error) result
 (** [scan_for_connect lines] scans a list of SSH stdout lines for
     the first valid [BILK CONNECT] line.  Returns [Error] if none
     is found or if the line is malformed. *)
+
+(** {1 Typed serve configuration} *)
+
+(** Configuration for the remote [bilk serve] process.
+    Structurally excludes [--insecure] and [--bind] flags. *)
+type serve_config = {
+  port : int;
+  auto_checkpoint : bool;
+  name : string;
+  session_timeout : int;
+}
+
+val build_serve_args : serve_config -> string list
+(** [build_serve_args config] constructs the argument list for
+    [bilk serve] from typed configuration values. The result
+    never contains [--insecure] or [--bind]. *)

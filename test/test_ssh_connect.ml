@@ -96,6 +96,67 @@ let test_roundtrip_property =
        | Some info -> info.port = port && info.key = key
        | None -> false)
 
+(* --- build_serve_args --- *)
+
+let test_default_config () =
+  let config = {
+    Ssh_connect.port = 7890;
+    auto_checkpoint = false;
+    name = "default";
+    session_timeout = 86400;
+  } in
+  let args = Ssh_connect.build_serve_args config in
+  Alcotest.(check bool) "has --port" true (List.mem "--port" args);
+  Alcotest.(check bool) "has 7890" true (List.mem "7890" args)
+
+let test_auto_checkpoint_flag () =
+  let config = {
+    Ssh_connect.port = 7890;
+    auto_checkpoint = true;
+    name = "default";
+    session_timeout = 86400;
+  } in
+  let args = Ssh_connect.build_serve_args config in
+  Alcotest.(check bool) "has --auto-checkpoint" true
+    (List.mem "--auto-checkpoint" args)
+
+let test_name_flag () =
+  let config = {
+    Ssh_connect.port = 7890;
+    auto_checkpoint = false;
+    name = "myrepl";
+    session_timeout = 86400;
+  } in
+  let args = Ssh_connect.build_serve_args config in
+  Alcotest.(check bool) "has --name" true (List.mem "--name" args);
+  Alcotest.(check bool) "has myrepl" true (List.mem "myrepl" args)
+
+let test_session_timeout_flag () =
+  let config = {
+    Ssh_connect.port = 7890;
+    auto_checkpoint = false;
+    name = "default";
+    session_timeout = 3600;
+  } in
+  let args = Ssh_connect.build_serve_args config in
+  Alcotest.(check bool) "has --session-timeout" true
+    (List.mem "--session-timeout" args);
+  Alcotest.(check bool) "has 3600" true (List.mem "3600" args)
+
+let prop_no_insecure_or_bind =
+  let open QCheck2 in
+  Test.make ~name:"build_serve_args never contains --insecure or --bind"
+    ~count:200
+    (Gen.quad
+       (Gen.int_range 1 65535)
+       Gen.bool
+       (Gen.string_size ~gen:(Gen.char_range 'a' 'z') (Gen.int_range 1 20))
+       (Gen.int_range 1 604800))
+    (fun (port, auto_checkpoint, name, session_timeout) ->
+       let config = { Ssh_connect.port; auto_checkpoint; name; session_timeout } in
+       let args = Ssh_connect.build_serve_args config in
+       not (List.mem "--insecure" args) && not (List.mem "--bind" args))
+
 let () =
   Alcotest.run "Ssh_connect"
     [ ("parse_connect_line",
@@ -117,5 +178,12 @@ let () =
        ])
     ; ("property",
        [ QCheck_alcotest.to_alcotest test_roundtrip_property
+       ])
+    ; ("build_serve_args",
+       [ Alcotest.test_case "default config" `Quick test_default_config
+       ; Alcotest.test_case "auto-checkpoint" `Quick test_auto_checkpoint_flag
+       ; Alcotest.test_case "name" `Quick test_name_flag
+       ; Alcotest.test_case "session-timeout" `Quick test_session_timeout_flag
+       ; QCheck_alcotest.to_alcotest prop_no_insecure_or_bind
        ])
     ]

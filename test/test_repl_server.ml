@@ -541,6 +541,175 @@ let test_server_cmd_scheme_passthrough () =
   Repl_server.shutdown server;
   Unix.close client_fd
 
+(* --- Named sessions --- *)
+
+let with_temp_dir fn =
+  let dir = Filename.temp_dir "bilk_server_test" "" in
+  Fun.protect ~finally:(fun () ->
+    let rec rm path =
+      if Sys.is_directory path then begin
+        Array.iter (fun f -> rm (Filename.concat path f)) (Sys.readdir path);
+        Unix.rmdir path
+      end else
+        Sys.remove path
+    in
+    rm dir
+  ) (fun () -> fn dir)
+
+let string_contains s sub =
+  let slen = String.length s and sublen = String.length sub in
+  if sublen > slen then false
+  else
+    let rec check i = i + sublen <= slen
+      && (String.sub s i sublen = sub || check (i + 1)) in
+    check 0
+
+let make_server_with_home home =
+  let saved = try Some (Sys.getenv "BILK_HOME") with Not_found -> None in
+  Unix.putenv "BILK_HOME" home;
+  let config = {
+    Repl_server.port = 0;
+    auto_checkpoint = false;
+    name = "test";
+    bind_address = Unix.inet_addr_loopback;
+    session_timeout = 86400;
+    insecure = true;
+  } in
+  let server = Repl_server.create config in
+  let (client_fd, server_fd) = Unix.socketpair Unix.PF_UNIX Unix.SOCK_STREAM 0 in
+  Repl_server.accept_client server server_fd;
+  let restore () =
+    (match saved with
+     | Some v -> Unix.putenv "BILK_HOME" v
+     | None ->
+       (* Can't unsetenv easily in OCaml, set to empty *)
+       Unix.putenv "BILK_HOME" "")
+  in
+  (server, client_fd, server_fd, restore)
+
+let test_server_named_session_roundtrip () =
+  with_temp_dir (fun home ->
+    let (server, client_fd, _server_fd, restore) = make_server_with_home home in
+    Fun.protect ~finally:restore (fun () ->
+      (* Define something and checkpoint *)
+      Repl_server.handle_eval server "(define x 42)";
+      ignore (read_server_msgs client_fd);
+      Repl_server.handle_eval server ",checkpoint snap1";
+      ignore (read_server_msgs client_fd);
+      (* Save session by name *)
+      Repl_server.handle_eval server ",save-session test1";
+      let msgs = read_server_msgs client_fd in
+      let has_error = List.exists (function
+        | Repl_protocol.Error _ -> true | _ -> false) msgs in
+      Alcotest.(check bool) "no error on save" false has_error;
+      (* Load session by name *)
+      Repl_server.handle_eval server ",load-session test1";
+      let msgs2 = read_server_msgs client_fd in
+      let has_error2 = List.exists (function
+        | Repl_protocol.Error _ -> true | _ -> false) msgs2 in
+      Alcotest.(check bool) "no error on load" false has_error2;
+      Repl_server.shutdown server;
+      Unix.close client_fd))
+
+let test_server_sessions_list () =
+  with_temp_dir (fun home ->
+    let (server, client_fd, _server_fd, restore) = make_server_with_home home in
+    Fun.protect ~finally:restore (fun () ->
+      Repl_server.handle_eval server ",checkpoint cp1";
+      ignore (read_server_msgs client_fd);
+      Repl_server.handle_eval server ",save-session alpha";
+      ignore (read_server_msgs client_fd);
+      Repl_server.handle_eval server ",save-session beta";
+      ignore (read_server_msgs client_fd);
+      Repl_server.handle_eval server ",sessions";
+      let msgs = read_server_msgs client_fd in
+      let output = List.filter_map (function
+        | Repl_protocol.Output s -> Some s | _ -> None) msgs in
+      let combined = String.concat "" output in
+      let has_alpha = string_contains combined "alpha" in
+      let has_beta = string_contains combined "beta" in
+      Alcotest.(check bool) "lists alpha" true has_alpha;
+      Alcotest.(check bool) "lists beta" true has_beta;
+      Repl_server.shutdown server;
+      Unix.close client_fd))
+
+let test_server_save_session_traversal () =
+  with_temp_dir (fun home ->
+    let (server, client_fd, _server_fd, restore) = make_server_with_home home in
+    Fun.protect ~finally:restore (fun () ->
+      Repl_server.handle_eval server ",save-session ../evil";
+      let msgs = read_server_msgs client_fd in
+      let has_error = List.exists (function
+        | Repl_protocol.Error _ -> true | _ -> false) msgs in
+      Alcotest.(check bool) "path traversal rejected" true has_error;
+      Repl_server.shutdown server;
+      Unix.close client_fd))
+
+let test_server_load_session_nonexistent () =
+  with_temp_dir (fun home ->
+    let (server, client_fd, _server_fd, restore) = make_server_with_home home in
+    Fun.protect ~finally:restore (fun () ->
+      Repl_server.handle_eval server ",load-session nonexistent";
+      let msgs = read_server_msgs client_fd in
+      let has_error = List.exists (function
+        | Repl_protocol.Error _ -> true | _ -> false) msgs in
+      Alcotest.(check bool) "nonexistent session error" true has_error;
+      Repl_server.shutdown server;
+      Unix.close client_fd))
+
+(* --- Path restriction for ,load --- *)
+
+let test_server_load_traversal () =
+  (* ../../../etc/passwd may not exist, so the error could be
+     "path not found" or "outside allowed directories" — either
+     way, the load must be rejected. *)
+  let (server, client_fd, _server_fd) = make_server () in
+  Repl_server.handle_eval server ",load ../../../etc/passwd";
+  let msgs = read_server_msgs client_fd in
+  let has_error = List.exists (function
+    | Repl_protocol.Error _ -> true
+    | _ -> false) msgs in
+  Alcotest.(check bool) "path traversal error" true has_error;
+  (* Must NOT have loaded successfully *)
+  let has_loaded = List.exists (function
+    | Repl_protocol.Output s -> string_contains s "Loaded"
+    | _ -> false) msgs in
+  Alcotest.(check bool) "not loaded" false has_loaded;
+  Repl_server.shutdown server;
+  Unix.close client_fd
+
+let test_server_load_absolute_outside () =
+  let (server, client_fd, _server_fd) = make_server () in
+  Repl_server.handle_eval server ",load /etc/passwd";
+  let msgs = read_server_msgs client_fd in
+  let has_error = List.exists (function
+    | Repl_protocol.Error s ->
+      string_contains s "outside" || string_contains s "not found"
+    | _ -> false) msgs in
+  Alcotest.(check bool) "absolute outside error" true has_error;
+  Repl_server.shutdown server;
+  Unix.close client_fd
+
+let test_server_load_valid_relative () =
+  with_temp_dir (fun dir ->
+    (* Create a valid .scm file in a temp dir *)
+    let file = Filename.concat dir "test.scm" in
+    let oc = open_out file in
+    output_string oc "(define load-test-var 99)\n";
+    close_out oc;
+    let (server, client_fd, _server_fd) = make_server () in
+    (* Add the temp dir to search paths so it's allowed *)
+    let inst = Repl_server.instance server in
+    inst.Instance.search_paths := dir :: !(inst.Instance.search_paths);
+    Repl_server.handle_eval server (Printf.sprintf ",load %s" file);
+    let msgs = read_server_msgs client_fd in
+    let has_outside_error = List.exists (function
+      | Repl_protocol.Error s -> string_contains s "outside"
+      | _ -> false) msgs in
+    Alcotest.(check bool) "no path restriction error" false has_outside_error;
+    Repl_server.shutdown server;
+    Unix.close client_fd)
+
 let () =
   Alcotest.run "Repl_server"
     [ ("eval",
@@ -600,5 +769,23 @@ let () =
        ; Alcotest.test_case "unknown command" `Quick test_server_cmd_unknown
        ; Alcotest.test_case "scheme passthrough" `Quick
            test_server_cmd_scheme_passthrough
+       ])
+    ; ("named_sessions",
+       [ Alcotest.test_case "save/load round-trip" `Quick
+           test_server_named_session_roundtrip
+       ; Alcotest.test_case ",sessions list" `Quick
+           test_server_sessions_list
+       ; Alcotest.test_case "path traversal rejected" `Quick
+           test_server_save_session_traversal
+       ; Alcotest.test_case "nonexistent session" `Quick
+           test_server_load_session_nonexistent
+       ])
+    ; ("path_restriction",
+       [ Alcotest.test_case ",load traversal" `Quick
+           test_server_load_traversal
+       ; Alcotest.test_case ",load absolute outside" `Quick
+           test_server_load_absolute_outside
+       ; Alcotest.test_case ",load valid relative" `Quick
+           test_server_load_valid_relative
        ])
     ]

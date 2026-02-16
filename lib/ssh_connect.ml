@@ -41,3 +41,18 @@ let scan_for_connect lines =
         search rest
   in
   search lines
+
+(* --- Typed serve configuration --- *)
+
+type serve_config = {
+  port : int;
+  auto_checkpoint : bool;
+  name : string;
+  session_timeout : int;
+}
+
+let build_serve_args config =
+  ["--port"; string_of_int config.port]
+  @ (if config.auto_checkpoint then ["--auto-checkpoint"] else [])
+  @ ["--name"; config.name]
+  @ ["--session-timeout"; string_of_int config.session_timeout]

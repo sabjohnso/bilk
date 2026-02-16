@@ -123,6 +123,27 @@ let graceful_shutdown t =
   auto_checkpoint_on_disconnect t;
   shutdown t
 
+(* --- Path safety for ,load --- *)
+
+let safe_resolve_path ~allowed path =
+  let full =
+    if Filename.is_relative path
+    then Filename.concat (Sys.getcwd ()) path
+    else path
+  in
+  match (try Some (Unix.realpath full)
+         with Unix.Unix_error _ -> None) with
+  | None -> Error (Printf.sprintf "path not found: %s" path)
+  | Some resolved ->
+    let within dir =
+      let n = String.length dir in
+      String.length resolved >= n
+      && String.sub resolved 0 n = dir
+      && (String.length resolved = n || resolved.[n] = '/')
+    in
+    if List.exists within allowed then Ok resolved
+    else Error "path is outside allowed directories"
+
 (* --- Server-side comma command dispatch --- *)
 
 let handle_server_command t line =
@@ -174,10 +195,11 @@ let handle_server_command t line =
     send_to_client t (Repl_protocol.Result "")
   | "save-session" ->
     if arg = "" then
-      send_to_client t (Repl_protocol.Error "Usage: ,save-session <file>")
+      send_to_client t (Repl_protocol.Error "Usage: ,save-session <name>")
     else begin
       (try
-         Session.save t.session arg;
+         let home = Search_path.bilk_home () in
+         Session_store.save ~home t.session arg;
          let nc = List.length (Session.list_checkpoints t.session) in
          send_to_client t
            (Repl_protocol.Output
@@ -185,6 +207,8 @@ let handle_server_command t line =
                  arg nc (if nc = 1 then "" else "s")));
          send_to_client t (Repl_protocol.Result "")
        with
+       | Session_store.Store_error msg ->
+         send_to_client t (Repl_protocol.Error msg)
        | Session.Session_error msg ->
          send_to_client t (Repl_protocol.Error msg)
        | Sys_error msg ->
@@ -192,10 +216,11 @@ let handle_server_command t line =
     end
   | "load-session" ->
     if arg = "" then
-      send_to_client t (Repl_protocol.Error "Usage: ,load-session <file>")
+      send_to_client t (Repl_protocol.Error "Usage: ,load-session <name>")
     else begin
       (try
-         let loaded = Session.load arg in
+         let home = Search_path.bilk_home () in
+         let loaded = Session_store.load ~home arg in
          let cps = Session.list_checkpoints loaded in
          let nc = List.length cps in
          t.session <- loaded;
@@ -209,11 +234,24 @@ let handle_server_command t line =
                  arg nc (if nc = 1 then "" else "s")));
          send_to_client t (Repl_protocol.Result "")
        with
+       | Session_store.Store_error msg ->
+         send_to_client t (Repl_protocol.Error msg)
        | Session.Session_error msg ->
          send_to_client t (Repl_protocol.Error msg)
        | Sys_error msg ->
          send_to_client t (Repl_protocol.Error msg))
     end
+  | "sessions" ->
+    let home = Search_path.bilk_home () in
+    let names = Session_store.list ~home () in
+    if names = [] then
+      send_to_client t (Repl_protocol.Output "No saved sessions.\n")
+    else begin
+      let text = String.concat "\n"
+          (List.map (fun name -> "  " ^ name) names) ^ "\n" in
+      send_to_client t (Repl_protocol.Output text)
+    end;
+    send_to_client t (Repl_protocol.Result "")
   | "reload" ->
     if arg = "" then
       send_to_client t (Repl_protocol.Error "Usage: ,reload (library name)")
@@ -310,25 +348,35 @@ let handle_server_command t line =
     if arg = "" then
       send_to_client t (Repl_protocol.Error "Usage: ,load <file>")
     else begin
-      (try
-         let port = Port.of_file arg in
-         ignore (Instance.eval_port t.inst port);
-         send_to_client t
-           (Repl_protocol.Output (Printf.sprintf "Loaded %s\n" arg));
-         send_to_client t (Repl_protocol.Result "")
-       with
-       | Reader.Read_error (_, msg) ->
-         send_to_client t (Repl_protocol.Error msg)
-       | Compiler.Compile_error (_, msg) ->
-         send_to_client t (Repl_protocol.Error msg)
-       | Vm.Runtime_error msg ->
-         send_to_client t (Repl_protocol.Error msg)
-       | Fasl.Fasl_error msg ->
-         send_to_client t (Repl_protocol.Error msg)
-       | Failure msg ->
-         send_to_client t (Repl_protocol.Error msg)
-       | Sys_error msg ->
-         send_to_client t (Repl_protocol.Error msg))
+      let allowed =
+        [Sys.getcwd ()] @ !(t.inst.Instance.search_paths) in
+      let allowed_real = List.filter_map (fun d ->
+        try Some (Unix.realpath d)
+        with Unix.Unix_error _ -> None
+      ) allowed in
+      match safe_resolve_path ~allowed:allowed_real arg with
+      | Error msg ->
+        send_to_client t (Repl_protocol.Error msg)
+      | Ok resolved ->
+        (try
+           let port = Port.of_file resolved in
+           ignore (Instance.eval_port t.inst port);
+           send_to_client t
+             (Repl_protocol.Output (Printf.sprintf "Loaded %s\n" arg));
+           send_to_client t (Repl_protocol.Result "")
+         with
+         | Reader.Read_error (_, msg) ->
+           send_to_client t (Repl_protocol.Error msg)
+         | Compiler.Compile_error (_, msg) ->
+           send_to_client t (Repl_protocol.Error msg)
+         | Vm.Runtime_error msg ->
+           send_to_client t (Repl_protocol.Error msg)
+         | Fasl.Fasl_error msg ->
+           send_to_client t (Repl_protocol.Error msg)
+         | Failure msg ->
+           send_to_client t (Repl_protocol.Error msg)
+         | Sys_error msg ->
+           send_to_client t (Repl_protocol.Error msg))
     end
   | "env" ->
     let inst = t.inst in
@@ -356,8 +404,9 @@ let handle_server_command t line =
        \  ,checkpoint <name>   Save a named checkpoint\n\
        \  ,revert <name>       Revert to a checkpoint\n\
        \  ,checkpoints         List all checkpoints\n\
-       \  ,save-session <file> Save session to file\n\
-       \  ,load-session <file> Load session from file\n\
+       \  ,save-session <name> Save session by name\n\
+       \  ,load-session <name> Load session by name\n\
+       \  ,sessions            List saved sessions\n\
        \  ,env                 List global bindings\n\
        \  ,libs                List loaded libraries\n\
        \  ,exports <lib>       List library exports\n\

@@ -341,8 +341,9 @@ let repl_help () =
   print_endline "  ,checkpoint <name>   Snapshot current state as a named checkpoint";
   print_endline "  ,revert <name>       Restore state from a named checkpoint";
   print_endline "  ,checkpoints         List all checkpoints";
-  print_endline "  ,save-session <file> Save all checkpoints to a binary file";
-  print_endline "  ,load-session <file> Load checkpoints from a binary file";
+  print_endline "  ,save-session <name> Save session by name";
+  print_endline "  ,load-session <name> Load session by name";
+  print_endline "  ,sessions            List saved sessions";
   print_endline "  ,clear               Clear terminal screen"
 
 let repl_env inst =
@@ -616,7 +617,7 @@ let run_repl theme_name =
     [",help"; ",h"; ",quit"; ",q"; ",load"; ",env"; ",libs";
      ",available"; ",exports"; ",build"; ",deps"; ",reload";
      ",theme"; ",paredit"; ",checkpoint"; ",revert"; ",checkpoints";
-     ",save-session"; ",load-session"; ",clear"]
+     ",save-session"; ",load-session"; ",sessions"; ",clear"]
   in
   let cached_candidates = ref [] in
   let cache_gen = ref (-1) in
@@ -666,8 +667,12 @@ let run_repl theme_name =
       apply_matches ~width text cursor start matches
     | Completion_context.Repl_command_arg (cmd, arg, start) ->
       let matches = match cmd with
-        | ",load" | ",save-session" | ",load-session" ->
+        | ",load" ->
           Completion.complete_path arg
+        | ",save-session" | ",load-session" ->
+          let home = Search_path.bilk_home () in
+          let names = Session_store.list ~home () in
+          Completion.find_matches arg names
         | ",theme" ->
           Completion.find_matches arg ["dark"; "light"; "none"]
         | ",reload" | ",exports" | ",deps" ->
@@ -855,47 +860,59 @@ let run_repl theme_name =
       true
     end else if String.length trimmed > 14
                 && String.sub trimmed 0 14 = ",save-session " then begin
-      let path = String.trim (String.sub trimmed 14 (String.length trimmed - 14)) in
-      if path = "" then
-        Printf.eprintf "Usage: ,save-session <file>\n%!"
+      let name = String.trim (String.sub trimmed 14 (String.length trimmed - 14)) in
+      if name = "" then
+        Printf.eprintf "Usage: ,save-session <name>\n%!"
       else begin
         try
-          Session.save !session_ref path;
+          let home = Search_path.bilk_home () in
+          Session_store.save ~home !session_ref name;
           let nc = List.length (Session.list_checkpoints !session_ref) in
           Printf.printf "Session saved: %s (%d checkpoint%s)\n%!"
-            path nc (if nc = 1 then "" else "s")
-        with Sys_error msg ->
-          Printf.eprintf "Error: %s\n%!" msg
+            name nc (if nc = 1 then "" else "s")
+        with
+        | Session_store.Store_error msg -> Printf.eprintf "Error: %s\n%!" msg
+        | Sys_error msg -> Printf.eprintf "Error: %s\n%!" msg
       end;
       true
     end else if trimmed = ",save-session" then begin
-      Printf.eprintf "Usage: ,save-session <file>\n%!";
+      Printf.eprintf "Usage: ,save-session <name>\n%!";
       true
     end else if String.length trimmed > 14
                 && String.sub trimmed 0 14 = ",load-session " then begin
-      let path = String.trim (String.sub trimmed 14 (String.length trimmed - 14)) in
-      if path = "" then
-        Printf.eprintf "Usage: ,load-session <file>\n%!"
+      let name = String.trim (String.sub trimmed 14 (String.length trimmed - 14)) in
+      if name = "" then
+        Printf.eprintf "Usage: ,load-session <name>\n%!"
       else begin
         try
-          let loaded = Session.load path in
+          let home = Search_path.bilk_home () in
+          let loaded = Session_store.load ~home name in
           let cps = Session.list_checkpoints loaded in
           let nc = List.length cps in
           Printf.printf "Session loaded: %s (%d checkpoint%s)\n%!"
-            path nc (if nc = 1 then "" else "s");
-          (* Replace current session *)
+            name nc (if nc = 1 then "" else "s");
           session_ref := loaded;
-          (* Revert to latest checkpoint if any *)
-          match List.rev cps with
-          | latest :: _ -> revert_checkpoint !session_ref latest
-          | [] -> ()
+          (match List.rev cps with
+           | latest :: _ -> revert_checkpoint !session_ref latest
+           | [] -> ())
         with
+        | Session_store.Store_error msg -> Printf.eprintf "Error: %s\n%!" msg
         | Session.Session_error msg -> Printf.eprintf "Error: %s\n%!" msg
         | Sys_error msg -> Printf.eprintf "Error: %s\n%!" msg
       end;
       true
     end else if trimmed = ",load-session" then begin
-      Printf.eprintf "Usage: ,load-session <file>\n%!";
+      Printf.eprintf "Usage: ,load-session <name>\n%!";
+      true
+    end else if trimmed = ",sessions" then begin
+      let home = Search_path.bilk_home () in
+      let names = Session_store.list ~home () in
+      if names = [] then
+        Printf.printf "No saved sessions.\n%!"
+      else
+        List.iter (fun name ->
+          Printf.printf "  %s\n%!" name
+        ) names;
       true
     end else
       false
@@ -2324,15 +2341,39 @@ let make_connect_cmd () =
          info ["port"; "p"] ~docv:"PORT"
            ~doc:"SSH port on the remote host.")
   in
-  let serve_args_opt =
-    Arg.(value & pos_right 0 string [] &
-         info [] ~docv:"SERVE-ARGS"
-           ~doc:"Additional arguments to pass to $(b,bilk serve).")
+  let serve_port_opt =
+    Arg.(value & opt int 7890 &
+         info ["serve-port"] ~docv:"PORT"
+           ~doc:"Port for $(b,bilk serve) on the remote host (default 7890).")
   in
-  let cmd target ssh_port serve_args =
+  let auto_checkpoint_flag =
+    Arg.(value & flag &
+         info ["auto-checkpoint"]
+           ~doc:"Enable auto-checkpoint on disconnect.")
+  in
+  let serve_name_opt =
+    Arg.(value & opt string "default" &
+         info ["name"] ~docv:"NAME"
+           ~doc:"Session name for the remote server (default \"default\").")
+  in
+  let session_timeout_opt =
+    Arg.(value & opt int 86400 &
+         info ["session-timeout"] ~docv:"SECONDS"
+           ~doc:"Session timeout in seconds (default 86400).")
+  in
+  let cmd target ssh_port serve_port auto_checkpoint serve_name session_timeout =
+    let config = {
+      Ssh_connect.port = serve_port;
+      auto_checkpoint;
+      name = serve_name;
+      session_timeout;
+    } in
+    let serve_args = Ssh_connect.build_serve_args config in
     exit (run_connect target ssh_port serve_args)
   in
-  let term = Term.(const cmd $ target_arg $ ssh_port_opt $ serve_args_opt) in
+  let term = Term.(const cmd $ target_arg $ ssh_port_opt
+                   $ serve_port_opt $ auto_checkpoint_flag
+                   $ serve_name_opt $ session_timeout_opt) in
   let info =
     Cmd.info "connect" ~version
       ~doc:"Connect to a remote host via SSH"
@@ -2342,9 +2383,9 @@ let make_connect_cmd () =
                 the connection by reading the $(b,BILK CONNECT) line \
                 from the server's stdout, extracting the port and \
                 encryption key.";
-            `P "Additional arguments after the target are passed through \
-                to $(b,bilk serve) on the remote host (e.g., \
-                $(b,--auto-checkpoint), $(b,--name)).";
+            `P "Server options ($(b,--serve-port), $(b,--auto-checkpoint), \
+                $(b,--name), $(b,--session-timeout)) are forwarded to \
+                $(b,bilk serve) on the remote host.";
             `P "The encryption key is set in $(b,BILK_KEY) and cleared \
                 after connection to prevent leaking to child processes."]
   in

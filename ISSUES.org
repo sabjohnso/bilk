@@ -331,3 +331,661 @@ same data.
 Fix: pass the already-computed versions into
 =format_conflict_error=, or cache =installed_versions= results
 during resolution.
+
+* Project Review (2026-02-16)
+
+** HIGH Priority
+
+*** DONE Issue 31: REPL server binds to all interfaces with no authentication
+:PROPERTIES:
+:PRIORITY: A
+:CATEGORY: security
+:END:
+
+[[file:lib/repl_server.ml::127][lib/repl_server.ml:127]] — ~Unix.inet_addr_any~ exposes full Scheme eval to
+the network. Should default to ~inet_addr_loopback~ (localhost only), require
+explicit ~--bind 0.0.0.0~ flag for network binding.
+
+Also affects:
+- [[file:bin/main.ml::1703][bin/main.ml:1703]] — DAP server ~inet_addr_any~
+- [[file:bin/main.ml::1753][bin/main.ml:1753]] — LSP server ~inet_addr_any~
+
+**** Plan
+- Add ~bind_address~ field to ~Repl_server.config~ (default ~inet_addr_loopback~)
+- Update ~.mli~ to document the field
+- Add ~--bind~ flag to ~make_serve_cmd~ in ~bin/main.ml~
+- Change DAP/LSP servers in ~bin/main.ml~ to use ~inet_addr_loopback~
+- Update test configs in ~test/test_repl_server.ml~ to include ~bind_address~
+
+*** TODO Issue 32: C FFI: ~bilk_error_message~ returns dangling pointer
+:PROPERTIES:
+:PRIORITY: A
+:CATEGORY: security
+:END:
+
+[[file:lib/bilk_stubs.c::176][lib/bilk_stubs.c:176]] — Returns ~String_val(r)~ after ~CAMLreturnT~
+unregisters the GC root. Any subsequent allocation could invalidate the
+pointer.
+
+**** Plan
+- Change return type from ~const char *~ to ~char *~
+- Use ~strdup(String_val(r))~ before ~CAMLreturnT~
+- Update [[file:lib/bilk.h::85][lib/bilk.h:85]] doc to say caller must ~free()~
+- Update [[file:test/test_c_embed_impl.c::106][test/test_c_embed_impl.c:106]] to ~free(msg)~
+
+*** TODO Issue 33: C FFI: ~bilk_fixnum~ truncates ~long~ to ~int~
+:PROPERTIES:
+:PRIORITY: A
+:CATEGORY: correctness
+:END:
+
+[[file:lib/bilk_stubs.c::260][lib/bilk_stubs.c:260]] — On 64-bit systems, ~long~ is 8 bytes but the cast
+to ~int~ silently truncates values exceeding ~INT_MAX~.
+
+**** Plan
+- Replace ~Val_int((int)n)~ with ~Val_long(n)~ to preserve full range
+
+*** TODO Issue 34: C FFI: Missing ~malloc~ NULL check
+:PROPERTIES:
+:PRIORITY: A
+:CATEGORY: correctness
+:END:
+
+[[file:lib/bilk_stubs.c::40][lib/bilk_stubs.c:40]] — ~argv = malloc(...)~ not checked for NULL in
+~bilk_c_dispatch_primitive~.
+
+**** Plan
+- Add ~if (argv == NULL) CAMLreturn(Val_int(0));~ after malloc
+
+*** TODO Issue 35: R7RS: ~eq?~ is alias for ~eqv?~
+:PROPERTIES:
+:PRIORITY: A
+:CATEGORY: correctness
+:END:
+
+[[file:lib/instance.ml::308][lib/instance.ml:308]] — ~prim_eq args = prim_eqv args~. Per R7RS, ~eq?~
+should be pointer identity. Mutable objects (pairs, vectors, strings) should
+compare by identity under ~eq?~, not structural content.
+
+**** Plan
+- Write failing tests: ~(eq? (cons 1 2) (cons 1 2))~ should be ~#f~; ~(let ((p (cons 1 2))) (eq? p p))~ should be ~#t~; same for vectors, strings, closures
+- Implement ~prim_eq~ with value comparison for immutable scalars (bool, fixnum, bignum, char, symbol, nil, eof, void) and physical identity (~==~) for everything else
+
+*** TODO Issue 36: R7RS: ~map~ / ~for-each~ only handle single list
+:PROPERTIES:
+:PRIORITY: A
+:CATEGORY: correctness
+:END:
+
+[[file:lib/instance.ml::2793][lib/instance.ml:2793-2801]] — Boot definitions only accept one list argument.
+R7RS requires multi-list: ~(map + '(1 2) '(3 4))~ should produce ~(4 6)~.
+
+**** Plan
+- Write failing tests for multi-list ~map~, ~for-each~, ~string-map~, ~string-for-each~, ~vector-map~, ~vector-for-each~
+- Rewrite boot definitions using rest args (~. lsts~) with fast single-list path and general multi-list path
+- Shortest list determines result length per R7RS
+
+** MEDIUM Priority
+
+*** TODO Issue 37: ~instance.ml~ is a god object (5,769 lines)
+:PROPERTIES:
+:PRIORITY: B
+:CATEGORY: architecture
+:END:
+
+Combines 8+ responsibilities: primitive implementations (~2200 lines),
+registration (~500 lines), library name manifests (~300 lines), library
+loading, evaluation pipeline, instance state, SRFI implementations (hash
+tables, char-sets, regexp — each 300-500 lines), and forward references.
+
+**** Recommended decomposition
+1. Extract ~Primitives~ module (~3500 lines of pure ~Datum.t list -> Datum.t~)
+2. Extract ~Scheme_libraries~ module (export name lists + registration)
+3. Extract SRFI modules: ~Srfi_69.ml~, ~Srfi_14.ml~, ~Srfi_115.ml~
+4. Extract ~Library_loader~ module (~300 lines)
+
+*** TODO Issue 38: ~bin/main.ml~ is 2,280 lines with mixed concerns
+:PROPERTIES:
+:PRIORITY: B
+:CATEGORY: architecture
+:END:
+
+Config loading, error formatting, instance setup, 20+ REPL commands, full
+REPL loop with completion/watch/sessions, 14 cmdliner subcommands, manual
+subcommand dispatch. Should factor REPL commands, config management, and
+subcommand definitions into separate modules.
+
+*** TODO Issue 39: Expander raises ~Compiler.Compile_error~
+:PROPERTIES:
+:PRIORITY: B
+:CATEGORY: architecture
+:END:
+
+[[file:lib/expander.ml::1][lib/expander.ml:1]] and [[file:lib/library.ml::49][lib/library.ml:49]] — Cross-module coupling. Should
+have a shared ~Expand_error~ or move the exception to a shared module.
+
+*** TODO Issue 40: ~Obj.t~ usage for type-safety workarounds
+:PROPERTIES:
+:PRIORITY: B
+:CATEGORY: architecture
+:END:
+
+5 uses across ~datum.ml~, ~reader.ml~, ~instance.ml~, ~port.mli~ — breaks
+type safety to work around mutual recursion in type definitions (regexp and
+readtable). A GADT or functor approach could eliminate them.
+
+*** TODO Issue 41: Compiler ~patch_jump~ is O(n^2)
+:PROPERTIES:
+:PRIORITY: B
+:CATEGORY: performance
+:END:
+
+[[file:lib/compiler.ml::50][lib/compiler.ml:50-58]] — Converts reversed instruction list to array,
+patches one element, converts back. For forms like ~cond~ with many clauses,
+this is called per-clause.
+
+**** Plan
+- Change ~state.instructions~ from ~Opcode.t list~ to a resizable array (e.g. ~Buffer~-style)
+- Patch in-place with O(1) array access
+- Keep ~emit~, ~current_pc~, and finalization working with new representation
+
+*** TODO Issue 42: VM fixed stack size of 1024
+:PROPERTIES:
+:PRIORITY: B
+:CATEGORY: correctness
+:END:
+
+[[file:lib/vm.ml::41][lib/vm.ml:41]] — Deep recursion or large argument lists could overflow.
+Should be growable (double on overflow).
+
+**** Plan
+- Make ~stack~ and ~stack_size~ into refs
+- Grow by doubling in ~push~ when at capacity, up to ~max_stack_size~ (1M)
+- Add ~ensure_stack_capacity~ for ~restore_continuation~ blit
+- Write test: ~(define (sum n) (if (= n 0) 0 (+ n (sum (- n 1)))))~ with n=2000
+
+*** TODO Issue 43: FASL deserialization has no vector size limit
+:PROPERTIES:
+:PRIORITY: B
+:CATEGORY: security
+:END:
+
+[[file:lib/fasl.ml::221][lib/fasl.ml:221]] — A crafted FASL claiming ~count = 2^31 - 1~ vector
+elements could cause a denial-of-service via huge allocation. No recursion
+depth limit either.
+
+**** Plan
+- Add ~max_collection_size~ (10M) and ~max_recursion_depth~ (10K) constants
+- Add optional ~depth~ parameter to ~read_datum~, increment on recursive calls
+- Check vector count against ~max_collection_size~ before ~Array.init~
+- Check instruction count in ~read_code_obj~ similarly
+
+*** TODO Issue 44: No OCaml version constraint in dune-project
+:PROPERTIES:
+:PRIORITY: B
+:CATEGORY: build
+:END:
+
+[[file:dune-project][dune-project]] — Project requires OCaml 5.3.0+BER but does not specify
+~(ocaml (>= 5.3.0))~ in dependencies.
+
+**** Plan
+- Add ~(ocaml (>= 5.3.0))~ to the ~depends~ list in ~dune-project~
+
+*** TODO Issue 45: Hardcoded absolute source path in build
+:PROPERTIES:
+:PRIORITY: B
+:CATEGORY: build
+:END:
+
+[[file:lib/dune::9][lib/dune:9-13]] — ~bilk_config.ml~ bakes an absolute source-tree path into
+the compiled library. Only valid during development, not after install.
+
+** LOW Priority
+
+*** TODO Issue 46: ~syntax_list_to_list~ defined 3 times
+:PROPERTIES:
+:PRIORITY: C
+:CATEGORY: duplication
+:END:
+
+[[file:lib/expander.ml::60][expander.ml:60]], [[file:lib/compiler.ml::62][compiler.ml:62]], [[file:lib/instance.ml::5287][instance.ml:5287]] — Nearly identical.
+~Syntax.to_proper_list~ already exists in [[file:lib/syntax.mli::48][syntax.mli:48]] but none use it.
+
+**** Plan
+- Replace all 3 with calls to ~Syntax.to_proper_list~
+
+*** TODO Issue 47: Numeric helpers duplicated between reader and instance
+:PROPERTIES:
+:PRIORITY: C
+:CATEGORY: duplication
+:END:
+
+~is_exact_syntax~ / ~is_exact_datum~, ~to_inexact_syntax~ / ~to_inexact_datum~,
+etc. — Parallel ~Syntax.datum~ and ~Datum.t~ versions of the same logic.
+
+*** TODO Issue 48: Dead code
+:PROPERTIES:
+:PRIORITY: C
+:CATEGORY: cleanup
+:END:
+
+- ~_require_rx~ in [[file:lib/instance.ml::4969][instance.ml:4969]] — Never called, superseded by ~ensure_rx~
+- ~ignore loc~ in [[file:lib/compiler.ml::533][compiler.ml:533,622]] — Unused parameters
+- Warning suppressors in [[file:lib/expander.ml::26][expander.ml:26-27]] — ~let _ = Var~
+
+*** TODO Issue 49: ~Char~ always printed as hex
+:PROPERTIES:
+:PRIORITY: C
+:CATEGORY: correctness
+:END:
+
+[[file:lib/datum.ml::195][lib/datum.ml:195]] — ~#\x04NN~ format. R7RS recommends named characters
+(~#\space~, ~#\newline~) and printable ASCII as themselves.
+
+**** Plan
+- Match on code point for R7RS named chars: null(0x00), alarm(0x07), backspace(0x08), tab(0x09), newline(0x0A), return(0x0D), escape(0x1B), space(0x20), delete(0x7F)
+- Printable ASCII (0x21-0x7E): print as ~#\c~
+- Everything else: keep hex format
+
+*** TODO Issue 50: Runtime errors lack source locations
+:PROPERTIES:
+:PRIORITY: C
+:CATEGORY: diagnostics
+:END:
+
+~Vm.Runtime_error of string~ carries no ~Loc.t~. The VM has ~source_map~
+but primitive errors discard location context.
+
+*** TODO Issue 51: Placeholder metadata in dune-project
+:PROPERTIES:
+:PRIORITY: C
+:CATEGORY: distribution
+:END:
+
+[[file:dune-project][dune-project]] lines 8-33 contain template defaults: ~"Author Name"~, ~"A short synopsis"~,
+~"github username/reponame"~, etc. Blocks ~opam publish~.
+
+*** TODO Issue 52: LICENSE says "wile-scheme"
+:PROPERTIES:
+:PRIORITY: C
+:CATEGORY: distribution
+:END:
+
+[[file:LICENSE::3][LICENSE:3]] — Should say "bilk" or the author's name.
+
+*** TODO Issue 53: No CHANGES.md
+:PROPERTIES:
+:PRIORITY: C
+:CATEGORY: distribution
+:END:
+
+*** TODO Issue 54: ~(-ldl)~ is Linux-specific
+:PROPERTIES:
+:PRIORITY: C
+:CATEGORY: build
+:END:
+
+[[file:lib/dune::6][lib/dune:6]] — macOS links ~-ldl~ implicitly. Should be conditional.
+
+*** TODO Issue 55: Monolithic library
+:PROPERTIES:
+:PRIORITY: C
+:CATEGORY: build
+:END:
+
+All 50 modules compile into one ~bilk~ library. Splitting into ~bilk.core~,
+~bilk.repl~, ~bilk.tools~ would reduce downstream link overhead.
+
+** Test Suite Gaps
+
+*** TODO Issue 56: Expander tests are thin (141 lines for 1,773-line module)
+:PROPERTIES:
+:PRIORITY: B
+:CATEGORY: testing
+:END:
+
+No test for ~syntax-rules~ pattern matching, ellipsis, or hygiene in isolation.
+
+*** TODO Issue 57: Instance primitives — 210 registered, only a subset tested individually
+:PROPERTIES:
+:PRIORITY: C
+:CATEGORY: testing
+:END:
+
+*** TODO Issue 58: No formal R7RS conformance suite
+:PROPERTIES:
+:PRIORITY: B
+:CATEGORY: testing
+:END:
+
+*** TODO Issue 59: No tail-call verification per R7RS 3.5 for all required contexts
+:PROPERTIES:
+:PRIORITY: B
+:CATEGORY: testing
+:END:
+
+*** TODO Issue 60: ~parameterize~ / ~make-parameter~ untested
+:PROPERTIES:
+:PRIORITY: C
+:CATEGORY: testing
+:END:
+
+*** TODO Issue 61: Test helper duplication
+:PROPERTIES:
+:PRIORITY: C
+:CATEGORY: testing
+:END:
+
+~datum_testable~, ~check_datum~, ~eval~, ~with_temp_dir~, ~write_file~ copy-pasted
+across 13+ files. Should extract ~test/test_helpers.ml~.
+
+*** TODO Issue 62: No property tests in ~test_vm.ml~ or ~test_datum.ml~
+:PROPERTIES:
+:PRIORITY: C
+:CATEGORY: testing
+:END:
+
+* Remote REPL Security Review (2026-02-16)
+
+** CRITICAL
+
+*** DONE Issue 63: Path traversal in server comma commands
+:PROPERTIES:
+:PRIORITY: A
+:CATEGORY: security
+:END:
+
+[[file:lib/repl_server.ml][repl_server.ml]] — ~,load~, ~,save-session~, and ~,load-session~ accept
+arbitrary file paths from the remote client with no ~realpath()~ check,
+whitelist, or symlink protection. A remote client can read or write
+arbitrary files accessible to the server process.
+
+**** Resolution
+- ~,save-session~ and ~,load-session~ now take a name (not a path),
+  stored under =~/.bilk/sessions/<name>.bses= via [[file:lib/session_store.ml][Session_store]] module.
+  Names are validated to reject path separators, ~.~, ~..~, and null bytes.
+- ~,load~ now resolves paths via ~Unix.realpath~ and rejects anything
+  outside ~Sys.getcwd()~ or ~Instance.search_paths~
+  ([[file:lib/repl_server.ml::safe_resolve_path][safe_resolve_path]] helper).
+- Tests: [[file:test/test_session_store.ml][test_session_store.ml]] (12 tests),
+  [[file:test/test_repl_server.ml][test_repl_server.ml]] named_sessions + path_restriction groups.
+
+*** TODO Issue 64: No max frame size in protocol
+:PROPERTIES:
+:PRIORITY: A
+:CATEGORY: security
+:END:
+
+[[file:lib/repl_protocol.ml][repl_protocol.ml]] — A malicious peer can send a frame header claiming
+a 4GB payload, causing out-of-memory. The ~frame_available~ function
+also risks integer overflow when ~offset + 4 + payload_len~ wraps on
+63-bit OCaml ints.
+
+**** Plan
+- Add ~max_frame_size~ constant (e.g. 16 MiB)
+- Reject frames exceeding ~max_frame_size~ in ~read_client_msg~ /
+  ~read_server_msg~ with a protocol error
+- Guard ~frame_available~ against integer overflow: check
+  ~payload_len > max_frame_size~ before arithmetic
+- Write tests: oversized frame header rejected, boundary values handled
+
+*** DONE Issue 65: Flag injection via ~serve_args~ in SSH connect
+:PROPERTIES:
+:PRIORITY: A
+:CATEGORY: security
+:END:
+
+[[file:lib/ssh_connect.ml][ssh_connect.ml]] — Arguments in ~serve_args~ are passed directly to the
+remote ~bilk serve~ command. A malicious ~serve_args~ value can inject
+~--insecure --bind 0.0.0.0~, bypassing the security model.
+
+**** Resolution
+- ~bilk connect~ now uses typed cmdliner flags (~--serve-port~,
+  ~--auto-checkpoint~, ~--name~, ~--session-timeout~) instead of
+  raw string passthrough.
+- [[file:lib/ssh_connect.ml::serve_config][Ssh_connect.serve_config]] type structurally excludes
+  ~--insecure~ and ~--bind~ — the type has no fields for those.
+- [[file:lib/ssh_connect.ml::build_serve_args][Ssh_connect.build_serve_args]] constructs arguments from typed config.
+- QCheck2 property test: output never contains ~--insecure~ or ~--bind~.
+- Tests: [[file:test/test_ssh_connect.ml][test_ssh_connect.ml]] build_serve_args group (5 tests).
+
+*** TODO Issue 66: No server authentication (MITM possible)
+:PROPERTIES:
+:PRIORITY: A
+:CATEGORY: security
+:END:
+
+[[file:lib/repl_client.ml][repl_client.ml]] — The client does not verify the server's identity.
+Even with encryption, if an attacker intercepts the shared key during
+the SSH bootstrap or via other means, MITM is possible. There is no
+certificate pinning, no host key verification, and no trust-on-first-use
+mechanism.
+
+**** Plan
+- Implement server identity verification: e.g. server sends a challenge
+  signed with the shared key, or adopt a proper key exchange (Noise
+  protocol, STS) instead of pre-shared key
+- At minimum, add TOFU (trust-on-first-use): store server key fingerprint
+  on first connect, warn on mismatch
+
+*** TODO Issue 67: Unbounded ~recv_buf~ growth in client
+:PROPERTIES:
+:PRIORITY: A
+:CATEGORY: security
+:END:
+
+[[file:lib/repl_client.ml][repl_client.ml]] — A malicious server can send data that never contains
+a complete frame, causing ~recv_buf~ to grow without bound until OOM.
+
+**** Plan
+- Track ~recv_buf~ size; if it exceeds ~max_frame_size~ (from Issue 64)
+  without yielding a complete frame, disconnect with error
+- Write test: client disconnects when buffer exceeds limit
+
+** HIGH
+
+*** TODO Issue 68: Unbounded eval input/output in server
+:PROPERTIES:
+:PRIORITY: A
+:CATEGORY: security
+:END:
+
+[[file:lib/repl_server.ml][repl_server.ml]] — No size limits on eval expressions received from
+clients or on result strings sent back. A client can send a multi-GB
+expression or trigger output that exhausts server memory.
+
+**** Plan
+- Add ~max_input_size~ (e.g. 1 MiB) check before eval
+- Add ~max_output_size~ (e.g. 16 MiB) truncation on result/output strings
+- Return ~Error "input too large"~ / ~Error "output truncated"~ respectively
+
+*** TODO Issue 69: FD leak on client replacement in server
+:PROPERTIES:
+:PRIORITY: B
+:CATEGORY: correctness
+:END:
+
+[[file:lib/repl_server.ml][repl_server.ml]] — ~accept_client~ overwrites ~t.client_fd~ without
+closing the previous fd. If a second client connects while the first
+is still attached, the old fd is leaked.
+
+**** Plan
+- Close existing ~client_fd~ (if any) before assigning the new one
+- Write test: two successive ~accept_client~ calls don't leak fds
+
+*** TODO Issue 70: Infinite loop in ~eval_remote~
+:PROPERTIES:
+:PRIORITY: B
+:CATEGORY: correctness
+:END:
+
+[[file:lib/repl_client.ml][repl_client.ml]] — ~eval_remote~ loops calling ~recv_msg~ until it
+receives ~Result~ or ~Error~. If the server never sends either (e.g.
+due to a bug or hang), the client loops forever with no timeout.
+
+**** Plan
+- Add a timeout (e.g. 60s configurable) to ~eval_remote~
+- On timeout, return an error message rather than blocking indefinitely
+- Alternatively, use ~Unix.select~ with a deadline in the receive loop
+
+*** TODO Issue 71: ~BILK_KEY~ cleanup incomplete
+:PROPERTIES:
+:PRIORITY: B
+:CATEGORY: security
+:END:
+
+[[file:bin/main.ml][bin/main.ml]] — ~Unix.putenv "BILK_KEY" ""~ sets the variable to an
+empty string rather than unsetting it. The key may still appear in
+~/proc/*/environ~ (as ~BILK_KEY=~). OCaml has no ~unsetenv~ binding.
+
+**** Plan
+- Write a C stub for ~unsetenv("BILK_KEY")~ or use ~Sys.remove~ if
+  available in newer OCaml versions
+- Alternatively, accept the limitation and document it, since the empty
+  value is not usable as a key
+
+*** TODO Issue 72: Theme path traversal via ~,theme~
+:PROPERTIES:
+:PRIORITY: B
+:CATEGORY: security
+:END:
+
+[[file:lib/repl_client.ml][repl_client.ml]] — ~,theme ../../etc/passwd~ could read arbitrary files
+through ~resolve_theme~ if it loads theme definitions from file paths
+without validation.
+
+**** Plan
+- Validate theme argument: only allow alphanumeric names (no path
+  separators), resolve against a fixed themes directory
+- Write test: path traversal attempt rejected
+
+** MEDIUM
+
+*** TODO Issue 73: Completions count unchecked in protocol
+:PROPERTIES:
+:PRIORITY: B
+:CATEGORY: security
+:END:
+
+[[file:lib/repl_protocol.ml][repl_protocol.ml]] — The completions message reads a u16 count (up to
+65535) but doesn't validate that the payload contains enough data for
+that many entries. A crafted message could cause an out-of-bounds read.
+
+**** Plan
+- Track remaining payload bytes while reading completions
+- Reject message if count exceeds available data
+- Write test: malformed completions message handled gracefully
+
+*** TODO Issue 74: Error messages leak server file paths
+:PROPERTIES:
+:PRIORITY: B
+:CATEGORY: security
+:END:
+
+[[file:lib/repl_server.ml][repl_server.ml]] — ~Sys_error~ messages (containing full filesystem
+paths) are forwarded as ~Error~ messages to the remote client, leaking
+information about the server's directory layout.
+
+**** Plan
+- Sanitize error messages before sending: strip absolute paths or
+  replace with relative paths
+- Or catch ~Sys_error~ specifically and return a generic message
+
+*** TODO Issue 75: No port validation in SSH connect
+:PROPERTIES:
+:PRIORITY: C
+:CATEGORY: correctness
+:END:
+
+[[file:lib/ssh_connect.ml][ssh_connect.ml]] — Port values are not validated: negative, zero, or
+>65535 values are accepted and passed to the remote command.
+
+**** Plan
+- Validate port range (1-65535) before constructing the SSH command
+- Return error for out-of-range values
+
+*** TODO Issue 76: ~Read_request~ prompt injection
+:PROPERTIES:
+:PRIORITY: C
+:CATEGORY: security
+:END:
+
+[[file:lib/repl_client.ml][repl_client.ml]] — A malicious server can send ~Read_request~ with an
+arbitrary prompt string, potentially social-engineering the user into
+entering credentials or sensitive data that gets sent back to the server.
+
+**** Plan
+- Prefix all server-originated prompts with a clear indicator (e.g.
+  ~[remote]~) so users know the prompt comes from the server
+- Optionally, allow users to deny read requests
+
+*** TODO Issue 77: Signal handler safety
+:PROPERTIES:
+:PRIORITY: C
+:CATEGORY: correctness
+:END:
+
+[[file:lib/repl_server.ml][repl_server.ml]] and [[file:lib/repl_client.ml][repl_client.ml]] — Signal handlers
+perform I/O operations (checkpoint writes, message sends) instead of
+setting a flag and deferring the work. This is not async-signal-safe
+and can cause deadlocks or corruption if the signal interrupts a
+critical section.
+
+**** Plan
+- Change signal handlers to set a ~volatile~ flag
+- Check the flag in the main event loop and perform cleanup there
+
+** LOW
+
+*** TODO Issue 78: Custom base64 codec in repl_crypto
+:PROPERTIES:
+:PRIORITY: C
+:CATEGORY: security
+:END:
+
+[[file:lib/repl_crypto.ml][repl_crypto.ml]] — Uses a hand-rolled base64 encode/decode instead of
+a standard, audited library. Increases risk of subtle encoding bugs.
+
+**** Plan
+- Replace with ~Base64~ opam package or OCaml stdlib base64 if available
+
+*** TODO Issue 79: No forward secrecy in crypto layer
+:PROPERTIES:
+:PRIORITY: C
+:CATEGORY: security
+:END:
+
+[[file:lib/repl_crypto.ml][repl_crypto.ml]] — Uses a single pre-shared key for the entire session.
+Compromise of the key exposes all past and future sessions using that
+key. No ephemeral key exchange (e.g. DH, ECDH) is performed.
+
+*** TODO Issue 80: No memory zeroization for key material
+:PROPERTIES:
+:PRIORITY: C
+:CATEGORY: security
+:END:
+
+[[file:lib/repl_crypto.ml][repl_crypto.ml]] — OCaml's garbage collector does not support explicit
+memory zeroization. Key material in OCaml strings/bytes may persist in
+memory after use, potentially recoverable via memory dump.
+
+This is a fundamental OCaml limitation. Mitigation would require C stubs
+with ~explicit_bzero~ on pinned memory, which adds significant complexity.
+
+*** TODO Issue 81: No security-focused tests for remote REPL
+:PROPERTIES:
+:PRIORITY: B
+:CATEGORY: testing
+:END:
+
+Zero security-focused tests across all remote REPL modules: no tests for
+malformed frames, oversized payloads, path traversal attempts, invalid
+tokens, buffer overflow attempts, or concurrent connection abuse.
+
+**** Plan
+- Add adversarial test cases to each module's test file:
+  - ~test_repl_protocol.ml~: malformed frames, oversized headers, truncated payloads
+  - ~test_repl_server.ml~: path traversal in commands, oversized eval, invalid tokens
+  - ~test_repl_client.ml~: malicious server responses, buffer growth limits
+  - ~test_ssh_connect.ml~: flag injection, port validation edge cases
