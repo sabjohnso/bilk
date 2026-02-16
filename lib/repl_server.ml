@@ -4,6 +4,9 @@ type config = {
   port : int;
   auto_checkpoint : bool;
   name : string;
+  bind_address : Unix.inet_addr;
+  session_timeout : int;
+  insecure : bool;
 }
 
 (* --- State --- *)
@@ -13,6 +16,7 @@ type t = {
   inst : Instance.t;
   session : Session.t;
   token : string;
+  crypto_key : Repl_crypto.key option;
   interrupt : bool ref;
   mutable client_fd : Unix.file_descr option;
   mutable alive : bool;
@@ -33,10 +37,15 @@ let generate_token () =
 (* --- Constructor --- *)
 
 let create config =
+  let crypto_key =
+    if config.insecure then None
+    else Some (Repl_crypto.generate_key ())
+  in
   { config;
     inst = Instance.create ();
     session = Session.create ();
     token = generate_token ();
+    crypto_key;
     interrupt = ref false;
     client_fd = None;
     alive = true;
@@ -48,6 +57,25 @@ let create config =
 let is_alive t = t.alive
 let session_token t = t.token
 let instance t = t.inst
+
+(* --- Connect line and validation --- *)
+
+let connect_line t =
+  let key_str = match t.crypto_key with
+    | None -> "insecure"
+    | Some k -> Repl_crypto.key_to_base64 k
+  in
+  Printf.sprintf "BILK CONNECT %d %s" t.config.port key_str
+
+let is_loopback addr =
+  let s = Unix.string_of_inet_addr addr in
+  s = "127.0.0.1" || s = "::1"
+
+let validate_config config =
+  if config.insecure && not (is_loopback config.bind_address) then
+    Error "insecure mode requires loopback bind address"
+  else
+    Ok ()
 
 (* --- Client communication --- *)
 
@@ -224,7 +252,7 @@ let check_keepalive t last_ping last_pong =
 let run t =
   let server_sock = Unix.socket Unix.PF_INET Unix.SOCK_STREAM 0 in
   Unix.setsockopt server_sock Unix.SO_REUSEADDR true;
-  Unix.bind server_sock (Unix.ADDR_INET (Unix.inet_addr_any, t.config.port));
+  Unix.bind server_sock (Unix.ADDR_INET (t.config.bind_address, t.config.port));
   Unix.listen server_sock 1;
   let handle_signal _ = t.alive <- false in
   Sys.set_signal Sys.sigint (Sys.Signal_handle handle_signal);

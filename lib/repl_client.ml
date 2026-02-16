@@ -6,6 +6,7 @@ type config = {
   theme : string option;
   history_file : string option;
   paredit : bool;
+  key : string option;
 }
 
 (* --- Connection --- *)

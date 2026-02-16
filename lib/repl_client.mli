@@ -24,6 +24,10 @@ type config = {
 
   paredit : bool;
   (** Enable paredit mode for structural editing. *)
+
+  key : string option;
+  (** Session key for authenticated encryption.
+      [None] connects without encryption (insecure mode). *)
 }
 
 (** {1 Connection} *)

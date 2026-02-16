@@ -1700,7 +1700,7 @@ let run_debug path port =
     | Some p ->
       let sock = Unix.socket PF_INET SOCK_STREAM 0 in
       Unix.setsockopt sock SO_REUSEADDR true;
-      Unix.bind sock (Unix.ADDR_INET (Unix.inet_addr_any, p));
+      Unix.bind sock (Unix.ADDR_INET (Unix.inet_addr_loopback, p));
       Unix.listen sock 1;
       Printf.eprintf "Listening on port %d...\n%!" p;
       let (client, _addr) = Unix.accept sock in
@@ -1750,7 +1750,7 @@ let run_lsp port =
     | Some p ->
       let sock = Unix.socket PF_INET SOCK_STREAM 0 in
       Unix.setsockopt sock SO_REUSEADDR true;
-      Unix.bind sock (Unix.ADDR_INET (Unix.inet_addr_any, p));
+      Unix.bind sock (Unix.ADDR_INET (Unix.inet_addr_loopback, p));
       Unix.listen sock 1;
       Printf.eprintf "LSP server listening on port %d...\n%!" p;
       let (client, _addr) = Unix.accept sock in
@@ -2096,14 +2096,30 @@ let make_profile_cmd () =
 
 (* --- Remote REPL: serve / attach --- *)
 
-let run_serve port auto_checkpoint name =
+let run_serve port auto_checkpoint name bind insecure session_timeout =
+  let bind_address =
+    try Unix.inet_addr_of_string bind
+    with Failure _ ->
+      Printf.eprintf "Invalid bind address: %s\n%!" bind;
+      exit 1
+  in
   let config = {
     Repl_server.port;
     auto_checkpoint;
     name;
+    bind_address;
+    session_timeout;
+    insecure;
   } in
+  (match Repl_server.validate_config config with
+   | Error msg ->
+     Printf.eprintf "Invalid configuration: %s\n%!" msg;
+     exit 1
+   | Ok () -> ());
   let server = Repl_server.create config in
-  Printf.printf "Bilk REPL server '%s' listening on port %d\n%!" name port;
+  Printf.printf "%s\n%!" (Repl_server.connect_line server);
+  Printf.eprintf "Bilk REPL server '%s' listening on %s:%d\n%!"
+    name bind port;
   (try Repl_server.run server
    with e ->
      Repl_server.shutdown server;
@@ -2127,11 +2143,27 @@ let make_serve_cmd () =
          info ["name"] ~docv:"NAME"
            ~doc:"Session name (default 'default').")
   in
-  let cmd port auto_checkpoint name =
-    exit (run_serve port auto_checkpoint name)
+  let bind_opt =
+    Arg.(value & opt string "127.0.0.1" &
+         info ["bind"] ~docv:"ADDRESS"
+           ~doc:"Network address to bind to (default 127.0.0.1).")
   in
-  let term = Term.(const cmd $ port_opt
-                   $ auto_checkpoint_opt $ name_opt) in
+  let insecure_opt =
+    Arg.(value & flag &
+         info ["insecure"]
+           ~doc:"Disable encryption. Only allowed with loopback bind.")
+  in
+  let session_timeout_opt =
+    Arg.(value & opt int 86400 &
+         info ["session-timeout"] ~docv:"SECONDS"
+           ~doc:"Session timeout in seconds (default 86400).")
+  in
+  let cmd port auto_checkpoint name bind insecure session_timeout =
+    exit (run_serve port auto_checkpoint name bind insecure session_timeout)
+  in
+  let term = Term.(const cmd $ port_opt $ auto_checkpoint_opt
+                   $ name_opt $ bind_opt $ insecure_opt
+                   $ session_timeout_opt) in
   let info =
     Cmd.info "serve" ~version
       ~doc:"Start a remote REPL server"
@@ -2143,10 +2175,12 @@ let make_serve_cmd () =
   Cmd.v info term
 
 let run_attach host port theme paredit =
+  let key = Sys.getenv_opt "BILK_KEY" in
   let config : Repl_client.config = {
     host; port; theme;
     history_file;
     paredit;
+    key;
   } in
   (try Repl_client.connect config
    with
@@ -2198,6 +2232,97 @@ let make_attach_cmd () =
                 $(b,bilk serve). Runs the full REPL UI locally (line \
                 editor, paredit, highlighting, completion) and sends \
                 expressions to the server for evaluation."]
+  in
+  Cmd.v info term
+
+(* --- Remote REPL: connect (SSH bootstrap) --- *)
+
+let run_connect target ssh_port serve_args =
+  match Ssh_connect.parse_target target with
+  | None ->
+    Printf.eprintf "Expected USER@HOST format (e.g., user@host)\n%!";
+    exit 1
+  | Some (user, host) ->
+    let ssh_cmd = "ssh" in
+    let ssh_args =
+      (match ssh_port with
+       | None -> [ssh_cmd; "-l"; user; host]
+       | Some p -> [ssh_cmd; "-l"; user; "-p"; string_of_int p; host])
+      @ ["bilk"; "serve"] @ serve_args
+    in
+    let pipe_read, pipe_write = Unix.pipe () in
+    let pid = Unix.create_process ssh_cmd
+        (Array.of_list ssh_args)
+        Unix.stdin pipe_write Unix.stderr in
+    Unix.close pipe_write;
+    (* Read lines from SSH stdout until BILK CONNECT or EOF *)
+    let ic = Unix.in_channel_of_descr pipe_read in
+    let lines = ref [] in
+    (try
+       while true do
+         let line = input_line ic in
+         lines := line :: !lines;
+         (* Check if this is the connect line *)
+         if String.length line >= 12
+            && String.sub line 0 12 = "BILK CONNECT" then
+           raise Exit
+       done
+     with Exit | End_of_file -> ());
+    let result = Ssh_connect.scan_for_connect (List.rev !lines) in
+    match result with
+    | Error (Ssh_connect.No_bilk_on_remote msg) ->
+      Printf.eprintf "Error: %s\n%!" msg;
+      Unix.close pipe_read;
+      ignore (Unix.waitpid [] pid);
+      exit 1
+    | Error (Ssh_connect.Ssh_failed msg) ->
+      Printf.eprintf "SSH failed: %s\n%!" msg;
+      Unix.close pipe_read;
+      ignore (Unix.waitpid [] pid);
+      exit 1
+    | Error (Ssh_connect.Invalid_connect_line msg) ->
+      Printf.eprintf "Invalid connect line: %s\n%!" msg;
+      Unix.close pipe_read;
+      ignore (Unix.waitpid [] pid);
+      exit 1
+    | Ok info ->
+      Unix.close pipe_read;
+      (* Set BILK_KEY for the attach process *)
+      Unix.putenv "BILK_KEY" info.key;
+      (* Attach to the remote server *)
+      let exit_code = run_attach host info.port None false in
+      ignore (Unix.waitpid [] pid);
+      exit_code
+
+let make_connect_cmd () =
+  let open Cmdliner in
+  let target_arg =
+    Arg.(required & pos 0 (some string) None &
+         info [] ~docv:"USER@HOST"
+           ~doc:"Remote host in USER@HOST format.")
+  in
+  let ssh_port_opt =
+    Arg.(value & opt (some int) None &
+         info ["port"; "p"] ~docv:"PORT"
+           ~doc:"SSH port on the remote host.")
+  in
+  let serve_args_opt =
+    Arg.(value & pos_right 0 string [] &
+         info [] ~docv:"SERVE-ARGS"
+           ~doc:"Additional arguments to pass to $(b,bilk serve).")
+  in
+  let cmd target ssh_port serve_args =
+    exit (run_connect target ssh_port serve_args)
+  in
+  let term = Term.(const cmd $ target_arg $ ssh_port_opt $ serve_args_opt) in
+  let info =
+    Cmd.info "connect" ~version
+      ~doc:"Connect to a remote host via SSH"
+      ~man:[`S "DESCRIPTION";
+            `P "Starts $(b,bilk serve) on a remote host via SSH and \
+                automatically connects to it. The SSH session bootstraps \
+                the connection by reading the $(b,BILK CONNECT) line \
+                from the server's stdout."]
   in
   Cmd.v info term
 
@@ -2280,6 +2405,12 @@ let () =
         Array.sub Sys.argv 2 (argc - 2)
       ] in
       exit (Cmd.eval ~argv (make_attach_cmd ()))
+    | "connect" ->
+      let argv = Array.concat [
+        [| Sys.argv.(0) |];
+        Array.sub Sys.argv 2 (argc - 2)
+      ] in
+      exit (Cmd.eval ~argv (make_connect_cmd ()))
     | arg when String.length arg > 0 && arg.[0] <> '-' ->
       let script_args = Array.to_list (Array.sub Sys.argv 2 (argc - 2)) in
       exit (run_file arg script_args)

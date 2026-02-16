@@ -206,13 +206,15 @@ let test_config_fields () =
     theme = Some "dark";
     history_file = Some "/tmp/history";
     paredit = true;
+    key = Some "secret-key";
   } in
   Alcotest.(check string) "host" "example.com" config.host;
   Alcotest.(check int) "port" 7890 config.port;
   Alcotest.(check (option string)) "theme" (Some "dark") config.theme;
   Alcotest.(check (option string)) "history_file"
     (Some "/tmp/history") config.history_file;
-  Alcotest.(check bool) "paredit" true config.paredit
+  Alcotest.(check bool) "paredit" true config.paredit;
+  Alcotest.(check (option string)) "key" (Some "secret-key") config.key
 
 let () =
   Alcotest.run "Repl_client"

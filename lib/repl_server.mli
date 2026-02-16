@@ -17,6 +17,16 @@ type config = {
 
   name : string;
   (** Session name for display and auto-checkpoint naming. *)
+
+  bind_address : Unix.inet_addr;
+  (** Network address to bind the listener to.
+      Default [Unix.inet_addr_loopback] for security. *)
+
+  session_timeout : int;
+  (** Session timeout in seconds.  Stored for future use. *)
+
+  insecure : bool;
+  (** If [true], skip encryption.  Only allowed with loopback bind. *)
 }
 
 (** {1 Server lifecycle} *)
@@ -71,3 +81,12 @@ val session_token : t -> string
 val instance : t -> Instance.t
 (** [instance t] returns the server's Scheme instance.
     Exposed for testing eval side-effects. *)
+
+val connect_line : t -> string
+(** [connect_line t] returns the [BILK CONNECT <port> <key>] line
+    suitable for parsing by {!Ssh_connect.parse_connect_line}.
+    If {!config.insecure} is [true], the key is ["insecure"]. *)
+
+val validate_config : config -> (unit, string) result
+(** [validate_config config] checks that the configuration is valid.
+    Rejects [insecure=true] with a non-loopback bind address. *)

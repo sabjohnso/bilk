@@ -25,6 +25,9 @@ let make_server () =
     Repl_server.port = 0;
     auto_checkpoint = false;
     name = "test";
+    bind_address = Unix.inet_addr_loopback;
+    session_timeout = 86400;
+    insecure = true;
   } in
   let server = Repl_server.create config in
   let (client_fd, server_fd) = Unix.socketpair Unix.PF_UNIX Unix.SOCK_STREAM 0 in
@@ -223,6 +226,123 @@ let test_session_token_nonempty () =
   Repl_server.shutdown server;
   Unix.close client_fd
 
+(* --- connect_line: non-insecure format --- *)
+
+let test_connect_line_format () =
+  let config = {
+    Repl_server.port = 7890;
+    auto_checkpoint = false;
+    name = "test";
+    bind_address = Unix.inet_addr_loopback;
+    session_timeout = 86400;
+    insecure = false;
+  } in
+  let server = Repl_server.create config in
+  let line = Repl_server.connect_line server in
+  (* Should start with "BILK CONNECT 7890 " *)
+  Alcotest.(check bool) "starts with prefix" true
+    (String.length line > 18 &&
+     String.sub line 0 18 = "BILK CONNECT 7890 ");
+  (* Key should not be "insecure" *)
+  let parts = String.split_on_char ' ' line in
+  let key = List.nth parts 3 in
+  Alcotest.(check bool) "key not insecure" true (key <> "insecure");
+  Repl_server.shutdown server
+
+(* --- connect_line: insecure --- *)
+
+let test_connect_line_insecure () =
+  let config = {
+    Repl_server.port = 7890;
+    auto_checkpoint = false;
+    name = "test";
+    bind_address = Unix.inet_addr_loopback;
+    session_timeout = 86400;
+    insecure = true;
+  } in
+  let server = Repl_server.create config in
+  let line = Repl_server.connect_line server in
+  Alcotest.(check string) "insecure connect line"
+    "BILK CONNECT 7890 insecure" line;
+  Repl_server.shutdown server
+
+(* --- connect_line: parseable roundtrip --- *)
+
+let test_connect_line_parseable () =
+  let config = {
+    Repl_server.port = 4567;
+    auto_checkpoint = false;
+    name = "rt";
+    bind_address = Unix.inet_addr_loopback;
+    session_timeout = 86400;
+    insecure = false;
+  } in
+  let server = Repl_server.create config in
+  let line = Repl_server.connect_line server in
+  let parsed = Ssh_connect.parse_connect_line line in
+  (match parsed with
+   | Some info ->
+     Alcotest.(check int) "port roundtrips" 4567 info.port;
+     Alcotest.(check bool) "key non-empty" true
+       (String.length info.key > 0)
+   | None ->
+     Alcotest.fail "connect_line should be parseable");
+  Repl_server.shutdown server
+
+(* --- validate_config --- *)
+
+let test_validate_insecure_loopback_ok () =
+  let config = {
+    Repl_server.port = 7890;
+    auto_checkpoint = false;
+    name = "test";
+    bind_address = Unix.inet_addr_loopback;
+    session_timeout = 86400;
+    insecure = true;
+  } in
+  Alcotest.(check bool) "loopback insecure ok" true
+    (Repl_server.validate_config config = Ok ())
+
+let test_validate_insecure_any_rejected () =
+  let config = {
+    Repl_server.port = 7890;
+    auto_checkpoint = false;
+    name = "test";
+    bind_address = Unix.inet_addr_any;
+    session_timeout = 86400;
+    insecure = true;
+  } in
+  Alcotest.(check bool) "any insecure rejected" true
+    (match Repl_server.validate_config config with
+     | Error _ -> true
+     | Ok () -> false)
+
+let test_validate_secure_any_ok () =
+  let config = {
+    Repl_server.port = 7890;
+    auto_checkpoint = false;
+    name = "test";
+    bind_address = Unix.inet_addr_any;
+    session_timeout = 86400;
+    insecure = false;
+  } in
+  Alcotest.(check bool) "any secure ok" true
+    (Repl_server.validate_config config = Ok ())
+
+let test_validate_insecure_specific_ip_rejected () =
+  let config = {
+    Repl_server.port = 7890;
+    auto_checkpoint = false;
+    name = "test";
+    bind_address = Unix.inet_addr_of_string "192.168.1.1";
+    session_timeout = 86400;
+    insecure = true;
+  } in
+  Alcotest.(check bool) "specific ip insecure rejected" true
+    (match Repl_server.validate_config config with
+     | Error _ -> true
+     | Ok () -> false)
+
 let () =
   Alcotest.run "Repl_server"
     [ ("eval",
@@ -247,5 +367,20 @@ let () =
            test_disconnect_keeps_alive
        ; Alcotest.test_case "interrupt flag" `Quick test_interrupt_flag
        ; Alcotest.test_case "instance accessor" `Quick test_instance_accessor
+       ])
+    ; ("connect_line",
+       [ Alcotest.test_case "format" `Quick test_connect_line_format
+       ; Alcotest.test_case "insecure" `Quick test_connect_line_insecure
+       ; Alcotest.test_case "parseable" `Quick test_connect_line_parseable
+       ])
+    ; ("validate_config",
+       [ Alcotest.test_case "insecure loopback ok" `Quick
+           test_validate_insecure_loopback_ok
+       ; Alcotest.test_case "insecure any rejected" `Quick
+           test_validate_insecure_any_rejected
+       ; Alcotest.test_case "secure any ok" `Quick
+           test_validate_secure_any_ok
+       ; Alcotest.test_case "insecure specific ip rejected" `Quick
+           test_validate_insecure_specific_ip_rejected
        ])
     ]
