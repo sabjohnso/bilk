@@ -642,21 +642,19 @@ let run_repl theme_name =
     let loaded = Library.list_all inst.Instance.libraries in
     List.map (fun (l : Library.t) -> l.name) loaded
   in
-  let apply_matches ~width text cursor start matches =
+  let apply_matches ~width:_ text cursor start matches =
     match matches with
     | [] -> Line_editor.No_completions
-    | [single] ->
-      let before = String.sub text 0 start in
-      let after = String.sub text cursor (String.length text - cursor) in
-      Line_editor.Single (before ^ single ^ after,
-                          start + String.length single)
     | _ ->
       let cp = Completion.common_prefix matches in
       let before = String.sub text 0 start in
       let after = String.sub text cursor (String.length text - cursor) in
-      let display = Completion.format_columns ~width matches in
-      Line_editor.Multiple (before ^ cp ^ after,
-                            start + String.length cp, display)
+      Line_editor.Menu {
+        text = before ^ cp ^ after;
+        cursor = start + String.length cp;
+        candidates = matches;
+        start;
+      }
   in
   let complete_fn text cursor ~width =
     let rt = (!inst_ref).Instance.readtable in

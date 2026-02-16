@@ -19,6 +19,11 @@ val format_columns : width:int -> string list -> string
 (** [format_columns ~width candidates] arranges candidates in columns
     fitting within [width].  Returns the formatted string. *)
 
+val format_columns_highlighted : width:int -> highlight:int -> string list -> string
+(** [format_columns_highlighted ~width ~highlight candidates] arranges
+    candidates in columns fitting within [width], wrapping the item at
+    index [highlight] in ANSI reverse video. Returns [""] for empty list. *)
+
 val should_complete_at : string -> int -> bool
 (** [should_complete_at text cursor] returns [true] when the character
     before [cursor] is an identifier character, indicating that Tab

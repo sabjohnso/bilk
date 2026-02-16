@@ -48,6 +48,7 @@ type key =
   | Alt_ctrl_n         (** C-M-n — forward up out of list (paredit) *)
   | Alt_ctrl_p         (** C-M-p — backward down into list (paredit) *)
   | Shift_tab          (** Shift-Tab — re-indent all (paredit) *)
+  | Escape             (** Bare Escape key *)
   | Unknown            (** Unrecognized sequence *)
 
 (** Opaque terminal state handle. *)

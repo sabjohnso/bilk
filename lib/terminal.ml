@@ -39,6 +39,7 @@ type key =
   | Alt_ctrl_n
   | Alt_ctrl_p
   | Shift_tab
+  | Escape
   | Unknown
 
 type t = {
@@ -143,7 +144,7 @@ let parse_key_bytes buf len =
     | 0x15 -> Ctrl_u
     | 0x17 -> Ctrl_w
     | 0x1B ->
-      if len = 1 then Unknown
+      if len = 1 then Escape
       else begin
         let b1 = Char.code (Bytes.get buf 1) in
         if b1 = 0x5B (* '[' *) then begin
@@ -195,7 +196,7 @@ let read_key t =
     (* Escape — check for multi-byte sequence *)
     let b1 = read_byte_timeout t.fd 50 in
     if b1 < 0 then
-      Unknown (* bare Escape *)
+      Escape (* bare Escape *)
     else if b1 = 0x5B then begin
       (* CSI: ESC [ ... *)
       let csi = read_csi t.fd in

@@ -125,7 +125,7 @@ let test_shift_tab () =
 
 let test_bare_escape () =
   Alcotest.(check bool) "bare ESC" true
-    (parse [0x1B] = Terminal.Unknown)
+    (parse [0x1B] = Terminal.Escape)
 
 let test_empty_input () =
   Alcotest.(check bool) "empty" true

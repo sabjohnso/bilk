@@ -25,6 +25,15 @@ type completion_result =
   | Multiple of string * int * string
       (** [(new_text, new_cursor, display)] — common prefix applied,
           [display] string to show below input. *)
+  | Menu of {
+      text : string;
+      cursor : int;
+      candidates : string list;
+      start : int;
+    }
+      (** Interactive menu: [text] with common prefix applied, [cursor]
+          after prefix, raw sorted [candidates], [start] byte offset
+          where the prefix begins in [text]. *)
 
 (** Editor configuration. *)
 type config = {

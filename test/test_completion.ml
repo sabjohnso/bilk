@@ -95,6 +95,49 @@ let test_format_columns_empty () =
   let result = Completion.format_columns ~width:80 [] in
   Alcotest.(check string) "empty" "" result
 
+(* format_columns_highlighted *)
+
+let test_format_highlighted_basic () =
+  let result = Completion.format_columns_highlighted ~width:80 ~highlight:1
+    ["alpha"; "beta"; "gamma"] in
+  (* Only "beta" should be wrapped in reverse video *)
+  Alcotest.(check bool) "has reverse on beta" true
+    (let pat = "\x1b[7mbeta\x1b[0m" in
+     let plen = String.length pat in
+     let rlen = String.length result in
+     let found = ref false in
+     for i = 0 to rlen - plen do
+       if String.sub result i plen = pat then found := true
+     done;
+     !found);
+  (* "alpha" should NOT be wrapped *)
+  Alcotest.(check bool) "alpha not reversed" false
+    (let pat = "\x1b[7malpha\x1b[0m" in
+     let plen = String.length pat in
+     let rlen = String.length result in
+     let found = ref false in
+     for i = 0 to rlen - plen do
+       if String.sub result i plen = pat then found := true
+     done;
+     !found)
+
+let test_format_highlighted_first () =
+  let result = Completion.format_columns_highlighted ~width:80 ~highlight:0
+    ["alpha"; "beta"; "gamma"] in
+  Alcotest.(check bool) "has reverse on alpha" true
+    (let pat = "\x1b[7malpha\x1b[0m" in
+     let plen = String.length pat in
+     let rlen = String.length result in
+     let found = ref false in
+     for i = 0 to rlen - plen do
+       if String.sub result i plen = pat then found := true
+     done;
+     !found)
+
+let test_format_highlighted_empty () =
+  let result = Completion.format_columns_highlighted ~width:80 ~highlight:0 [] in
+  Alcotest.(check string) "empty" "" result
+
 (* should_complete_at *)
 
 let test_should_complete_after_ident () =
@@ -289,6 +332,24 @@ let prop_complete_path_results_start_with_prefix =
          String.sub r 0 (String.length dir) = dir
        ) results)
 
+let prop_format_highlighted_exactly_one_reverse =
+  QCheck2.Test.make ~count:200
+    ~name:"format_columns_highlighted has exactly one reverse video marker"
+    QCheck2.Gen.(pair
+      (list_size (int_range 1 20) ident_gen)
+      (int_range 0 19))
+    (fun (strs, idx) ->
+       let idx = idx mod List.length strs in
+       let result = Completion.format_columns_highlighted ~width:80 ~highlight:idx strs in
+       let marker = "\x1b[7m" in
+       let mlen = String.length marker in
+       let rlen = String.length result in
+       let count = ref 0 in
+       for i = 0 to rlen - mlen do
+         if String.sub result i mlen = marker then incr count
+       done;
+       !count = 1)
+
 let prop_format_columns_contains_all =
   QCheck2.Test.make ~count:200
     ~name:"format_columns contains every candidate"
@@ -333,6 +394,11 @@ let () =
        [ Alcotest.test_case "basic" `Quick test_format_columns_basic
        ; Alcotest.test_case "empty" `Quick test_format_columns_empty
        ])
+    ; ("format_columns_highlighted",
+       [ Alcotest.test_case "basic" `Quick test_format_highlighted_basic
+       ; Alcotest.test_case "first" `Quick test_format_highlighted_first
+       ; Alcotest.test_case "empty" `Quick test_format_highlighted_empty
+       ])
     ; ("match_library_name",
        [ Alcotest.test_case "scheme b" `Quick test_match_library_scheme_b
        ; Alcotest.test_case "scheme empty" `Quick test_match_library_scheme_empty
@@ -362,6 +428,7 @@ let () =
          ; prop_find_matches_subset
          ; prop_find_matches_all_start_with_prefix
          ; prop_format_columns_contains_all
+         ; prop_format_highlighted_exactly_one_reverse
          ; prop_complete_path_results_start_with_prefix
          ; prop_should_complete_iff_extract_nonempty
          ])

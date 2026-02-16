@@ -53,6 +53,29 @@ let format_columns ~width candidates =
     ) candidates;
     Buffer.contents buf
 
+let format_columns_highlighted ~width ~highlight candidates =
+  match candidates with
+  | [] -> ""
+  | _ ->
+    let max_len = List.fold_left (fun acc s -> max acc (String.length s)) 0 candidates in
+    let col_width = max_len + 2 in
+    let ncols = max 1 (width / col_width) in
+    let buf = Buffer.create 256 in
+    List.iteri (fun i s ->
+      if i > 0 && i mod ncols = 0 then
+        Buffer.add_char buf '\n';
+      if i = highlight then begin
+        Buffer.add_string buf "\x1b[7m";
+        Buffer.add_string buf s;
+        Buffer.add_string buf "\x1b[0m"
+      end else
+        Buffer.add_string buf s;
+      let pad = col_width - String.length s in
+      if pad > 0 && (i + 1) mod ncols <> 0 then
+        Buffer.add_string buf (String.make pad ' ')
+    ) candidates;
+    Buffer.contents buf
+
 let should_complete_at text cursor =
   cursor > 0 && is_ident_char text.[cursor - 1]
 

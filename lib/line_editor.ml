@@ -4,6 +4,12 @@ type completion_result =
   | No_completions
   | Single of string * int
   | Multiple of string * int * string
+  | Menu of {
+      text : string;
+      cursor : int;
+      candidates : string list;
+      start : int;
+    }
 
 type config = {
   prompt : string;
@@ -29,6 +35,16 @@ type t = {
   history : History.t;
 }
 
+(* Completion menu state — active while user is navigating candidates. *)
+type menu_state = {
+  candidates : string list;
+  mutable selected : int;
+  start : int;              (* byte offset in text where prefix begins *)
+  original_text : string;   (* text before common prefix was applied *)
+  original_cursor : int;    (* cursor before common prefix was applied *)
+  width : int;              (* terminal width, cached at menu open *)
+}
+
 (* Internal editing state for one read_input call.
    The buffer holds the full multi-line text with \n separators.
    cursor is a byte offset into the text. *)
@@ -37,6 +53,8 @@ type edit_state = {
   mutable cursor : int;
   mutable saved_input : string;  (* saved before history navigation *)
   mutable rendered_row : int;    (* cursor row at last render, for move-up *)
+  mutable menu : menu_state option;
+  term_width : int;              (* terminal width, queried once at start *)
 }
 
 let create config =
@@ -220,7 +238,10 @@ let effective_continuation_prompt t =
   if cont_len >= target_len then cont
   else cont ^ String.make (target_len - cont_len) ' '
 
-let render t st =
+(* Render the input lines to the terminal. After this call, the terminal
+   cursor is at the end of the last input line.
+   Returns (nlines, cur_row, cur_col, prompt_vlen, cont_prompt_vlen). *)
+let render_input t st =
   let text = content_string st in
   let lines = lines_of_text text in
   let nlines = List.length lines in
@@ -255,17 +276,82 @@ let render t st =
     if i < nlines - 1 then
       Terminal.write_string t.term "\r\n"
   ) lines;
-  (* Clear any residual lines below *)
+  (nlines, cur_row, cur_col,
+   visible_length prompt, visible_length cont_prompt)
+
+(* Reposition the terminal cursor to the input cursor position and
+   clear any residual content below the last input line. *)
+let finish_render t st nlines cur_row cur_col prompt_vlen cont_prompt_vlen =
   Terminal.clear_below t.term;
-  (* Reposition cursor using raw text coordinates (ignoring ANSI escapes) *)
   let last_line = nlines - 1 in
   let lines_up = last_line - cur_row in
   if lines_up > 0 then
     Terminal.write_string t.term (Printf.sprintf "\x1b[%dA" lines_up);
-  let prompt_len = if cur_row = 0 then visible_length prompt
-                   else visible_length cont_prompt in
+  let prompt_len = if cur_row = 0 then prompt_vlen else cont_prompt_vlen in
   Terminal.move_to_column t.term (prompt_len + cur_col + 1);
   st.rendered_row <- cur_row
+
+let render t st =
+  let (nlines, cur_row, cur_col, pv, cpv) = render_input t st in
+  finish_render t st nlines cur_row cur_col pv cpv
+
+(* Render input lines plus the completion menu below them.
+   Used when the menu first opens (input text may have changed). *)
+let render_menu t st menu =
+  let (nlines, cur_row, cur_col, pv, cpv) = render_input t st in
+  (* Move below the last input line *)
+  Terminal.write_string t.term "\r\n";
+  (* Write highlighted candidates *)
+  let display = Completion.format_columns_highlighted
+    ~width:menu.width ~highlight:menu.selected menu.candidates in
+  Terminal.write_string t.term display;
+  Terminal.clear_below t.term;
+  (* Count menu display lines (1 + number of newlines in display) *)
+  let menu_newlines =
+    String.fold_left (fun acc c -> if c = '\n' then acc + 1 else acc)
+      0 display
+  in
+  (* Move back up to cursor position in input:
+     from end of menu display, go up past menu lines + remaining input lines *)
+  let total_up = menu_newlines + nlines - cur_row in
+  if total_up > 0 then
+    Terminal.write_string t.term (Printf.sprintf "\x1b[%dA" total_up);
+  let prompt_len = if cur_row = 0 then pv else cpv in
+  Terminal.move_to_column t.term (prompt_len + cur_col + 1);
+  st.rendered_row <- cur_row
+
+(* Redraw only the menu display (for Tab/Shift-Tab cycling).
+   Avoids re-rendering input and avoids querying terminal size.
+   Moves cursor from its current position down to the menu area,
+   rewrites the highlighted candidates, and moves back. *)
+let cycle_menu t st menu =
+  let text = content_string st in
+  let nlines = num_lines text in
+  let cur_row = cursor_row text st.cursor in
+  let cur_col = cursor_col text st.cursor in
+  let prompt = effective_prompt t in
+  let cont_prompt = effective_continuation_prompt t in
+  (* Move from cursor position down to the menu area *)
+  let lines_down = nlines - cur_row in
+  if lines_down > 0 then
+    Terminal.write_string t.term (Printf.sprintf "\x1b[%dB" lines_down);
+  Terminal.write_string t.term "\r";
+  (* Redraw the menu with updated highlight *)
+  let display = Completion.format_columns_highlighted
+    ~width:menu.width ~highlight:menu.selected menu.candidates in
+  Terminal.write_string t.term display;
+  Terminal.clear_below t.term;
+  (* Move back up to cursor position *)
+  let menu_newlines =
+    String.fold_left (fun acc c -> if c = '\n' then acc + 1 else acc)
+      0 display
+  in
+  let total_up = menu_newlines + nlines - cur_row in
+  if total_up > 0 then
+    Terminal.write_string t.term (Printf.sprintf "\x1b[%dA" total_up);
+  let prompt_len = if cur_row = 0 then visible_length prompt
+                   else visible_length cont_prompt in
+  Terminal.move_to_column t.term (prompt_len + cur_col + 1)
 
 (* --- Word movement helpers --- *)
 
@@ -378,8 +464,7 @@ let handle_completion t st =
   | None -> ()
   | Some complete_fn ->
     let text = content_string st in
-    let (_rows, cols) = Terminal.get_terminal_size t.term in
-    let width = max 40 cols in
+    let width = st.term_width in
     begin match complete_fn text st.cursor ~width with
     | No_completions ->
       Terminal.write_string t.term "\x07"  (* bell *)
@@ -405,6 +490,59 @@ let handle_completion t st =
       (* Re-render the input *)
       st.rendered_row <- 0;
       render t st
+    | Menu { text = new_text; cursor = new_cursor; candidates = [_]; _ } ->
+      (* Single match — auto-complete without showing menu *)
+      Buffer.clear st.content;
+      Buffer.add_string st.content new_text;
+      st.cursor <- new_cursor;
+      render t st
+    | Menu { text = new_text; cursor = new_cursor; candidates; start } ->
+      let original_text = content_string st in
+      let original_cursor = st.cursor in
+      Buffer.clear st.content;
+      Buffer.add_string st.content new_text;
+      st.cursor <- new_cursor;
+      let m = {
+        candidates;
+        selected = 0;
+        start;
+        original_text;
+        original_cursor;
+        width;
+      } in
+      st.menu <- Some m;
+      render_menu t st m
+    end
+
+(* Silently try to reopen the completion menu after typing/deleting.
+   Unlike handle_completion: no bell on no matches, and single matches
+   are kept in the menu (not auto-completed) so the user can confirm
+   with Enter/Tab or cancel with Escape. *)
+let try_reopen_menu t st =
+  match t.config.complete with
+  | None -> ()
+  | Some complete_fn ->
+    let text = content_string st in
+    let cur = st.cursor in
+    let width = st.term_width in
+    begin match complete_fn text cur ~width with
+    | No_completions | Single _ | Multiple _ -> ()
+    | Menu { text = new_text; cursor = new_cursor; candidates; start } ->
+      let original_text = text in
+      let original_cursor = cur in
+      Buffer.clear st.content;
+      Buffer.add_string st.content new_text;
+      st.cursor <- new_cursor;
+      let m = {
+        candidates;
+        selected = 0;
+        start;
+        original_text;
+        original_cursor;
+        width;
+      } in
+      st.menu <- Some m;
+      render_menu t st m
     end
 
 (* --- Main read loop --- *)
@@ -415,11 +553,17 @@ let read_input t =
   let (_row, col) = Terminal.get_cursor_pos t.term in
   if col > 1 then
     Terminal.write_string t.term "\r\n";
+  (* Query terminal size once before rendering. get_terminal_size uses
+     cursor-movement escape sequences that can displace the cursor, so we
+     must not call it during the editing loop. *)
+  let (_rows, cols) = Terminal.get_terminal_size t.term in
   let st = {
     content = Buffer.create 80;
     cursor = 0;
     saved_input = "";
     rendered_row = 0;
+    menu = None;
+    term_width = max 40 cols;
   } in
   History.reset_nav t.history;
   render t st;
@@ -428,8 +572,95 @@ let read_input t =
     | Some idle -> Terminal.read_key_with_idle t.term ~idle
     | None -> Terminal.read_key t.term
   in
+  let insert_char_maybe_paredit c =
+    if paredit_active t then begin
+      let text = content_string st in
+      let rt = get_readtable t in
+      match c with
+      | '(' | '[' ->
+        apply_paredit_result st (Paredit.insert_open_paren text st.cursor)
+      | ')' | ']' ->
+        let result = Paredit.insert_close_paren rt text st.cursor in
+        if result.text = text && result.cursor = st.cursor then
+          Terminal.write_string t.term "\x07"  (* bell *)
+        else
+          apply_paredit_result st result
+      | '"' ->
+        apply_paredit_result st (Paredit.insert_double_quote rt text st.cursor)
+      | _ -> insert_char st c
+    end else
+      insert_char st c
+  in
+  let delete_backward_maybe_paredit () =
+    if paredit_active t then begin
+      let text = content_string st in
+      let rt = get_readtable t in
+      apply_paredit_result st (Paredit.backspace_paredit rt text st.cursor)
+    end else
+      delete_backward st
+  in
   let rec loop () =
     let key = read_key () in
+    match st.menu with
+    | Some menu -> handle_menu_key key menu
+    | None -> handle_normal_key key
+
+  and handle_menu_key key menu =
+    match key with
+    | Terminal.Tab ->
+      menu.selected <- (menu.selected + 1) mod (List.length menu.candidates);
+      cycle_menu t st menu;
+      loop ()
+    | Terminal.Shift_tab ->
+      let n = List.length menu.candidates in
+      menu.selected <- (menu.selected + n - 1) mod n;
+      cycle_menu t st menu;
+      loop ()
+    | Terminal.Enter ->
+      (* Accept: replace prefix→cursor with selected candidate *)
+      let candidate = List.nth menu.candidates menu.selected in
+      let text = content_string st in
+      let before = String.sub text 0 menu.start in
+      let after = String.sub text st.cursor (String.length text - st.cursor) in
+      Buffer.clear st.content;
+      Buffer.add_string st.content (before ^ candidate ^ after);
+      st.cursor <- menu.start + String.length candidate;
+      st.menu <- None;
+      render t st;
+      loop ()
+    | Terminal.Escape ->
+      (* Cancel: restore original text/cursor *)
+      Buffer.clear st.content;
+      Buffer.add_string st.content menu.original_text;
+      st.cursor <- menu.original_cursor;
+      st.menu <- None;
+      render t st;
+      loop ()
+    | Terminal.Char c ->
+      (* Dismiss menu, insert char, try to reopen *)
+      st.menu <- None;
+      insert_char_maybe_paredit c;
+      render t st;
+      try_reopen_menu t st;
+      loop ()
+    | Terminal.Backspace ->
+      (* Dismiss menu, delete backward, try to reopen *)
+      st.menu <- None;
+      delete_backward_maybe_paredit ();
+      render t st;
+      try_reopen_menu t st;
+      loop ()
+    | Terminal.Ctrl_c | Terminal.Ctrl_d ->
+      st.menu <- None;
+      render t st;
+      handle_normal_key key
+    | _ ->
+      (* Dismiss menu, delegate to normal handler *)
+      st.menu <- None;
+      render t st;
+      handle_normal_key key
+
+  and handle_normal_key key =
     match key with
     | Terminal.Enter ->
       let text = content_string st in
@@ -444,13 +675,9 @@ let read_input t =
       let should_submit = match t.config.is_complete with
         | None -> cursor_at_end
         | Some f ->
-          (* Empty input submits (allows blank lines).
-             Non-empty input only submits if cursor is at end
-             (modulo trailing whitespace) AND expression is complete. *)
           text = "" || (cursor_at_end && f text)
       in
       if should_submit then begin
-        (* Final render with cursor beyond all tokens to clear paren-match highlights *)
         st.cursor <- String.length text + 1;
         render t st;
         Terminal.write_string t.term "\r\n";
@@ -479,7 +706,6 @@ let read_input t =
       loop ()
 
     | Terminal.Ctrl_c ->
-      (* Move to end and print newline *)
       let text = content_string st in
       let nlines = num_lines text in
       let cur_row = cursor_row text st.cursor in
@@ -501,33 +727,12 @@ let read_input t =
       end
 
     | Terminal.Char c ->
-      if paredit_active t then begin
-        let text = content_string st in
-        let rt = get_readtable t in
-        match c with
-        | '(' | '[' ->
-          apply_paredit_result st (Paredit.insert_open_paren text st.cursor)
-        | ')' | ']' ->
-          let result = Paredit.insert_close_paren rt text st.cursor in
-          if result.text = text && result.cursor = st.cursor then
-            Terminal.write_string t.term "\x07"  (* bell *)
-          else
-            apply_paredit_result st result
-        | '"' ->
-          apply_paredit_result st (Paredit.insert_double_quote rt text st.cursor)
-        | _ -> insert_char st c
-      end else
-        insert_char st c;
+      insert_char_maybe_paredit c;
       render t st;
       loop ()
 
     | Terminal.Backspace ->
-      if paredit_active t then begin
-        let text = content_string st in
-        let rt = get_readtable t in
-        apply_paredit_result st (Paredit.backspace_paredit rt text st.cursor)
-      end else
-        delete_backward st;
+      delete_backward_maybe_paredit ();
       render t st;
       loop ()
 
@@ -558,7 +763,6 @@ let read_input t =
       loop ()
 
     | Terminal.Home | Terminal.Ctrl_a ->
-      (* Move to start of current line *)
       let text = content_string st in
       let p = ref (st.cursor - 1) in
       while !p >= 0 && text.[!p] <> '\n' do decr p done;
@@ -567,7 +771,6 @@ let read_input t =
       loop ()
 
     | Terminal.End_key | Terminal.Ctrl_e ->
-      (* Move to end of current line *)
       let text = content_string st in
       let len = String.length text in
       let p = ref st.cursor in
@@ -607,12 +810,10 @@ let read_input t =
       let text = content_string st in
       let row = cursor_row text st.cursor in
       if row > 0 then begin
-        (* Move up within multi-line input *)
         let col = cursor_col text st.cursor in
         st.cursor <- pos_of_row_col text (row - 1) col;
         render t st
       end else begin
-        (* On first line — navigate history, with prefix filtering *)
         let prefix = String.sub text 0 st.cursor in
         let hist_fn = if prefix = "" then fun () -> History.prev t.history
                       else fun () -> History.prev_matching t.history prefix in
@@ -621,7 +822,6 @@ let read_input t =
            if st.saved_input = "" && text <> "" then
              st.saved_input <- text;
            set_content st entry;
-           (* Keep cursor at end of prefix for prefix search *)
            if prefix <> "" then
              st.cursor <- String.length prefix
          | None -> ());
@@ -634,12 +834,10 @@ let read_input t =
       let row = cursor_row text st.cursor in
       let nlines = num_lines text in
       if row < nlines - 1 then begin
-        (* Move down within multi-line input *)
         let col = cursor_col text st.cursor in
         st.cursor <- pos_of_row_col text (row + 1) col;
         render t st
       end else begin
-        (* On last line — navigate history, with prefix filtering *)
         let prefix = String.sub text 0 st.cursor in
         let hist_fn = if prefix = "" then fun () -> History.next t.history
                       else fun () -> History.next_matching t.history prefix in
@@ -780,6 +978,9 @@ let read_input t =
         apply_paredit_result st (Paredit.backward_down rt text st.cursor);
         render t st
       end;
+      loop ()
+
+    | Terminal.Escape ->
       loop ()
 
     | Terminal.Unknown ->
