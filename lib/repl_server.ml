@@ -1,46 +1,58 @@
+(* --- Configuration --- *)
+
 type config = {
   port : int;
-  scrollback_size : int;
   auto_checkpoint : bool;
   name : string;
 }
 
+(* --- State --- *)
+
 type t = {
   config : config;
-  scrollback : Scrollback.t;
+  inst : Instance.t;
+  session : Session.t;
+  token : string;
+  interrupt : bool ref;
   mutable client_fd : Unix.file_descr option;
   mutable alive : bool;
-  mutable inst : Instance.t option;
-  mutable session : Session.t option;
-  mutable last_ping : float;
-  mutable last_pong : float;
+  recv_buf : Buffer.t;
 }
+
+(* --- Token generation --- *)
+
+let generate_token () =
+  Mirage_crypto_rng_unix.use_default ();
+  let raw = Mirage_crypto_rng.generate 16 in
+  let buf = Buffer.create 32 in
+  String.iter (fun c ->
+    Buffer.add_string buf (Printf.sprintf "%02x" (Char.code c))
+  ) raw;
+  Buffer.contents buf
+
+(* --- Constructor --- *)
 
 let create config =
   { config;
-    scrollback = Scrollback.create ~max_bytes:config.scrollback_size;
+    inst = Instance.create ();
+    session = Session.create ();
+    token = generate_token ();
+    interrupt = ref false;
     client_fd = None;
     alive = true;
-    inst = None;
-    session = None;
-    last_ping = 0.0;
-    last_pong = 0.0;
+    recv_buf = Buffer.create 4096;
   }
 
-let accept_client t fd =
-  t.client_fd <- Some fd;
-  t.last_pong <- Unix.gettimeofday ()
-
-let append_output t s =
-  Scrollback.append t.scrollback s
-
-let get_scrollback t =
-  Scrollback.contents t.scrollback
-
-let clear_scrollback t =
-  Scrollback.clear t.scrollback
+(* --- Accessors --- *)
 
 let is_alive t = t.alive
+let session_token t = t.token
+let instance t = t.inst
+
+(* --- Client communication --- *)
+
+let accept_client t fd =
+  t.client_fd <- Some fd
 
 let send_to_client t msg =
   match t.client_fd with
@@ -61,19 +73,14 @@ let shutdown t =
   ) t.client_fd;
   t.client_fd <- None
 
-let relay_output t s =
-  append_output t s;
-  send_to_client t (Repl_protocol.Output s)
+(* --- Auto-checkpoint on disconnect --- *)
 
 let auto_checkpoint_on_disconnect t =
   if t.config.auto_checkpoint then begin
-    match t.inst, t.session with
-    | Some inst, Some session ->
-      let name = Printf.sprintf "%s-disconnect-%d"
-          t.config.name (int_of_float (Unix.gettimeofday ())) in
-      (try Session.checkpoint session name inst
-       with Session.Session_error _ -> ())
-    | _ -> ()
+    let name = Printf.sprintf "%s-disconnect-%d"
+        t.config.name (int_of_float (Unix.gettimeofday ())) in
+    (try Session.checkpoint t.session name t.inst
+     with Session.Session_error _ -> ())
   end
 
 let disconnect_client t =
@@ -83,57 +90,154 @@ let disconnect_client t =
   auto_checkpoint_on_disconnect t;
   t.client_fd <- None
 
+(* --- Eval handler --- *)
+
+let handle_eval t expr =
+  let inst = t.inst in
+  (* Save original ports *)
+  let saved_output = !(inst.current_output) in
+  let saved_error = !(inst.current_error) in
+  (* Redirect to capture ports *)
+  let capture_out = Port.open_output_string () in
+  let capture_err = Port.open_output_string () in
+  inst.current_output := capture_out;
+  inst.current_error := capture_err;
+  (* Install interrupt check via on_call *)
+  let saved_on_call = !(inst.on_call) in
+  t.interrupt := false;
+  inst.on_call := Some (fun _loc _proc _args ->
+    if !(t.interrupt) then begin
+      t.interrupt := false;
+      raise (Vm.Runtime_error "interrupted")
+    end);
+  (* Evaluate all expressions in the string *)
+  let port = Port.of_string expr in
+  let last_result = ref Datum.Void in
+  let error_msg = ref None in
+  let rec eval_loop () =
+    try
+      let syntax = Reader.read_syntax inst.readtable port in
+      match syntax with
+      | { Syntax.datum = Syntax.Eof; _ } -> ()
+      | _ ->
+        begin try
+          last_result := Instance.eval_syntax inst syntax;
+          Port.flush capture_out;
+          Port.flush capture_err
+        with
+        | Reader.Read_error (_loc, msg) -> error_msg := Some msg
+        | Compiler.Compile_error (_loc, msg) -> error_msg := Some msg
+        | Vm.Runtime_error msg -> error_msg := Some msg
+        | Fasl.Fasl_error msg -> error_msg := Some msg
+        | Failure msg -> error_msg := Some msg
+        end;
+        if !error_msg = None then eval_loop ()
+    with
+    | Reader.Read_error (_loc, msg) -> error_msg := Some msg
+  in
+  eval_loop ();
+  (* Restore ports and on_call *)
+  inst.current_output := saved_output;
+  inst.current_error := saved_error;
+  inst.on_call := saved_on_call;
+  (* Send captured output *)
+  let out_text = Port.get_output_string capture_out in
+  let err_text = Port.get_output_string capture_err in
+  if out_text <> "" then
+    send_to_client t (Repl_protocol.Output out_text);
+  if err_text <> "" then
+    send_to_client t (Repl_protocol.Output err_text);
+  (* Send result or error *)
+  match !error_msg with
+  | Some msg ->
+    send_to_client t (Repl_protocol.Error msg)
+  | None ->
+    let result_str = match !last_result with
+      | Datum.Void -> ""
+      | v -> Datum.to_string v
+    in
+    send_to_client t (Repl_protocol.Result result_str)
+
+(* --- Complete handler --- *)
+
+let handle_complete t prefix =
+  let inst = t.inst in
+  let syms = Symbol.all inst.Instance.symbols in
+  let bound = List.filter_map (fun sym ->
+    match Env.lookup inst.Instance.global_env sym with
+    | Some _ -> Some (Symbol.name sym)
+    | None -> None
+  ) syms in
+  let syntax_names = Expander.binding_names inst.Instance.syn_env in
+  let all = bound @ syntax_names in
+  let candidates = List.sort_uniq String.compare all in
+  let matches = Completion.find_matches prefix candidates in
+  send_to_client t (Repl_protocol.Completions matches)
+
+(* --- Interrupt handler --- *)
+
+let handle_interrupt t =
+  t.interrupt := true
+
+(* --- Resume handler --- *)
+
+let handle_resume t token =
+  if Eqaf.equal token t.token then
+    send_to_client t Repl_protocol.Session_ok
+  else
+    send_to_client t Repl_protocol.Session_deny
+
+(* --- Message dispatch --- *)
+
 let handle_client_msg t msg =
   match msg with
   | Repl_protocol.Disconnect ->
     disconnect_client t
-  | Repl_protocol.Eval _s ->
-    ()
-  | Repl_protocol.Complete _s ->
-    ()
+  | Repl_protocol.Eval s ->
+    handle_eval t s
+  | Repl_protocol.Complete s ->
+    handle_complete t s
   | Repl_protocol.Interrupt ->
-    ()
+    handle_interrupt t
   | Repl_protocol.Input _s ->
-    ()
-  | Repl_protocol.Resume _s ->
-    ()
+    () (* Input forwarding deferred to a later phase *)
+  | Repl_protocol.Resume s ->
+    handle_resume t s
+
+(* --- Keepalive --- *)
 
 let ping_interval = 30.0
 let pong_timeout = 60.0
 
-let check_keepalive t =
+let check_keepalive t last_ping last_pong =
   let now = Unix.gettimeofday () in
-  if t.client_fd <> None && now -. t.last_ping > ping_interval then begin
+  if t.client_fd <> None && now -. !last_ping > ping_interval then begin
     send_to_client t (Repl_protocol.Status Repl_protocol.Ready);
-    t.last_ping <- now
+    last_ping := now
   end;
-  if t.client_fd <> None && t.last_pong > 0.0
-     && now -. t.last_pong > pong_timeout then begin
+  if t.client_fd <> None && !last_pong > 0.0
+     && now -. !last_pong > pong_timeout then
     disconnect_client t
-  end
+
+(* --- Main server loop --- *)
 
 let run t =
   let server_sock = Unix.socket Unix.PF_INET Unix.SOCK_STREAM 0 in
   Unix.setsockopt server_sock Unix.SO_REUSEADDR true;
   Unix.bind server_sock (Unix.ADDR_INET (Unix.inet_addr_any, t.config.port));
   Unix.listen server_sock 1;
-  let inst = Instance.create () in
-  let session = Session.create () in
-  t.inst <- Some inst;
-  t.session <- Some session;
-  let handle_signal _ =
-    t.alive <- false
-  in
+  let handle_signal _ = t.alive <- false in
   Sys.set_signal Sys.sigint (Sys.Signal_handle handle_signal);
   Sys.set_signal Sys.sigterm (Sys.Signal_handle handle_signal);
   Sys.set_signal Sys.sigpipe Sys.Signal_ignore;
-  let (pipe_read, pipe_write) = Unix.pipe () in
   let read_buf = Bytes.create 4096 in
+  let last_ping = ref 0.0 in
+  let last_pong = ref 0.0 in
   (try
      while t.alive do
        let fds_to_watch =
          match t.client_fd with
-         | Some fd -> [fd; pipe_read]
+         | Some fd -> [fd]
          | None -> [server_sock]
        in
        let (ready, _, _) =
@@ -143,11 +247,8 @@ let run t =
        List.iter (fun fd ->
          if fd == server_sock then begin
            let (client_fd, _addr) = Unix.accept server_sock in
-           t.client_fd <- Some client_fd;
-           t.last_pong <- Unix.gettimeofday ();
-           let sb = get_scrollback t in
-           if sb <> "" then
-             send_to_client t (Repl_protocol.Output sb)
+           accept_client t client_fd;
+           last_pong := Unix.gettimeofday ()
          end else if Some fd = t.client_fd then begin
            let n = try Unix.read fd read_buf 0 4096
              with Unix.Unix_error _ -> 0
@@ -155,41 +256,28 @@ let run t =
            if n = 0 then
              disconnect_client t
            else begin
-             let data = Bytes.sub_string read_buf 0 n in
+             Buffer.add_subbytes t.recv_buf read_buf 0 n;
+             let data = Buffer.contents t.recv_buf in
              let off = ref 0 in
              (try
                 while Repl_protocol.frame_available data !off do
                   let (msg, next) = Repl_protocol.read_client_msg data !off in
                   handle_client_msg t msg;
-                  (match msg with
-                   | Repl_protocol.Eval s ->
-                     (try
-                        ignore (Unix.write_substring pipe_write s 0
-                                  (String.length s))
-                      with Unix.Unix_error _ -> ())
-                   | _ -> ());
                   off := next
                 done
               with Repl_protocol.Protocol_error _ ->
-                disconnect_client t)
-           end
-         end else if fd == pipe_read then begin
-           let n = try Unix.read fd read_buf 0 4096
-             with Unix.Unix_error _ -> 0
-           in
-           if n > 0 then begin
-             let s = Bytes.sub_string read_buf 0 n in
-             relay_output t s
+                disconnect_client t);
+             let remaining = String.length data - !off in
+             Buffer.clear t.recv_buf;
+             if remaining > 0 then
+               Buffer.add_string t.recv_buf
+                 (String.sub data !off remaining)
            end
          end
        ) ready;
-       check_keepalive t
+       check_keepalive t last_ping last_pong
      done
    with e ->
-     (try Unix.close pipe_read with Unix.Unix_error _ -> ());
-     (try Unix.close pipe_write with Unix.Unix_error _ -> ());
      (try Unix.close server_sock with Unix.Unix_error _ -> ());
      raise e);
-  (try Unix.close pipe_read with Unix.Unix_error _ -> ());
-  (try Unix.close pipe_write with Unix.Unix_error _ -> ());
   (try Unix.close server_sock with Unix.Unix_error _ -> ())

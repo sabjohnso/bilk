@@ -25,6 +25,10 @@
   cmdliner
   yojson
   zarith
+  mirage-crypto
+  mirage-crypto-rng
+  digestif
+  eqaf
   (odoc :with-doc)
   (alcotest :with-test)
   (qcheck-core :with-test)

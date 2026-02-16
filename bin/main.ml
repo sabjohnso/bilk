@@ -2096,10 +2096,9 @@ let make_profile_cmd () =
 
 (* --- Remote REPL: serve / attach --- *)
 
-let run_serve port scrollback_size auto_checkpoint name =
+let run_serve port auto_checkpoint name =
   let config = {
     Repl_server.port;
-    scrollback_size;
     auto_checkpoint;
     name;
   } in
@@ -2118,11 +2117,6 @@ let make_serve_cmd () =
          info ["port"; "p"] ~docv:"PORT"
            ~doc:"TCP port to listen on (default 7890).")
   in
-  let scrollback_opt =
-    Arg.(value & opt int 65536 &
-         info ["scrollback"] ~docv:"BYTES"
-           ~doc:"Scrollback buffer size in bytes (default 64KB).")
-  in
   let auto_checkpoint_opt =
     Arg.(value & flag &
          info ["auto-checkpoint"]
@@ -2133,10 +2127,10 @@ let make_serve_cmd () =
          info ["name"] ~docv:"NAME"
            ~doc:"Session name (default 'default').")
   in
-  let cmd port scrollback auto_checkpoint name =
-    exit (run_serve port scrollback auto_checkpoint name)
+  let cmd port auto_checkpoint name =
+    exit (run_serve port auto_checkpoint name)
   in
-  let term = Term.(const cmd $ port_opt $ scrollback_opt
+  let term = Term.(const cmd $ port_opt
                    $ auto_checkpoint_opt $ name_opt) in
   let info =
     Cmd.info "serve" ~version
@@ -2144,8 +2138,7 @@ let make_serve_cmd () =
       ~man:[`S "DESCRIPTION";
             `P "Starts a persistent REPL server that clients can connect \
                 to with $(b,bilk attach). The server holds the Scheme \
-                instance, line editor, and scrollback buffer. Clients \
-                that disconnect can reconnect and see previous output."]
+                instance. Clients run the full line editor locally."]
   in
   Cmd.v info term
 
