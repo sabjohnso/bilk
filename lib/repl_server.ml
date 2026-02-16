@@ -40,6 +40,9 @@ let append_output t s =
 let get_scrollback t =
   Scrollback.contents t.scrollback
 
+let clear_scrollback t =
+  Scrollback.clear t.scrollback
+
 let is_alive t = t.alive
 
 let send_server_exit t =

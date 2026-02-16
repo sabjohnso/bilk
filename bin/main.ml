@@ -342,7 +342,8 @@ let repl_help () =
   print_endline "  ,revert <name>       Restore state from a named checkpoint";
   print_endline "  ,checkpoints         List all checkpoints";
   print_endline "  ,save-session <file> Save all checkpoints to a binary file";
-  print_endline "  ,load-session <file> Load checkpoints from a binary file"
+  print_endline "  ,load-session <file> Load checkpoints from a binary file";
+  print_endline "  ,clear               Clear terminal screen"
 
 let repl_env inst =
   let syms = Symbol.all inst.Instance.symbols in
@@ -493,7 +494,7 @@ let save_repl_settings theme_ref paredit_ref =
     ("paredit", Datum.Bool !paredit_ref);
   ]
 
-let handle_repl_command inst pkg_info theme_ref paredit_ref line =
+let handle_repl_command inst pkg_info theme_ref paredit_ref ~on_clear line =
   let line = String.trim line in
   match line with
   | ",quit" | ",q" -> exit 0
@@ -508,6 +509,9 @@ let handle_repl_command inst pkg_info theme_ref paredit_ref line =
     Printf.eprintf "Usage: ,deps (library name)\n%!"
   | ",reload" ->
     Printf.eprintf "Usage: ,reload (library name)\n%!"
+  | ",clear" ->
+    Printf.printf "\x1b[2J\x1b[H%!";
+    on_clear ()
   | ",paredit" ->
     paredit_ref := not !(paredit_ref);
     save_repl_settings theme_ref paredit_ref;
@@ -612,7 +616,7 @@ let run_repl theme_name =
     [",help"; ",h"; ",quit"; ",q"; ",load"; ",env"; ",libs";
      ",available"; ",exports"; ",build"; ",deps"; ",reload";
      ",theme"; ",paredit"; ",checkpoint"; ",revert"; ",checkpoints";
-     ",save-session"; ",load-session"]
+     ",save-session"; ",load-session"; ",clear"]
   in
   let cached_candidates = ref [] in
   let cache_gen = ref (-1) in
@@ -917,7 +921,8 @@ let run_repl theme_name =
             else
               Printf.eprintf "Usage: ,load <file>\n%!"
           end else
-            handle_repl_command !inst_ref pkg_info theme_ref paredit_ref trimmed
+            handle_repl_command !inst_ref pkg_info theme_ref paredit_ref
+              ~on_clear:(fun () -> ()) trimmed
         end;
         loop ()
       end else begin

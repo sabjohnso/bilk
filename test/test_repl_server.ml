@@ -87,6 +87,23 @@ let test_scrollback_accumulation () =
   Alcotest.(check string) "accumulated" "line 1\nline 2\nline 3\n" sb;
   Repl_server.shutdown server
 
+(* --- clear_scrollback empties the buffer --- *)
+
+let test_clear_scrollback () =
+  let config = {
+    Repl_server.port = 0;
+    scrollback_size = 4096;
+    auto_checkpoint = false;
+    name = "test";
+  } in
+  let server = Repl_server.create config in
+  Repl_server.append_output server "line 1\n";
+  Repl_server.append_output server "line 2\n";
+  Repl_server.clear_scrollback server;
+  let sb = Repl_server.get_scrollback server in
+  Alcotest.(check string) "empty after clear" "" sb;
+  Repl_server.shutdown server
+
 let () =
   Alcotest.run "Repl_server"
     [ ("lifecycle",
@@ -98,6 +115,8 @@ let () =
            test_keepalive_state
        ; Alcotest.test_case "scrollback accumulation" `Quick
            test_scrollback_accumulation
+       ; Alcotest.test_case "clear scrollback" `Quick
+           test_clear_scrollback
        ])
     ; ("protocol",
        [ Alcotest.test_case "write/read" `Quick

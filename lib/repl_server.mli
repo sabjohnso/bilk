@@ -35,6 +35,9 @@ val append_output : t -> string -> unit
 val get_scrollback : t -> string
 (** [get_scrollback t] returns the current scrollback contents. *)
 
+val clear_scrollback : t -> unit
+(** [clear_scrollback t] empties the scrollback buffer. *)
+
 val is_alive : t -> bool
 (** [is_alive t] returns whether the server is running. *)
 
