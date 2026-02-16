@@ -710,6 +710,71 @@ let test_server_load_valid_relative () =
     Repl_server.shutdown server;
     Unix.close client_fd)
 
+(* --- Eval input/output bounds (Issue 68) --- *)
+
+let test_eval_input_too_large () =
+  let (server, client_fd, _server_fd) = make_server () in
+  (* 1 MiB + 1 byte exceeds max_eval_input.
+     Use spaces: without the guard, the server processes them quickly
+     as whitespace and sends a small Result "".  With the guard, it
+     immediately sends Error "input too large". *)
+  let big_input = String.make (1_048_576 + 1) ' ' in
+  Repl_server.handle_eval server big_input;
+  let msgs = read_server_msgs client_fd in
+  let has_error = List.exists (function
+    | Repl_protocol.Error s -> s = "input too large"
+    | _ -> false
+  ) msgs in
+  Alcotest.(check bool) "input too large" true has_error;
+  (* No Result should be sent *)
+  let has_result = List.exists (function
+    | Repl_protocol.Result _ -> true
+    | _ -> false
+  ) msgs in
+  Alcotest.(check bool) "no result sent" false has_result;
+  Repl_server.shutdown server;
+  Unix.close client_fd
+
+let test_eval_moderate_output () =
+  let (server, client_fd, _server_fd) = make_server () in
+  (* Generate ~5KB of output — fits in single read, well under limit *)
+  Repl_server.handle_eval server
+    "(display (make-string 5000 #\\a))";
+  let msgs = read_server_msgs client_fd in
+  let output = List.filter_map (function
+    | Repl_protocol.Output s -> Some s
+    | _ -> None
+  ) msgs in
+  let combined = String.concat "" output in
+  Alcotest.(check bool) "output not truncated" true
+    (String.length combined >= 5000
+     && not (string_contains combined "[output truncated]"));
+  let has_result = List.exists (function
+    | Repl_protocol.Result _ -> true
+    | _ -> false
+  ) msgs in
+  Alcotest.(check bool) "result sent" true has_result;
+  Repl_server.shutdown server;
+  Unix.close client_fd
+
+let test_eval_normal_under_input_limit () =
+  let (server, client_fd, _server_fd) = make_server () in
+  (* A valid expression well under the 1 MiB limit *)
+  Repl_server.handle_eval server "(+ 100 200)";
+  let msgs = read_server_msgs client_fd in
+  let has_result = List.exists (function
+    | Repl_protocol.Result s -> s = "300"
+    | _ -> false
+  ) msgs in
+  Alcotest.(check bool) "result is 300" true has_result;
+  let has_error = List.exists (function
+    | Repl_protocol.Error _ -> true
+    | _ -> false
+  ) msgs in
+  Alcotest.(check bool) "no error" false has_error;
+  Repl_server.shutdown server;
+  Unix.close client_fd
+
 let () =
   Alcotest.run "Repl_server"
     [ ("eval",
@@ -787,5 +852,13 @@ let () =
            test_server_load_absolute_outside
        ; Alcotest.test_case ",load valid relative" `Quick
            test_server_load_valid_relative
+       ])
+    ; ("eval_bounds",
+       [ Alcotest.test_case "input too large" `Quick
+           test_eval_input_too_large
+       ; Alcotest.test_case "moderate output ok" `Quick
+           test_eval_moderate_output
+       ; Alcotest.test_case "normal under input limit" `Quick
+           test_eval_normal_under_input_limit
        ])
     ]

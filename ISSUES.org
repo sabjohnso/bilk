@@ -772,7 +772,7 @@ mechanism.
 - At minimum, add TOFU (trust-on-first-use): store server key fingerprint
   on first connect, warn on mismatch
 
-*** TODO Issue 67: Unbounded ~recv_buf~ growth in client
+*** DONE Issue 67: Unbounded ~recv_buf~ growth in client
 :PROPERTIES:
 :PRIORITY: A
 :CATEGORY: security
@@ -781,14 +781,17 @@ mechanism.
 [[file:lib/repl_client.ml][repl_client.ml]] — A malicious server can send data that never contains
 a complete frame, causing ~recv_buf~ to grow without bound until OOM.
 
-**** Plan
-- Track ~recv_buf~ size; if it exceeds ~max_frame_size~ (from Issue 64)
-  without yielding a complete frame, disconnect with error
-- Write test: client disconnects when buffer exceeds limit
+**** Resolution
+- Added ~recv_buf~ overflow check in [[file:lib/repl_client.ml::recv_msg][recv_msg]]: after each
+  read, if ~Buffer.length > max_frame_size + 4~ raises
+  ~Protocol_error "recv buffer overflow"~ (defense-in-depth
+  alongside Issue 64's ~frame_available~ guard)
+- Tests: [[file:test/test_repl_client.ml][test_repl_client.ml]] ~recv_buf_bound~ group
+  (2 tests: oversized header rejected, normal large frame OK)
 
 ** HIGH
 
-*** TODO Issue 68: Unbounded eval input/output in server
+*** DONE Issue 68: Unbounded eval input/output in server
 :PROPERTIES:
 :PRIORITY: A
 :CATEGORY: security
@@ -798,10 +801,18 @@ a complete frame, causing ~recv_buf~ to grow without bound until OOM.
 clients or on result strings sent back. A client can send a multi-GB
 expression or trigger output that exhausts server memory.
 
-**** Plan
-- Add ~max_input_size~ (e.g. 1 MiB) check before eval
-- Add ~max_output_size~ (e.g. 16 MiB) truncation on result/output strings
-- Return ~Error "input too large"~ / ~Error "output truncated"~ respectively
+**** Resolution
+- Added ~max_eval_input~ (1 MiB) and ~max_eval_output~ (16 MiB)
+  constants in [[file:lib/repl_server.ml][repl_server.ml]]
+- Input guard in [[file:lib/repl_server.ml::handle_eval][handle_eval]]: expressions exceeding
+  ~max_eval_input~ are rejected with ~Error "input too large"~
+- Output truncation via [[file:lib/repl_server.ml::truncate_output][truncate_output]]: captured stdout,
+  stderr, and result strings exceeding ~max_eval_output~ are
+  truncated with ~"[output truncated]"~ suffix
+- Server ~recv_buf~ overflow check in [[file:lib/repl_server.ml::run][run]]: disconnects
+  clients whose accumulated data exceeds ~max_frame_size + 4~
+- Tests: [[file:test/test_repl_server.ml][test_repl_server.ml]] ~eval_bounds~ group (3 tests:
+  input too large, moderate output OK, normal under limit)
 
 *** TODO Issue 69: FD leak on client replacement in server
 :PROPERTIES:

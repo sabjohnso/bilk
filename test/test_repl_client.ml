@@ -230,6 +230,44 @@ let test_classify_scheme_integration () =
   Alcotest.(check bool) "(+ 1 2) is Scheme_input" true
     (Repl_command.classify "(+ 1 2)" = Scheme_input)
 
+(* --- recv_buf bounded (Issue 67) --- *)
+
+let test_recv_buf_rejects_oversized () =
+  (* Verify that a malicious server sending a header claiming payload
+     larger than max_frame_size triggers Protocol_error — the
+     frame_available guard (primary defense from Issue 64) prevents
+     unbounded buffer growth.  The recv_buf overflow check added here
+     provides defense-in-depth for the same threat. *)
+  Sys.set_signal Sys.sigpipe Sys.Signal_ignore;
+  let (conn, server_fd) = make_pair () in
+  let too_large = Repl_protocol.max_frame_size + 1 in
+  let header = Bytes.create 4 in
+  Bytes.set header 0 (Char.chr ((too_large lsr 24) land 0xff));
+  Bytes.set header 1 (Char.chr ((too_large lsr 16) land 0xff));
+  Bytes.set header 2 (Char.chr ((too_large lsr 8) land 0xff));
+  Bytes.set header 3 (Char.chr (too_large land 0xff));
+  ignore (Unix.write server_fd header 0 4);
+  let filler = Bytes.make 100 '\x00' in
+  ignore (Unix.write server_fd filler 0 100);
+  Unix.close server_fd;
+  let raised_protocol_error = ref false in
+  (try ignore (Repl_client.recv_msg conn)
+   with Repl_protocol.Protocol_error _ -> raised_protocol_error := true);
+  Alcotest.(check bool) "protocol error raised" true !raised_protocol_error;
+  Repl_client.close_connection conn
+
+(* --- Normal large frame decodes without error --- *)
+
+let test_large_frame_ok () =
+  let (conn, server_fd) = make_pair () in
+  let payload = String.make 1000 'a' in
+  write_server_msg server_fd (Repl_protocol.Output payload);
+  let msg = Repl_client.recv_msg conn in
+  Alcotest.(check bool) "got large output" true
+    (match msg with Repl_protocol.Output s -> s = payload | _ -> false);
+  Repl_client.close_connection conn;
+  Unix.close server_fd
+
 let () =
   Alcotest.run "Repl_client"
     [ ("send_recv",
@@ -260,5 +298,11 @@ let () =
            test_classify_checkpoint_integration
        ; Alcotest.test_case "scheme integration" `Quick
            test_classify_scheme_integration
+       ])
+    ; ("recv_buf_bound",
+       [ Alcotest.test_case "rejects oversized" `Quick
+           test_recv_buf_rejects_oversized
+       ; Alcotest.test_case "large frame ok" `Quick
+           test_large_frame_ok
        ])
     ]

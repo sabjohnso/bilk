@@ -427,9 +427,22 @@ let handle_server_command t line =
       (Repl_protocol.Error
          (Printf.sprintf "Unknown command: ,%s" word))
 
+(* --- Eval input/output bounds --- *)
+
+let max_eval_input = 1_048_576     (* 1 MiB *)
+let max_eval_output = 16_777_216   (* 16 MiB *)
+
+let truncate_output s =
+  if String.length s > max_eval_output then
+    String.sub s 0 max_eval_output ^ "\n[output truncated]"
+  else s
+
 (* --- Eval handler --- *)
 
 let handle_eval t expr =
+  if String.length expr > max_eval_input then
+    send_to_client t (Repl_protocol.Error "input too large")
+  else
   let trimmed = String.trim expr in
   if String.length trimmed > 0 && trimmed.[0] = ',' then begin
     handle_server_command t trimmed;
@@ -481,9 +494,9 @@ let handle_eval t expr =
   inst.current_output := saved_output;
   inst.current_error := saved_error;
   inst.on_call := saved_on_call;
-  (* Send captured output *)
-  let out_text = Port.get_output_string capture_out in
-  let err_text = Port.get_output_string capture_err in
+  (* Send captured output (truncated if over limit) *)
+  let out_text = truncate_output (Port.get_output_string capture_out) in
+  let err_text = truncate_output (Port.get_output_string capture_err) in
   if out_text <> "" then
     send_to_client t (Repl_protocol.Output out_text);
   if err_text <> "" then
@@ -495,7 +508,7 @@ let handle_eval t expr =
   | None ->
     let result_str = match !last_result with
       | Datum.Void -> ""
-      | v -> Datum.to_string v
+      | v -> truncate_output (Datum.to_string v)
     in
     send_to_client t (Repl_protocol.Result result_str)
   end
@@ -602,21 +615,25 @@ let run t =
              disconnect_client t
            else begin
              Buffer.add_subbytes t.recv_buf read_buf 0 n;
-             let data = Buffer.contents t.recv_buf in
-             let off = ref 0 in
-             (try
-                while Repl_protocol.frame_available data !off do
-                  let (msg, next) = Repl_protocol.read_client_msg data !off in
-                  handle_client_msg t msg;
-                  off := next
-                done
-              with Repl_protocol.Protocol_error _ ->
-                disconnect_client t);
-             let remaining = String.length data - !off in
-             Buffer.clear t.recv_buf;
-             if remaining > 0 then
-               Buffer.add_string t.recv_buf
-                 (String.sub data !off remaining)
+             if Buffer.length t.recv_buf > Repl_protocol.max_frame_size + 4 then
+               disconnect_client t
+             else begin
+               let data = Buffer.contents t.recv_buf in
+               let off = ref 0 in
+               (try
+                  while Repl_protocol.frame_available data !off do
+                    let (msg, next) = Repl_protocol.read_client_msg data !off in
+                    handle_client_msg t msg;
+                    off := next
+                  done
+                with Repl_protocol.Protocol_error _ ->
+                  disconnect_client t);
+               let remaining = String.length data - !off in
+               Buffer.clear t.recv_buf;
+               if remaining > 0 then
+                 Buffer.add_string t.recv_buf
+                   (String.sub data !off remaining)
+             end
            end
          end
        ) ready;

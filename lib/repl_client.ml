@@ -47,6 +47,8 @@ let recv_msg conn =
       let n = Unix.read conn.fd tmp 0 4096 in
       if n = 0 then raise End_of_file;
       Buffer.add_subbytes conn.recv_buf tmp 0 n;
+      if Buffer.length conn.recv_buf > Repl_protocol.max_frame_size + 4 then
+        raise (Repl_protocol.Protocol_error "recv buffer overflow");
       try_decode ()
     end
   in
