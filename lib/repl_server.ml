@@ -13,8 +13,8 @@ type config = {
 
 type t = {
   config : config;
-  inst : Instance.t;
-  session : Session.t;
+  mutable inst : Instance.t;
+  mutable session : Session.t;
   token : string;
   crypto_key : Repl_crypto.key option;
   interrupt : bool ref;
@@ -57,6 +57,7 @@ let create config =
 let is_alive t = t.alive
 let session_token t = t.token
 let instance t = t.inst
+let session t = t.session
 
 (* --- Connect line and validation --- *)
 
@@ -118,9 +119,272 @@ let disconnect_client t =
   auto_checkpoint_on_disconnect t;
   t.client_fd <- None
 
+let graceful_shutdown t =
+  auto_checkpoint_on_disconnect t;
+  shutdown t
+
+(* --- Server-side comma command dispatch --- *)
+
+let handle_server_command t line =
+  let word, arg =
+    let s = String.sub line 1 (String.length line - 1) in
+    match String.index_opt s ' ' with
+    | Some i ->
+      (String.sub s 0 i,
+       String.trim (String.sub s (i + 1) (String.length s - i - 1)))
+    | None -> (s, "")
+  in
+  match word with
+  | "checkpoint" ->
+    if arg = "" then
+      send_to_client t (Repl_protocol.Error "Usage: ,checkpoint <name>")
+    else begin
+      (try
+         Session.checkpoint t.session arg t.inst;
+         send_to_client t
+           (Repl_protocol.Output (Printf.sprintf "Checkpoint saved: %s\n" arg));
+         send_to_client t (Repl_protocol.Result "")
+       with
+       | Checkpoint.Checkpoint_error msg ->
+         send_to_client t (Repl_protocol.Error msg)
+       | Session.Session_error msg ->
+         send_to_client t (Repl_protocol.Error msg))
+    end
+  | "revert" ->
+    if arg = "" then
+      send_to_client t (Repl_protocol.Error "Usage: ,revert <name>")
+    else begin
+      (try
+         t.inst <- Session.revert t.session arg;
+         send_to_client t
+           (Repl_protocol.Output (Printf.sprintf "Reverted to: %s\n" arg));
+         send_to_client t (Repl_protocol.Result "")
+       with Session.Session_error msg ->
+         send_to_client t (Repl_protocol.Error msg))
+    end
+  | "checkpoints" ->
+    let cps = Session.list_checkpoints t.session in
+    if cps = [] then
+      send_to_client t (Repl_protocol.Output "No checkpoints.\n")
+    else begin
+      let text = String.concat "\n"
+          (List.map (fun name -> "  " ^ name) cps) ^ "\n" in
+      send_to_client t (Repl_protocol.Output text)
+    end;
+    send_to_client t (Repl_protocol.Result "")
+  | "save-session" ->
+    if arg = "" then
+      send_to_client t (Repl_protocol.Error "Usage: ,save-session <file>")
+    else begin
+      (try
+         Session.save t.session arg;
+         let nc = List.length (Session.list_checkpoints t.session) in
+         send_to_client t
+           (Repl_protocol.Output
+              (Printf.sprintf "Session saved: %s (%d checkpoint%s)\n"
+                 arg nc (if nc = 1 then "" else "s")));
+         send_to_client t (Repl_protocol.Result "")
+       with
+       | Session.Session_error msg ->
+         send_to_client t (Repl_protocol.Error msg)
+       | Sys_error msg ->
+         send_to_client t (Repl_protocol.Error msg))
+    end
+  | "load-session" ->
+    if arg = "" then
+      send_to_client t (Repl_protocol.Error "Usage: ,load-session <file>")
+    else begin
+      (try
+         let loaded = Session.load arg in
+         let cps = Session.list_checkpoints loaded in
+         let nc = List.length cps in
+         t.session <- loaded;
+         (match List.rev cps with
+          | latest :: _ ->
+            t.inst <- Session.revert t.session latest
+          | [] -> ());
+         send_to_client t
+           (Repl_protocol.Output
+              (Printf.sprintf "Session loaded: %s (%d checkpoint%s)\n"
+                 arg nc (if nc = 1 then "" else "s")));
+         send_to_client t (Repl_protocol.Result "")
+       with
+       | Session.Session_error msg ->
+         send_to_client t (Repl_protocol.Error msg)
+       | Sys_error msg ->
+         send_to_client t (Repl_protocol.Error msg))
+    end
+  | "reload" ->
+    if arg = "" then
+      send_to_client t (Repl_protocol.Error "Usage: ,reload (library name)")
+    else begin
+      (try
+         let port = Port.of_string arg in
+         let syntax = Reader.read_syntax t.inst.Instance.readtable port in
+         let lib_name = Library.parse_library_name syntax in
+         Instance.reload_library t.inst lib_name;
+         send_to_client t
+           (Repl_protocol.Output
+              (Printf.sprintf "Reloaded %s\n" (Library.name_to_string lib_name)));
+         send_to_client t (Repl_protocol.Result "")
+       with
+       | Reader.Read_error (_, msg) ->
+         send_to_client t (Repl_protocol.Error msg)
+       | Compiler.Compile_error (_, msg) ->
+         send_to_client t (Repl_protocol.Error msg)
+       | Vm.Runtime_error msg ->
+         send_to_client t (Repl_protocol.Error msg)
+       | Failure msg ->
+         send_to_client t (Repl_protocol.Error msg))
+    end
+  | "exports" ->
+    if arg = "" then
+      send_to_client t (Repl_protocol.Error "Usage: ,exports (library name)")
+    else begin
+      (try
+         let port = Port.of_string arg in
+         let syntax = Reader.read_syntax t.inst.Instance.readtable port in
+         let lib_name = Library.parse_library_name syntax in
+         match Instance.ensure_library t.inst lib_name with
+         | None ->
+           send_to_client t
+             (Repl_protocol.Error
+                (Printf.sprintf "Library not found: %s"
+                   (Library.name_to_string lib_name)))
+         | Some lib ->
+           let (rt, syn) = Library.export_names lib in
+           let buf = Buffer.create 256 in
+           let rt_sorted = List.sort String.compare rt in
+           let syn_sorted = List.sort String.compare syn in
+           if syn_sorted <> [] then begin
+             Buffer.add_string buf "Syntax:\n";
+             List.iter (fun name ->
+               Buffer.add_string buf (Printf.sprintf "  %s\n" name)
+             ) syn_sorted
+           end;
+           if rt_sorted <> [] then begin
+             Buffer.add_string buf "Runtime:\n";
+             List.iter (fun name ->
+               Buffer.add_string buf (Printf.sprintf "  %s\n" name)
+             ) rt_sorted
+           end;
+           send_to_client t (Repl_protocol.Output (Buffer.contents buf));
+           send_to_client t (Repl_protocol.Result "")
+       with
+       | Reader.Read_error (_, msg) ->
+         send_to_client t (Repl_protocol.Error msg)
+       | Compiler.Compile_error (_, msg) ->
+         send_to_client t (Repl_protocol.Error msg)
+       | Failure msg ->
+         send_to_client t (Repl_protocol.Error msg))
+    end
+  | "deps" ->
+    if arg = "" then
+      send_to_client t (Repl_protocol.Error "Usage: ,deps (library name)")
+    else begin
+      (try
+         let port = Port.of_string arg in
+         let syntax = Reader.read_syntax t.inst.Instance.readtable port in
+         let lib_name = Library.parse_library_name syntax in
+         let builtins = Build.builtin_library_names t.inst in
+         let nodes = Dep_graph.build_graph ~builtins
+             ~search_paths:!(t.inst.Instance.search_paths)
+             t.inst.readtable [lib_name] in
+         send_to_client t
+           (Repl_protocol.Output (Dep_graph.format_tree nodes lib_name));
+         send_to_client t (Repl_protocol.Result "")
+       with
+       | Reader.Read_error (_, msg) ->
+         send_to_client t (Repl_protocol.Error msg)
+       | Compiler.Compile_error (_, msg) ->
+         send_to_client t (Repl_protocol.Error msg)
+       | Dep_graph.Resolve_error (name, msg) ->
+         send_to_client t
+           (Repl_protocol.Error
+              (Printf.sprintf "resolving %s: %s"
+                 (Library.name_to_string name) msg))
+       | Failure msg ->
+         send_to_client t (Repl_protocol.Error msg))
+    end
+  | "load" ->
+    if arg = "" then
+      send_to_client t (Repl_protocol.Error "Usage: ,load <file>")
+    else begin
+      (try
+         let port = Port.of_file arg in
+         ignore (Instance.eval_port t.inst port);
+         send_to_client t
+           (Repl_protocol.Output (Printf.sprintf "Loaded %s\n" arg));
+         send_to_client t (Repl_protocol.Result "")
+       with
+       | Reader.Read_error (_, msg) ->
+         send_to_client t (Repl_protocol.Error msg)
+       | Compiler.Compile_error (_, msg) ->
+         send_to_client t (Repl_protocol.Error msg)
+       | Vm.Runtime_error msg ->
+         send_to_client t (Repl_protocol.Error msg)
+       | Fasl.Fasl_error msg ->
+         send_to_client t (Repl_protocol.Error msg)
+       | Failure msg ->
+         send_to_client t (Repl_protocol.Error msg)
+       | Sys_error msg ->
+         send_to_client t (Repl_protocol.Error msg))
+    end
+  | "env" ->
+    let inst = t.inst in
+    let syms = Symbol.all inst.Instance.symbols in
+    let bound = List.filter_map (fun sym ->
+      match Env.lookup inst.Instance.global_env sym with
+      | Some _ -> Some (Symbol.name sym)
+      | None -> None
+    ) syms in
+    let sorted = List.sort String.compare bound in
+    let text = String.concat " " sorted ^ "\n" in
+    send_to_client t (Repl_protocol.Output text);
+    send_to_client t (Repl_protocol.Result "")
+  | "libs" ->
+    let libs = Library.list_all t.inst.Instance.libraries in
+    let names = List.map
+        (fun (l : Library.t) -> Library.name_to_string l.name) libs in
+    let sorted = List.sort String.compare names in
+    let text = String.concat "\n" sorted ^ "\n" in
+    send_to_client t (Repl_protocol.Output text);
+    send_to_client t (Repl_protocol.Result "")
+  | "help" ->
+    let text =
+      "Server commands:\n\
+       \  ,checkpoint <name>   Save a named checkpoint\n\
+       \  ,revert <name>       Revert to a checkpoint\n\
+       \  ,checkpoints         List all checkpoints\n\
+       \  ,save-session <file> Save session to file\n\
+       \  ,load-session <file> Load session from file\n\
+       \  ,env                 List global bindings\n\
+       \  ,libs                List loaded libraries\n\
+       \  ,exports <lib>       List library exports\n\
+       \  ,deps <lib>          Show library dependencies\n\
+       \  ,reload <lib>        Reload a library\n\
+       \  ,load <file>         Load a Scheme file\n\
+       Client commands:\n\
+       \  ,quit                Disconnect and exit\n\
+       \  ,help                Show this help\n\
+       \  ,paredit             Toggle paredit mode\n\
+       \  ,theme <name>        Switch color theme\n\
+       \  ,clear               Clear screen\n"
+    in
+    send_to_client t (Repl_protocol.Output text);
+    send_to_client t (Repl_protocol.Result "")
+  | _ ->
+    send_to_client t
+      (Repl_protocol.Error
+         (Printf.sprintf "Unknown command: ,%s" word))
+
 (* --- Eval handler --- *)
 
 let handle_eval t expr =
+  let trimmed = String.trim expr in
+  if String.length trimmed > 0 && trimmed.[0] = ',' then begin
+    handle_server_command t trimmed;
+  end else begin
   let inst = t.inst in
   (* Save original ports *)
   let saved_output = !(inst.current_output) in
@@ -185,6 +449,7 @@ let handle_eval t expr =
       | v -> Datum.to_string v
     in
     send_to_client t (Repl_protocol.Result result_str)
+  end
 
 (* --- Complete handler --- *)
 
@@ -254,7 +519,10 @@ let run t =
   Unix.setsockopt server_sock Unix.SO_REUSEADDR true;
   Unix.bind server_sock (Unix.ADDR_INET (t.config.bind_address, t.config.port));
   Unix.listen server_sock 1;
-  let handle_signal _ = t.alive <- false in
+  let handle_signal _ =
+    auto_checkpoint_on_disconnect t;
+    t.alive <- false
+  in
   Sys.set_signal Sys.sigint (Sys.Signal_handle handle_signal);
   Sys.set_signal Sys.sigterm (Sys.Signal_handle handle_signal);
   Sys.set_signal Sys.sigpipe Sys.Signal_ignore;

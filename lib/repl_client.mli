@@ -72,7 +72,14 @@ val request_completions : connection -> string -> string list
 
 (** {1 Interactive client} *)
 
+val print_client_help : unit -> unit
+(** Print a formatted list of all commands (client-local and
+    server-side) to stdout. *)
+
 val connect : config -> unit
 (** [connect config] connects to the server and runs the full
     interactive REPL with local line editing, paredit, highlighting,
-    and completion. Blocks until EOF or disconnect. *)
+    and completion.  Client-local commands ([,quit], [,help],
+    [,paredit], [,theme], [,clear]) are handled without a server
+    round-trip; all other comma commands and Scheme input are sent
+    to the server.  Blocks until EOF or disconnect. *)

@@ -216,6 +216,20 @@ let test_config_fields () =
   Alcotest.(check bool) "paredit" true config.paredit;
   Alcotest.(check (option string)) "key" (Some "secret-key") config.key
 
+(* --- Command classification integration --- *)
+
+let test_classify_quit_integration () =
+  Alcotest.(check bool) ",quit is Client_local Quit" true
+    (Repl_command.classify ",quit" = Client_local Quit)
+
+let test_classify_checkpoint_integration () =
+  Alcotest.(check bool) ",checkpoint is Server_side" true
+    (Repl_command.classify ",checkpoint x" = Server_side)
+
+let test_classify_scheme_integration () =
+  Alcotest.(check bool) "(+ 1 2) is Scheme_input" true
+    (Repl_command.classify "(+ 1 2)" = Scheme_input)
+
 let () =
   Alcotest.run "Repl_client"
     [ ("send_recv",
@@ -238,5 +252,13 @@ let () =
        ])
     ; ("config",
        [ Alcotest.test_case "fields" `Quick test_config_fields
+       ])
+    ; ("command_classify",
+       [ Alcotest.test_case ",quit integration" `Quick
+           test_classify_quit_integration
+       ; Alcotest.test_case ",checkpoint integration" `Quick
+           test_classify_checkpoint_integration
+       ; Alcotest.test_case "scheme integration" `Quick
+           test_classify_scheme_integration
        ])
     ]

@@ -172,6 +172,31 @@ let make_complete_fn conn rt =
       let candidates = request_completions conn prefix in
       apply_matches ~width text cursor start candidates
 
+(* --- Client-local help --- *)
+
+let print_client_help () =
+  print_string
+    "Client commands (handled locally):\n\
+     \  ,quit ,q       Disconnect and exit\n\
+     \  ,help ,h       Show this help\n\
+     \  ,paredit       Toggle paredit mode\n\
+     \  ,theme <name>  Switch color theme (dark, light, none, or path)\n\
+     \  ,clear         Clear screen\n\
+     \n\
+     Server commands (executed remotely):\n\
+     \  ,checkpoint <name>    Save a named checkpoint\n\
+     \  ,revert <name>        Revert to a checkpoint\n\
+     \  ,checkpoints          List all checkpoints\n\
+     \  ,save-session <file>  Save session to file\n\
+     \  ,load-session <file>  Load session from file\n\
+     \  ,env                  List global bindings\n\
+     \  ,libs                 List loaded libraries\n\
+     \  ,exports <lib>        List library exports\n\
+     \  ,deps <lib>           Show library dependencies\n\
+     \  ,reload <lib>         Reload a library\n\
+     \  ,load <file>          Load a Scheme file\n";
+  flush stdout
+
 (* --- Full interactive client --- *)
 
 let connect config =
@@ -194,8 +219,9 @@ let connect config =
     | Some name -> resolve_theme name
   in
   let paredit_ref = ref config.paredit in
+  let theme_ref = ref theme in
   let highlight_fn text cursor =
-    match theme with
+    match !theme_ref with
     | None -> text
     | Some t -> Highlight.highlight_line t rt text cursor
   in
@@ -238,6 +264,25 @@ let connect config =
     in
     read_line ()
   in
+  let send_to_server trimmed =
+    (* Install SIGINT handler to send Interrupt during eval *)
+    let prev_sigint = Sys.signal Sys.sigint
+        (Sys.Signal_handle (fun _ ->
+           (try send_msg conn Repl_protocol.Interrupt with _ -> ())))
+    in
+    let result = eval_remote conn ~on_output ~on_read trimmed in
+    Sys.set_signal Sys.sigint prev_sigint;
+    match result with
+    | `Result s ->
+      if s <> "" then print_endline s;
+      true
+    | `Error s ->
+      Printf.eprintf "%s\n%!" s;
+      true
+    | `Disconnected ->
+      Printf.eprintf "Connection lost.\n%!";
+      false
+  in
   let rec loop () =
     match Line_editor.read_input editor with
     | Line_editor.Interrupted ->
@@ -251,22 +296,31 @@ let connect config =
         loop ()
       else begin
         Line_editor.history_add editor input;
-        (* Install SIGINT handler to send Interrupt during eval *)
-        let prev_sigint = Sys.signal Sys.sigint
-            (Sys.Signal_handle (fun _ ->
-               (try send_msg conn Repl_protocol.Interrupt with _ -> ())))
-        in
-        let result = eval_remote conn ~on_output ~on_read trimmed in
-        Sys.set_signal Sys.sigint prev_sigint;
-        match result with
-        | `Result s ->
-          if s <> "" then print_endline s;
+        match Repl_command.classify trimmed with
+        | Repl_command.Client_local Quit ->
+          (try send_msg conn (Repl_protocol.Disconnect) with _ -> ())
+        | Repl_command.Client_local Help ->
+          print_client_help ();
           loop ()
-        | `Error s ->
-          Printf.eprintf "%s\n%!" s;
+        | Repl_command.Client_local Paredit ->
+          paredit_ref := not !paredit_ref;
+          if !paredit_ref then
+            Printf.printf "Paredit mode enabled.\n%!"
+          else
+            Printf.printf "Paredit mode disabled.\n%!";
           loop ()
-        | `Disconnected ->
-          Printf.eprintf "Connection lost.\n%!"
+        | Repl_command.Client_local (Theme name) ->
+          let new_theme = resolve_theme name in
+          theme_ref := new_theme;
+          (match new_theme with
+           | Some t -> Printf.printf "Switched to theme: %s\n%!" t.Highlight.name
+           | None -> Printf.printf "Highlighting disabled.\n%!");
+          loop ()
+        | Repl_command.Client_local Clear ->
+          Printf.printf "\x1b[2J\x1b[H%!";
+          loop ()
+        | Repl_command.Server_side | Repl_command.Scheme_input ->
+          if send_to_server trimmed then loop ()
       end
   in
   (try loop ()

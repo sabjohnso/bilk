@@ -48,6 +48,10 @@ val is_alive : t -> bool
 val shutdown : t -> unit
 (** [shutdown t] stops the server and cleans up resources. *)
 
+val graceful_shutdown : t -> unit
+(** [graceful_shutdown t] performs an auto-checkpoint (if enabled)
+    and then shuts down the server. *)
+
 val run : t -> unit
 (** [run t] starts the server's TCP listener and eval loop. Blocks
     until shutdown or signal. *)
@@ -56,9 +60,16 @@ val run : t -> unit
 
 val handle_eval : t -> string -> unit
 (** [handle_eval t expr] evaluates [expr] in the server's instance,
-    capturing output.  Sends {!Repl_protocol.Output},
+    capturing output.  If [expr] starts with [,], dispatches as a
+    server-side comma command instead.  Sends {!Repl_protocol.Output},
     {!Repl_protocol.Result}, or {!Repl_protocol.Error} to the
     connected client. *)
+
+val handle_server_command : t -> string -> unit
+(** [handle_server_command t line] dispatches a comma command
+    (e.g. [",checkpoint foo"]) using the server's session and instance.
+    Sends output via {!Repl_protocol.Output}, {!Repl_protocol.Result},
+    or {!Repl_protocol.Error}. *)
 
 val handle_complete : t -> string -> unit
 (** [handle_complete t prefix] gathers completion candidates from the
@@ -74,6 +85,10 @@ val handle_resume : t -> string -> unit
     session token and sends {!Repl_protocol.Session_ok} or
     {!Repl_protocol.Session_deny}. *)
 
+val handle_client_msg : t -> Repl_protocol.client_msg -> unit
+(** [handle_client_msg t msg] dispatches a client protocol message.
+    Exposed for testing with socketpairs. *)
+
 val session_token : t -> string
 (** [session_token t] returns the server's session token.
     Exposed for testing resume verification. *)
@@ -81,6 +96,10 @@ val session_token : t -> string
 val instance : t -> Instance.t
 (** [instance t] returns the server's Scheme instance.
     Exposed for testing eval side-effects. *)
+
+val session : t -> Session.t
+(** [session t] returns the server's session state.
+    Exposed for testing checkpoint operations. *)
 
 val connect_line : t -> string
 (** [connect_line t] returns the [BILK CONNECT <port> <key>] line

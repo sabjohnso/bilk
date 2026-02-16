@@ -343,6 +343,204 @@ let test_validate_insecure_specific_ip_rejected () =
      | Error _ -> true
      | Ok () -> false)
 
+(* --- Graceful shutdown: auto-checkpoint when enabled --- *)
+
+let test_graceful_shutdown_auto_checkpoint () =
+  let config = {
+    Repl_server.port = 0;
+    auto_checkpoint = true;
+    name = "test";
+    bind_address = Unix.inet_addr_loopback;
+    session_timeout = 86400;
+    insecure = true;
+  } in
+  let server = Repl_server.create config in
+  let (client_fd, server_fd) = Unix.socketpair Unix.PF_UNIX Unix.SOCK_STREAM 0 in
+  Repl_server.accept_client server server_fd;
+  Repl_server.graceful_shutdown server;
+  let cps = Session.list_checkpoints (Repl_server.session server) in
+  Alcotest.(check bool) "has auto-checkpoint" true (List.length cps > 0);
+  (try Unix.close client_fd with Unix.Unix_error _ -> ())
+
+(* --- Graceful shutdown: no checkpoint when disabled --- *)
+
+let test_graceful_shutdown_no_checkpoint () =
+  let config = {
+    Repl_server.port = 0;
+    auto_checkpoint = false;
+    name = "test";
+    bind_address = Unix.inet_addr_loopback;
+    session_timeout = 86400;
+    insecure = true;
+  } in
+  let server = Repl_server.create config in
+  let (client_fd, server_fd) = Unix.socketpair Unix.PF_UNIX Unix.SOCK_STREAM 0 in
+  Repl_server.accept_client server server_fd;
+  Repl_server.graceful_shutdown server;
+  let cps = Session.list_checkpoints (Repl_server.session server) in
+  Alcotest.(check (list string)) "no checkpoints" [] cps;
+  (try Unix.close client_fd with Unix.Unix_error _ -> ())
+
+(* --- Server commands: ,checkpoint creates checkpoint --- *)
+
+let test_server_cmd_checkpoint () =
+  let (server, client_fd, _server_fd) = make_server () in
+  Repl_server.handle_eval server ",checkpoint foo";
+  let msgs = read_server_msgs client_fd in
+  let has_output = List.exists (function
+    | Repl_protocol.Output s -> String.length s > 0
+    | Repl_protocol.Result _ -> true
+    | _ -> false
+  ) msgs in
+  Alcotest.(check bool) "got response" true has_output;
+  (* No Error message *)
+  let has_error = List.exists (function
+    | Repl_protocol.Error _ -> true
+    | _ -> false
+  ) msgs in
+  Alcotest.(check bool) "no error" false has_error;
+  Repl_server.shutdown server;
+  Unix.close client_fd
+
+(* --- Server commands: checkpoint + revert restores state --- *)
+
+let test_server_cmd_checkpoint_revert () =
+  let (server, client_fd, _server_fd) = make_server () in
+  (* Define x=1 *)
+  Repl_server.handle_eval server "(define x 1)";
+  ignore (read_server_msgs client_fd);
+  (* Checkpoint *)
+  Repl_server.handle_eval server ",checkpoint snap";
+  ignore (read_server_msgs client_fd);
+  (* Define x=2 *)
+  Repl_server.handle_eval server "(define x 2)";
+  ignore (read_server_msgs client_fd);
+  (* Verify x=2 *)
+  Repl_server.handle_eval server "x";
+  let msgs = read_server_msgs client_fd in
+  let has_2 = List.exists (function
+    | Repl_protocol.Result "2" -> true
+    | _ -> false
+  ) msgs in
+  Alcotest.(check bool) "x is 2" true has_2;
+  (* Revert *)
+  Repl_server.handle_eval server ",revert snap";
+  ignore (read_server_msgs client_fd);
+  (* Verify x=1 *)
+  Repl_server.handle_eval server "x";
+  let msgs2 = read_server_msgs client_fd in
+  let has_1 = List.exists (function
+    | Repl_protocol.Result "1" -> true
+    | _ -> false
+  ) msgs2 in
+  Alcotest.(check bool) "x is 1 after revert" true has_1;
+  Repl_server.shutdown server;
+  Unix.close client_fd
+
+(* --- Server commands: ,checkpoints lists names --- *)
+
+let test_server_cmd_checkpoints () =
+  let (server, client_fd, _server_fd) = make_server () in
+  Repl_server.handle_eval server ",checkpoint alpha";
+  ignore (read_server_msgs client_fd);
+  Repl_server.handle_eval server ",checkpoints";
+  let msgs = read_server_msgs client_fd in
+  let output = List.filter_map (function
+    | Repl_protocol.Output s -> Some s
+    | _ -> None
+  ) msgs in
+  let combined = String.concat "" output in
+  Alcotest.(check bool) "lists alpha" true
+    (String.length combined > 0
+     && try let _ = String.split_on_char '\n' combined
+            |> List.exists (fun l -> String.trim l = "alpha")
+        in true with _ -> false);
+  Repl_server.shutdown server;
+  Unix.close client_fd
+
+(* --- Server commands: ,env produces output --- *)
+
+let test_server_cmd_env () =
+  let (server, client_fd, _server_fd) = make_server () in
+  Repl_server.handle_eval server ",env";
+  let msgs = read_server_msgs client_fd in
+  let output = List.filter_map (function
+    | Repl_protocol.Output s -> Some s
+    | _ -> None
+  ) msgs in
+  let combined = String.concat "" output in
+  Alcotest.(check bool) "env has car" true
+    (let contains s sub =
+       let slen = String.length s and sublen = String.length sub in
+       let rec check i = i + sublen <= slen
+         && (String.sub s i sublen = sub || check (i + 1)) in
+       check 0
+     in contains combined "car");
+  Repl_server.shutdown server;
+  Unix.close client_fd
+
+(* --- Server commands: ,libs produces output --- *)
+
+let test_server_cmd_libs () =
+  let (server, client_fd, _server_fd) = make_server () in
+  Repl_server.handle_eval server ",libs";
+  let msgs = read_server_msgs client_fd in
+  let has_output = List.exists (function
+    | Repl_protocol.Output _ -> true
+    | Repl_protocol.Result _ -> true
+    | _ -> false
+  ) msgs in
+  Alcotest.(check bool) "got output" true has_output;
+  Repl_server.shutdown server;
+  Unix.close client_fd
+
+(* --- Server commands: ,help produces output --- *)
+
+let test_server_cmd_help () =
+  let (server, client_fd, _server_fd) = make_server () in
+  Repl_server.handle_eval server ",help";
+  let msgs = read_server_msgs client_fd in
+  let output = List.filter_map (function
+    | Repl_protocol.Output s -> Some s
+    | _ -> None
+  ) msgs in
+  let combined = String.concat "" output in
+  Alcotest.(check bool) "help has content" true (String.length combined > 0);
+  Repl_server.shutdown server;
+  Unix.close client_fd
+
+(* --- Server commands: unknown command → Error --- *)
+
+let test_server_cmd_unknown () =
+  let (server, client_fd, _server_fd) = make_server () in
+  Repl_server.handle_eval server ",xyzzy-nonsense";
+  let msgs = read_server_msgs client_fd in
+  let has_error = List.exists (function
+    | Repl_protocol.Error s ->
+      (let slen = String.length s and sublen = 7 in
+       let rec check i = i + sublen <= slen
+         && (String.sub s i sublen = "Unknown" || check (i + 1)) in
+       check 0)
+    | _ -> false
+  ) msgs in
+  Alcotest.(check bool) "unknown error" true has_error;
+  Repl_server.shutdown server;
+  Unix.close client_fd
+
+(* --- Server commands: regular (+ 1 2) still works --- *)
+
+let test_server_cmd_scheme_passthrough () =
+  let (server, client_fd, _server_fd) = make_server () in
+  Repl_server.handle_eval server "(+ 1 2)";
+  let msgs = read_server_msgs client_fd in
+  let has_result = List.exists (function
+    | Repl_protocol.Result "3" -> true
+    | _ -> false
+  ) msgs in
+  Alcotest.(check bool) "result is 3" true has_result;
+  Repl_server.shutdown server;
+  Unix.close client_fd
+
 let () =
   Alcotest.run "Repl_server"
     [ ("eval",
@@ -382,5 +580,25 @@ let () =
            test_validate_secure_any_ok
        ; Alcotest.test_case "insecure specific ip rejected" `Quick
            test_validate_insecure_specific_ip_rejected
+       ])
+    ; ("graceful_shutdown",
+       [ Alcotest.test_case "auto-checkpoint on graceful" `Quick
+           test_graceful_shutdown_auto_checkpoint
+       ; Alcotest.test_case "no checkpoint when disabled" `Quick
+           test_graceful_shutdown_no_checkpoint
+       ])
+    ; ("server_commands",
+       [ Alcotest.test_case ",checkpoint creates" `Quick
+           test_server_cmd_checkpoint
+       ; Alcotest.test_case ",checkpoint + ,revert" `Quick
+           test_server_cmd_checkpoint_revert
+       ; Alcotest.test_case ",checkpoints lists" `Quick
+           test_server_cmd_checkpoints
+       ; Alcotest.test_case ",env" `Quick test_server_cmd_env
+       ; Alcotest.test_case ",libs" `Quick test_server_cmd_libs
+       ; Alcotest.test_case ",help" `Quick test_server_cmd_help
+       ; Alcotest.test_case "unknown command" `Quick test_server_cmd_unknown
+       ; Alcotest.test_case "scheme passthrough" `Quick
+           test_server_cmd_scheme_passthrough
        ])
     ]

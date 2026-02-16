@@ -2169,13 +2169,23 @@ let make_serve_cmd () =
       ~doc:"Start a remote REPL server"
       ~man:[`S "DESCRIPTION";
             `P "Starts a persistent REPL server that clients can connect \
-                to with $(b,bilk attach). The server holds the Scheme \
-                instance. Clients run the full line editor locally."]
+                to with $(b,bilk attach) or $(b,bilk connect). The server \
+                holds the Scheme instance and handles evaluation, \
+                completion, and comma commands (checkpoints, sessions, \
+                library operations). Clients run the full line editor \
+                locally with zero-latency editing.";
+            `P "On client disconnect, the server stays alive and can be \
+                reconnected. With $(b,--auto-checkpoint), session state \
+                is automatically saved on disconnect and SIGINT/SIGTERM.";
+            `P "Prints a $(b,BILK CONNECT) line to stdout for use by \
+                $(b,bilk connect) SSH bootstrapping."]
   in
   Cmd.v info term
 
 let run_attach host port theme paredit =
   let key = Sys.getenv_opt "BILK_KEY" in
+  (* Clear the key from the environment so child processes don't inherit it *)
+  Unix.putenv "BILK_KEY" "";
   let config : Repl_client.config = {
     host; port; theme;
     history_file;
@@ -2230,8 +2240,16 @@ let make_attach_cmd () =
       ~man:[`S "DESCRIPTION";
             `P "Connects to a running REPL server started with \
                 $(b,bilk serve). Runs the full REPL UI locally (line \
-                editor, paredit, highlighting, completion) and sends \
-                expressions to the server for evaluation."]
+                editor, paredit, highlighting, tab completion) with \
+                zero-latency editing.";
+            `P "Client-local commands ($(b,,quit), $(b,,help), \
+                $(b,,paredit), $(b,,theme), $(b,,clear)) are handled \
+                without a server round-trip. All other comma commands \
+                ($(b,,checkpoint), $(b,,revert), $(b,,env), etc.) and \
+                Scheme expressions are sent to the server.";
+            `P "Encryption key is read from the $(b,BILK_KEY) \
+                environment variable. Set by $(b,bilk connect) \
+                automatically."]
   in
   Cmd.v info term
 
@@ -2322,7 +2340,13 @@ let make_connect_cmd () =
             `P "Starts $(b,bilk serve) on a remote host via SSH and \
                 automatically connects to it. The SSH session bootstraps \
                 the connection by reading the $(b,BILK CONNECT) line \
-                from the server's stdout."]
+                from the server's stdout, extracting the port and \
+                encryption key.";
+            `P "Additional arguments after the target are passed through \
+                to $(b,bilk serve) on the remote host (e.g., \
+                $(b,--auto-checkpoint), $(b,--name)).";
+            `P "The encryption key is set in $(b,BILK_KEY) and cleared \
+                after connection to prevent leaking to child processes."]
   in
   Cmd.v info term
 
