@@ -121,3 +121,13 @@ val authenticate_client : t -> bool
 val crypto_key : t -> Repl_crypto.key option
 (** [crypto_key t] returns the server's encryption key, or [None] in
     insecure mode.  Exposed for testing the handshake. *)
+
+(** {1 Error sanitization} *)
+
+val sanitize_error_path : string -> string
+(** [sanitize_error_path msg] strips absolute directory prefixes from
+    error messages, keeping only the basename.  For example,
+    ["/home/user/file.txt: No such file or directory"] becomes
+    ["file.txt: No such file or directory"].  Messages that don't start
+    with [/] are returned unchanged.  This prevents leaking server
+    directory layout through error messages sent to remote clients. *)

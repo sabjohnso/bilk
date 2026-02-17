@@ -906,6 +906,51 @@ let test_accept_closes_previous_fd () =
   (try Unix.close c1 with Unix.Unix_error _ -> ());
   (try Unix.close c2 with Unix.Unix_error _ -> ())
 
+(* --- Error path sanitization (Issue 74) --- *)
+
+let test_sanitize_error_path_absolute () =
+  let msg = "/home/user/secret/project/file.txt: No such file or directory" in
+  let result = Repl_server.sanitize_error_path msg in
+  Alcotest.(check string) "basename only"
+    "file.txt: No such file or directory" result
+
+let test_sanitize_error_path_no_path () =
+  let msg = "division by zero" in
+  let result = Repl_server.sanitize_error_path msg in
+  Alcotest.(check string) "unchanged" "division by zero" result
+
+let test_sanitize_error_path_relative () =
+  let msg = "foo.txt: Permission denied" in
+  let result = Repl_server.sanitize_error_path msg in
+  Alcotest.(check string) "relative unchanged" "foo.txt: Permission denied" result
+
+let test_sanitize_error_path_bare () =
+  (* Absolute path with no colon separator *)
+  let msg = "/home/user/secret/file.txt" in
+  let result = Repl_server.sanitize_error_path msg in
+  Alcotest.(check string) "basename of bare path" "file.txt" result
+
+let test_eval_sys_error_no_full_path () =
+  (* Evaluating (open-input-file ...) on a nonexistent file should
+     produce an error that does NOT contain the full absolute path *)
+  let (server, client_fd, _server_fd) = make_server () in
+  Repl_server.handle_eval server
+    "(open-input-file \"/deep/secret/server/path/missing.txt\")";
+  let msgs = read_server_msgs client_fd in
+  let errors = List.filter_map (function
+    | Repl_protocol.Error s -> Some s
+    | _ -> None
+  ) msgs in
+  (* There should be an error *)
+  Alcotest.(check bool) "has error" true (errors <> []);
+  (* Error should NOT contain the deep directory structure *)
+  let leaks_path = List.exists (fun s ->
+    string_contains s "/deep/secret/server/path"
+  ) errors in
+  Alcotest.(check bool) "no path leak" false leaks_path;
+  Repl_server.shutdown server;
+  Unix.close client_fd
+
 (* --- Security: adversarial inputs --- *)
 
 let test_adversarial_oversized_eval () =
@@ -1060,6 +1105,18 @@ let () =
     ; ("fd_leak",
        [ Alcotest.test_case "accept closes previous" `Quick
            test_accept_closes_previous_fd
+       ])
+    ; ("error_path_sanitization",
+       [ Alcotest.test_case "absolute path stripped" `Quick
+           test_sanitize_error_path_absolute
+       ; Alcotest.test_case "no path unchanged" `Quick
+           test_sanitize_error_path_no_path
+       ; Alcotest.test_case "relative unchanged" `Quick
+           test_sanitize_error_path_relative
+       ; Alcotest.test_case "bare absolute path" `Quick
+           test_sanitize_error_path_bare
+       ; Alcotest.test_case "eval sys_error no full path" `Quick
+           test_eval_sys_error_no_full_path
        ])
     ; ("adversarial",
        [ Alcotest.test_case "oversized eval rejected" `Quick

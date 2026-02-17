@@ -203,6 +203,17 @@ let safe_resolve_path ~allowed path =
     if List.exists within allowed then Ok resolved
     else Error "path is outside allowed directories"
 
+(* --- Error path sanitization (Issue 74) --- *)
+
+let sanitize_error_path msg =
+  if String.length msg > 0 && msg.[0] = '/' then
+    match String.index_opt msg ':' with
+    | Some i ->
+      let path = String.sub msg 0 i in
+      Filename.basename path ^ String.sub msg i (String.length msg - i)
+    | None -> Filename.basename msg
+  else msg
+
 (* --- Server-side comma command dispatch --- *)
 
 let handle_server_command t line =
@@ -271,7 +282,7 @@ let handle_server_command t line =
        | Session.Session_error msg ->
          send_to_client t (Repl_protocol.Error msg)
        | Sys_error msg ->
-         send_to_client t (Repl_protocol.Error msg))
+         send_to_client t (Repl_protocol.Error (sanitize_error_path msg)))
     end
   | "load-session" ->
     if arg = "" then
@@ -298,7 +309,7 @@ let handle_server_command t line =
        | Session.Session_error msg ->
          send_to_client t (Repl_protocol.Error msg)
        | Sys_error msg ->
-         send_to_client t (Repl_protocol.Error msg))
+         send_to_client t (Repl_protocol.Error (sanitize_error_path msg)))
     end
   | "sessions" ->
     let home = Search_path.bilk_home () in
@@ -540,9 +551,10 @@ let handle_eval t expr =
         with
         | Reader.Read_error (_loc, msg) -> error_msg := Some msg
         | Compiler.Compile_error (_loc, msg) -> error_msg := Some msg
-        | Vm.Runtime_error msg -> error_msg := Some msg
+        | Vm.Runtime_error msg -> error_msg := Some (sanitize_error_path msg)
         | Fasl.Fasl_error msg -> error_msg := Some msg
-        | Failure msg -> error_msg := Some msg
+        | Failure msg -> error_msg := Some (sanitize_error_path msg)
+        | Sys_error msg -> error_msg := Some (sanitize_error_path msg)
         end;
         if !error_msg = None then eval_loop ()
     with

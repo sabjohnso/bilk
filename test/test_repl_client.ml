@@ -440,6 +440,39 @@ let test_eval_read_prompt_sanitized () =
   Repl_client.close_connection conn;
   Unix.close server_fd
 
+(* --- eval_remote timeout (Issue 70) --- *)
+
+let test_eval_timeout () =
+  (* Server never sends Result/Error — client should time out *)
+  let (conn, server_fd) = make_pair () in
+  let t0 = Unix.gettimeofday () in
+  let result = Repl_client.eval_remote conn
+    ~on_output:(fun _ -> ())
+    ~on_read:(fun _ -> "")
+    ~timeout:0.2
+    "(loop)" in
+  let elapsed = Unix.gettimeofday () -. t0 in
+  Alcotest.(check bool) "returns timeout" true
+    (result = `Timeout);
+  Alcotest.(check bool) "took roughly 0.2s" true
+    (elapsed >= 0.15 && elapsed < 1.0);
+  Repl_client.close_connection conn;
+  Unix.close server_fd
+
+let test_eval_no_timeout_on_fast_result () =
+  (* Server responds quickly — no timeout *)
+  let (conn, server_fd) = make_pair () in
+  write_server_msg server_fd (Repl_protocol.Result "42");
+  let result = Repl_client.eval_remote conn
+    ~on_output:(fun _ -> ())
+    ~on_read:(fun _ -> "")
+    ~timeout:5.0
+    "(+ 40 2)" in
+  Alcotest.(check bool) "result, not timeout" true
+    (result = `Result "42");
+  Repl_client.close_connection conn;
+  Unix.close server_fd
+
 (* --- Theme validation tests (Issue 72) --- *)
 
 let test_theme_builtin_dark () =
@@ -499,6 +532,11 @@ let () =
        ; Alcotest.test_case "read request" `Quick test_eval_read_request
        ; Alcotest.test_case "disconnect" `Quick test_eval_disconnect
        ; Alcotest.test_case "skips status" `Quick test_eval_skips_status
+       ])
+    ; ("eval_timeout",
+       [ Alcotest.test_case "times out" `Quick test_eval_timeout
+       ; Alcotest.test_case "fast result" `Quick
+           test_eval_no_timeout_on_fast_result
        ])
     ; ("request_completions",
        [ Alcotest.test_case "normal" `Quick test_completions

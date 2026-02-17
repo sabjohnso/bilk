@@ -133,7 +133,8 @@ let read_client_msg data offset =
   let tag = Char.code data.[tag_off] in
   let body_off = tag_off + 1 in
   let next = offset + 4 + payload_len in
-  let msg = match tag with
+  let msg =
+    try match tag with
     | 0x01 ->
       let (s, _) = read_bytes data body_off in
       Eval s
@@ -153,6 +154,8 @@ let read_client_msg data offset =
       let nonce = String.sub data (body_off + 32) 32 in
       Auth_response (hmac, nonce)
     | _ -> raise (Protocol_error (Printf.sprintf "unknown client tag 0x%02x" tag))
+    with Invalid_argument _ ->
+      raise (Protocol_error "truncated payload")
   in
   (msg, next)
 
@@ -164,7 +167,8 @@ let read_server_msg data offset =
   let tag = Char.code data.[tag_off] in
   let body_off = tag_off + 1 in
   let next = offset + 4 + payload_len in
-  let msg = match tag with
+  let msg =
+    try match tag with
     | 0x81 ->
       let (s, _) = read_bytes data body_off in
       Output s
@@ -199,5 +203,7 @@ let read_server_msg data offset =
       Auth_ok hmac
     | 0x8b -> Auth_deny
     | _ -> raise (Protocol_error (Printf.sprintf "unknown server tag 0x%02x" tag))
+    with Invalid_argument _ ->
+      raise (Protocol_error "truncated payload")
   in
   (msg, next)

@@ -48,7 +48,7 @@ val close_connection : connection -> unit
 val send_msg : connection -> Repl_protocol.client_msg -> unit
 (** [send_msg conn msg] serializes and sends a client message. *)
 
-val recv_msg : connection -> Repl_protocol.server_msg
+val recv_msg : ?deadline:float -> connection -> Repl_protocol.server_msg
 (** [recv_msg conn] reads and deserializes one server message.
     Blocks until a complete frame is available.  Raises
     [End_of_file] if the connection is closed.
@@ -58,12 +58,15 @@ val eval_remote :
   connection ->
   on_output:(string -> unit) ->
   on_read:(string -> string) ->
+  ?timeout:float ->
   string ->
-  [ `Result of string | `Error of string | `Disconnected ]
-(** [eval_remote conn ~on_output ~on_read expr] sends [Eval expr] and
-    reads responses until [Result] or [Error]. Calls [on_output] for
+  [ `Result of string | `Error of string | `Disconnected | `Timeout ]
+(** [eval_remote conn ~on_output ~on_read ?timeout expr] sends [Eval expr]
+    and reads responses until [Result] or [Error]. Calls [on_output] for
     streaming [Output] messages and [on_read] for [Read_request]
-    prompts. Returns [`Disconnected] on connection loss. *)
+    prompts. Returns [`Disconnected] on connection loss, or [`Timeout]
+    if [timeout] seconds elapse without a terminal response.  [timeout]
+    defaults to [infinity] (no timeout). *)
 
 val request_completions : connection -> string -> string list
 (** [request_completions conn prefix] sends [Complete prefix] and

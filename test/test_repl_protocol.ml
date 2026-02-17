@@ -337,10 +337,24 @@ let test_auth_response_truncated_payload () =
   Buffer.add_char buf '\x07';
   Buffer.add_string buf (String.make 10 '\x00');
   let data = Buffer.contents buf in
-  let raised = ref false in
-  (try ignore (Repl_protocol.read_client_msg data 0)
-   with Invalid_argument _ -> raised := true);
-  Alcotest.(check bool) "truncated auth_response raises" true !raised
+  Alcotest.check_raises "truncated auth_response"
+    (Repl_protocol.Protocol_error "truncated payload")
+    (fun () -> ignore (Repl_protocol.read_client_msg data 0))
+
+let test_malformed_completions_count () =
+  (* Completions with count=5 but only 1 entry of payload data *)
+  let payload = Buffer.create 32 in
+  Buffer.add_char payload (Char.chr 0x84);    (* tag *)
+  Buffer.add_char payload (Char.chr 0);       (* count high byte *)
+  Buffer.add_char payload (Char.chr 5);       (* count = 5 *)
+  (* One string entry: "hi" (u32 len + data) — 4 entries missing *)
+  Buffer.add_string payload (encode_u32 2);
+  Buffer.add_string payload "hi";
+  let payload_data = Buffer.contents payload in
+  let frame = encode_u32 (String.length payload_data) ^ payload_data in
+  Alcotest.check_raises "malformed completions count"
+    (Repl_protocol.Protocol_error "truncated payload")
+    (fun () -> ignore (Repl_protocol.read_server_msg frame 0))
 
 let () =
   Alcotest.run "Repl_protocol"
@@ -407,5 +421,7 @@ let () =
            test_frame_available_at_offset
        ; Alcotest.test_case "truncated auth_response" `Quick
            test_auth_response_truncated_payload
+       ; Alcotest.test_case "malformed completions count" `Quick
+           test_malformed_completions_count
        ])
     ]

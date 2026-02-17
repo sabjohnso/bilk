@@ -845,7 +845,7 @@ is still attached, the old fd is leaked.
 - Test: [[file:test/test_repl_server.ml][test_repl_server.ml]] ~fd_leak~ group verifies the old
   server-side fd is closed after replacement (write raises ~EBADF~).
 
-*** TODO Issue 70: Infinite loop in ~eval_remote~
+*** DONE Issue 70: Infinite loop in ~eval_remote~
 :PROPERTIES:
 :PRIORITY: B
 :CATEGORY: correctness
@@ -855,10 +855,14 @@ is still attached, the old fd is leaked.
 receives ~Result~ or ~Error~. If the server never sends either (e.g.
 due to a bug or hang), the client loops forever with no timeout.
 
-**** Plan
-- Add a timeout (e.g. 60s configurable) to ~eval_remote~
-- On timeout, return an error message rather than blocking indefinitely
-- Alternatively, use ~Unix.select~ with a deadline in the receive loop
+**** Resolution
+Added ~Recv_timeout~ exception and ~?deadline~ parameter to ~recv_msg~
+using ~Unix.select~ for non-blocking wait.  ~eval_remote~ gains a
+~?timeout~ parameter (default: infinity) that computes a deadline from
+the current time.  Returns ~`Timeout~ if the deadline expires.
+~connect~ handles the new variant by printing a message and continuing
+the REPL loop.  Two new tests: timeout triggers after ~0.2s, fast
+result doesn't trigger timeout.
 
 *** DONE Issue 71: ~BILK_KEY~ cleanup incomplete
 :PROPERTIES:
@@ -905,7 +909,7 @@ without validation.
 
 ** MEDIUM
 
-*** TODO Issue 73: Completions count unchecked in protocol
+*** DONE Issue 73: Completions count unchecked in protocol
 :PROPERTIES:
 :PRIORITY: B
 :CATEGORY: security
@@ -915,12 +919,16 @@ without validation.
 65535) but doesn't validate that the payload contains enough data for
 that many entries. A crafted message could cause an out-of-bounds read.
 
-**** Plan
-- Track remaining payload bytes while reading completions
-- Reject message if count exceeds available data
-- Write test: malformed completions message handled gracefully
+**** Resolution
+Wrapped the deserialization bodies of ~read_client_msg~ and
+~read_server_msg~ in ~try/with Invalid_argument~ that converts to
+~Protocol_error "truncated payload"~.  This catches all out-of-bounds
+~String.sub~ accesses from ~read_bytes~, ~read_u16~, and fixed-size
+extractions (auth nonces, HMACs).  Two new tests: malformed completions
+count, and updated auth_response truncation test (now expects
+~Protocol_error~ instead of ~Invalid_argument~).
 
-*** TODO Issue 74: Error messages leak server file paths
+*** DONE Issue 74: Error messages leak server file paths
 :PROPERTIES:
 :PRIORITY: B
 :CATEGORY: security
@@ -930,10 +938,18 @@ that many entries. A crafted message could cause an out-of-bounds read.
 paths) are forwarded as ~Error~ messages to the remote client, leaking
 information about the server's directory layout.
 
-**** Plan
-- Sanitize error messages before sending: strip absolute paths or
-  replace with relative paths
-- Or catch ~Sys_error~ specifically and return a generic message
+**** Resolution
+Added [[file:lib/repl_server.ml::sanitize_error_path][sanitize_error_path]] that strips absolute directory
+prefixes from error messages, keeping only the basename (e.g.
+~"/home/user/file.txt: No such file"~ → ~"file.txt: No such file"~).
+Messages not starting with ~/~ are unchanged.  Applied to:
+- All ~Sys_error~ handlers in comma commands (~,save-session~,
+  ~,load-session~, ~,load~)
+- ~Sys_error~ added to eval_loop catch list (defense in depth)
+- ~Vm.Runtime_error~ and ~Failure~ in eval_loop (since primitives may
+  wrap ~Sys_error~ messages in these exceptions)
+Five new tests: 4 unit tests for ~sanitize_error_path~ + 1 integration
+test verifying eval doesn't leak full paths.
 
 *** DONE Issue 75: No port validation in SSH connect
 :PROPERTIES:

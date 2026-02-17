@@ -35,7 +35,9 @@ let rec read_eintr fd buf off len =
   try Unix.read fd buf off len
   with Unix.Unix_error (Unix.EINTR, _, _) -> read_eintr fd buf off len
 
-let recv_msg conn =
+exception Recv_timeout
+
+let recv_msg ?(deadline = infinity) conn =
   (* Try to decode a complete frame from the buffer, reading more if needed *)
   let rec try_decode () =
     let data = Buffer.contents conn.recv_buf in
@@ -47,6 +49,15 @@ let recv_msg conn =
         Buffer.add_string conn.recv_buf (String.sub data next remaining);
       msg
     end else begin
+      (* Check deadline before blocking on read *)
+      let remaining_time = deadline -. Unix.gettimeofday () in
+      if remaining_time <= 0.0 then raise Recv_timeout;
+      let wait = if deadline = infinity then (-1.0) else remaining_time in
+      let (ready, _, _) =
+        try Unix.select [conn.fd] [] [] wait
+        with Unix.Unix_error (Unix.EINTR, _, _) -> ([], [], [])
+      in
+      if ready = [] then raise Recv_timeout;
       let tmp = Bytes.create 4096 in
       let n = read_eintr conn.fd tmp 0 4096 in
       if n = 0 then raise End_of_file;
@@ -115,11 +126,15 @@ let sanitize_read_prompt raw =
 
 (* --- eval_remote --- *)
 
-let eval_remote conn ~on_output ~on_read expr =
+let eval_remote conn ~on_output ~on_read ?(timeout = infinity) expr =
   try
     send_msg conn (Repl_protocol.Eval expr);
+    let deadline =
+      if timeout = infinity then infinity
+      else Unix.gettimeofday () +. timeout
+    in
     let rec loop () =
-      let msg = recv_msg conn in
+      let msg = recv_msg ~deadline conn in
       match msg with
       | Repl_protocol.Result s -> `Result s
       | Repl_protocol.Error s -> `Error s
@@ -138,6 +153,7 @@ let eval_remote conn ~on_output ~on_read expr =
     in
     loop ()
   with
+  | Recv_timeout -> `Timeout
   | End_of_file | Unix.Unix_error _ | Repl_protocol.Protocol_error _ ->
     `Disconnected
 
@@ -380,6 +396,9 @@ let connect config =
     | `Disconnected ->
       Printf.eprintf "Connection lost.\n%!";
       false
+    | `Timeout ->
+      Printf.eprintf "Server response timed out.\n%!";
+      true
   in
   let rec loop () =
     match Line_editor.read_input editor with
