@@ -82,6 +82,12 @@ val authenticate : connection -> Repl_crypto.key -> unit
     shared key, and proves knowledge of it in return.
     @raise Repl_protocol.Protocol_error if authentication fails. *)
 
+val validate_theme_name : string -> bool
+(** [validate_theme_name name] returns [true] if [name] is a safe
+    theme name.  Built-in names (["dark"], ["light"], ["none"], ["off"])
+    are always valid.  Custom names must be non-empty and contain no
+    path separators, [..], or null bytes. *)
+
 val connect : config -> unit
 (** [connect config] connects to the server and runs the full
     interactive REPL with local line editing, paredit, highlighting,

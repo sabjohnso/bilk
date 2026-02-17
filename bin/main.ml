@@ -477,12 +477,19 @@ let resolve_theme name =
   | "dark" -> Some Highlight.dark_theme
   | "light" -> Some Highlight.light_theme
   | "none" | "off" -> None
-  | path ->
-    if Sys.file_exists path then
-      Some (Highlight.load_theme path)
-    else begin
-      Printf.eprintf "Theme not found: %s\n%!" path;
+  | _ ->
+    if not (Repl_client.validate_theme_name name) then begin
+      Printf.eprintf "Invalid theme name: %s\n%!" name;
       None
+    end else begin
+      let home = Search_path.bilk_home () in
+      let path = Filename.concat (Filename.concat home "themes") (name ^ ".scm") in
+      if Sys.file_exists path then
+        Some (Highlight.load_theme path)
+      else begin
+        Printf.eprintf "Theme not found: %s\n%!" name;
+        None
+      end
     end
 
 let save_repl_settings theme_ref paredit_ref =

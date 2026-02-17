@@ -876,7 +876,7 @@ empty string rather than unsetting it. The key may still appear in
 - Alternatively, accept the limitation and document it, since the empty
   value is not usable as a key
 
-*** TODO Issue 72: Theme path traversal via ~,theme~
+*** DONE Issue 72: Theme path traversal via ~,theme~
 :PROPERTIES:
 :PRIORITY: B
 :CATEGORY: security
@@ -886,10 +886,16 @@ empty string rather than unsetting it. The key may still appear in
 through ~resolve_theme~ if it loads theme definitions from file paths
 without validation.
 
-**** Plan
-- Validate theme argument: only allow alphanumeric names (no path
-  separators), resolve against a fixed themes directory
-- Write test: path traversal attempt rejected
+**** Resolution
+- Added [[file:lib/repl_client.ml::validate_theme_name][validate_theme_name]]: built-in names (~dark~, ~light~,
+  ~none~, ~off~) always accepted; custom names must be non-empty and
+  contain no path separators (~/~, ~\~), ~..~, or null bytes.
+- ~resolve_theme~ in both [[file:lib/repl_client.ml::resolve_theme][repl_client.ml]] and [[file:bin/main.ml::resolve_theme][bin/main.ml]]
+  now validates the name and resolves custom themes under
+  =~/.bilk/themes/<name>.scm= instead of accepting arbitrary paths.
+- Tests: 11 tests in [[file:test/test_repl_client.ml][test_repl_client.ml]] ~theme_validation~ group
+  (built-in acceptance, custom names, path traversal rejection,
+  slash rejection, dotdot rejection, null byte rejection, empty rejection).
 
 ** MEDIUM
 

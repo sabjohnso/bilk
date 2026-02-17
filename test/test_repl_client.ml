@@ -350,6 +350,52 @@ let test_auth_fake_server () =
   Repl_client.close_connection conn;
   (try Unix.close server_fd with Unix.Unix_error _ -> ())
 
+(* --- Theme validation tests (Issue 72) --- *)
+
+let test_theme_builtin_dark () =
+  Alcotest.(check bool) "dark is valid"
+    true (Repl_client.validate_theme_name "dark")
+
+let test_theme_builtin_light () =
+  Alcotest.(check bool) "light is valid"
+    true (Repl_client.validate_theme_name "light")
+
+let test_theme_builtin_none () =
+  Alcotest.(check bool) "none is valid"
+    true (Repl_client.validate_theme_name "none")
+
+let test_theme_builtin_off () =
+  Alcotest.(check bool) "off is valid"
+    true (Repl_client.validate_theme_name "off")
+
+let test_theme_custom_name () =
+  Alcotest.(check bool) "simple name is valid"
+    true (Repl_client.validate_theme_name "solarized")
+
+let test_theme_name_with_hyphen () =
+  Alcotest.(check bool) "hyphenated name is valid"
+    true (Repl_client.validate_theme_name "gruvbox-dark")
+
+let test_theme_traversal_rejected () =
+  Alcotest.(check bool) "../../etc/passwd rejected"
+    false (Repl_client.validate_theme_name "../../etc/passwd")
+
+let test_theme_slash_rejected () =
+  Alcotest.(check bool) "/etc/passwd rejected"
+    false (Repl_client.validate_theme_name "/etc/passwd")
+
+let test_theme_dotdot_rejected () =
+  Alcotest.(check bool) ".. rejected"
+    false (Repl_client.validate_theme_name "..")
+
+let test_theme_null_rejected () =
+  Alcotest.(check bool) "null byte rejected"
+    false (Repl_client.validate_theme_name "foo\x00bar")
+
+let test_theme_empty_rejected () =
+  Alcotest.(check bool) "empty rejected"
+    false (Repl_client.validate_theme_name "")
+
 let () =
   Alcotest.run "Repl_client"
     [ ("send_recv",
@@ -391,5 +437,19 @@ let () =
        [ Alcotest.test_case "success" `Quick test_auth_success
        ; Alcotest.test_case "deny" `Quick test_auth_deny
        ; Alcotest.test_case "fake server" `Quick test_auth_fake_server
+       ])
+    ; ("theme_validation",
+       [ Alcotest.test_case "dark" `Quick test_theme_builtin_dark
+       ; Alcotest.test_case "light" `Quick test_theme_builtin_light
+       ; Alcotest.test_case "none" `Quick test_theme_builtin_none
+       ; Alcotest.test_case "off" `Quick test_theme_builtin_off
+       ; Alcotest.test_case "custom name" `Quick test_theme_custom_name
+       ; Alcotest.test_case "hyphenated" `Quick test_theme_name_with_hyphen
+       ; Alcotest.test_case "traversal rejected" `Quick
+           test_theme_traversal_rejected
+       ; Alcotest.test_case "slash rejected" `Quick test_theme_slash_rejected
+       ; Alcotest.test_case "dotdot rejected" `Quick test_theme_dotdot_rejected
+       ; Alcotest.test_case "null rejected" `Quick test_theme_null_rejected
+       ; Alcotest.test_case "empty rejected" `Quick test_theme_empty_rejected
        ])
     ]

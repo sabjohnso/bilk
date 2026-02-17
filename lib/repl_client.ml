@@ -155,17 +155,37 @@ let is_complete_local rt text =
 
 (* --- Theme resolution --- *)
 
+let validate_theme_name name =
+  let is_builtin = match name with
+    | "dark" | "light" | "none" | "off" -> true
+    | _ -> false
+  in
+  if is_builtin then true
+  else
+    String.length name > 0
+    && not (String.contains name '/')
+    && not (String.contains name '\\')
+    && not (String.contains name '\x00')
+    && name <> "." && name <> ".."
+
 let resolve_theme name =
   match name with
   | "dark" -> Some Highlight.dark_theme
   | "light" -> Some Highlight.light_theme
   | "none" | "off" -> None
-  | path ->
-    if Sys.file_exists path then
-      Some (Highlight.load_theme path)
-    else begin
-      Printf.eprintf "Theme not found: %s\n%!" path;
+  | _ ->
+    if not (validate_theme_name name) then begin
+      Printf.eprintf "Invalid theme name: %s\n%!" name;
       None
+    end else begin
+      let home = Search_path.bilk_home () in
+      let path = Filename.concat (Filename.concat home "themes") (name ^ ".scm") in
+      if Sys.file_exists path then
+        Some (Highlight.load_theme path)
+      else begin
+        Printf.eprintf "Theme not found: %s\n%!" name;
+        None
+      end
     end
 
 (* --- Completion logic (local path + remote identifiers) --- *)
