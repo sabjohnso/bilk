@@ -127,20 +127,14 @@ let test_poll_recursive () =
 (* --- Inotify tests --- *)
 
 let test_inotify_backend_selected () =
-  (* On Linux, inotify should be selected *)
+  (* On Linux, inotify should be selected; elsewhere, polling *)
   let w = Watch.create () in
   Fun.protect ~finally:(fun () -> Watch.destroy w) (fun () ->
-    match Sys.os_type with
-    | "Unix" ->
-      (* Check if we're on Linux by reading /proc/version *)
-      let is_linux = Sys.file_exists "/proc/version" in
-      if is_linux then
-        Alcotest.(check bool) "inotify backend on Linux"
-          true (Watch.backend w = Watch.Inotify)
-      else
-        (* Non-Linux Unix — either backend is acceptable *)
-        Alcotest.(check pass) "skipped on non-Linux" () ()
-    | _ ->
+    let is_linux = Sys.file_exists "/proc/version" in
+    if is_linux then
+      Alcotest.(check bool) "inotify backend on Linux"
+        true (Watch.backend w = Watch.Inotify)
+    else
       Alcotest.(check bool) "polling backend on non-Linux"
         true (Watch.backend w = Watch.Polling))
 

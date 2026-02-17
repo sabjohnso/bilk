@@ -3,12 +3,12 @@
 #include <caml/alloc.h>
 #include <caml/fail.h>
 #include <caml/unixsupport.h>
+#include <errno.h>
 
 #ifdef __linux__
 
 #include <sys/inotify.h>
 #include <unistd.h>
-#include <errno.h>
 #include <string.h>
 
 CAMLprim value bilk_inotify_init(value unit) {
@@ -101,11 +101,11 @@ CAMLprim value bilk_in_isdir(value unit)    { (void)unit; return caml_copy_int64
 
 #else  /* not __linux__ */
 
-#include <caml/fail.h>
-
 CAMLprim value bilk_inotify_init(value unit) {
     (void)unit;
-    return Val_int(-1);
+    errno = ENOSYS;
+    uerror("inotify_init1", Nothing);
+    return Val_int(-1);  /* unreachable — uerror raises */
 }
 
 CAMLprim value bilk_inotify_add_watch(value fd_v, value path_v, value mask_v) {
