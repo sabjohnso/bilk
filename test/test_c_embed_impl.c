@@ -103,8 +103,9 @@ static void test_error_message(void) {
     bilk_inst_t inst = bilk_create();
     bilk_val_t v = bilk_eval_string(inst, "(car 42)");
     ASSERT("error returns NULL", v == BILK_NULL);
-    const char *msg = bilk_error_message(inst);
+    char *msg = bilk_error_message(inst);
     ASSERT("error message not empty", strlen(msg) > 0);
+    free(msg);
     bilk_destroy(inst);
 }
 
@@ -240,6 +241,36 @@ static void test_symbol(void) {
     bilk_destroy(inst);
 }
 
+static void test_fixnum_large(void) {
+    /* Issue 33: bilk_fixnum must not truncate long to int.
+       3000000000L exceeds INT_MAX (2147483647) on 64-bit systems. */
+    bilk_inst_t inst = bilk_create();
+    long big = 3000000000L;
+    bilk_val_t v = bilk_fixnum(inst, big);
+    ASSERT("large fixnum handle", v != BILK_NULL);
+    ASSERT("large is fixnum", bilk_is_fixnum(inst, v));
+    long got = bilk_fixnum_value(inst, v);
+    ASSERT("large fixnum round-trips", got == big);
+    bilk_release(inst, v);
+    bilk_destroy(inst);
+}
+
+static void test_error_message_freed(void) {
+    /* Issue 32: bilk_error_message must return a strdup'd string
+       that the caller can safely free(). */
+    bilk_inst_t inst = bilk_create();
+    bilk_val_t v = bilk_eval_string(inst, "(car 42)");
+    ASSERT("error returns NULL", v == BILK_NULL);
+    char *msg = bilk_error_message(inst);
+    ASSERT("error msg not empty", strlen(msg) > 0);
+    free(msg);
+    /* A second call should also work (independent copy) */
+    char *msg2 = bilk_error_message(inst);
+    ASSERT("second call works", strlen(msg2) > 0);
+    free(msg2);
+    bilk_destroy(inst);
+}
+
 static void test_nil(void) {
     bilk_inst_t inst = bilk_create();
     bilk_val_t v = bilk_nil(inst);
@@ -270,6 +301,8 @@ int run_c_tests(void) {
     test_flonum();
     test_symbol();
     test_nil();
+    test_fixnum_large();
+    test_error_message_freed();
 
     printf("\n%d/%d tests passed.\n", tests_passed, tests_run);
     return (tests_passed == tests_run) ? 0 : 1;

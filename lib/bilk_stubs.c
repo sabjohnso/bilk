@@ -38,6 +38,7 @@ CAMLprim value bilk_c_dispatch_primitive(value id_v, value ih_v, value args_v) {
     bilk_val_t *argv = NULL;
     if (argc > 0) {
         argv = (bilk_val_t *)malloc(argc * sizeof(bilk_val_t));
+        if (argv == NULL) CAMLreturn(Val_int(0));
         for (int i = 0; i < argc; i++) {
             argv[i] = (bilk_val_t)Int_val(Field(args_v, i));
         }
@@ -166,14 +167,12 @@ void bilk_destroy(bilk_inst_t inst) {
     caml_callback(*cb_destroy, Val_int(inst));
 }
 
-const char *bilk_error_message(bilk_inst_t inst) {
+char *bilk_error_message(bilk_inst_t inst) {
     CAMLparam0(); CAMLlocal1(r);
     ensure_cached();
     r = caml_callback(*cb_error_message, Val_int(inst));
-    /* Return pointer into OCaml string — valid until next GC.
-       For a real production API this should be copied, but for our
-       use case the caller reads it immediately. */
-    CAMLreturnT(const char *, String_val(r));
+    char *s = strdup(String_val(r));
+    CAMLreturnT(char *, s);
 }
 
 bilk_val_t bilk_eval_string(bilk_inst_t inst, const char *src) {
@@ -257,7 +256,7 @@ bilk_val_t bilk_bool(bilk_inst_t inst, int b) {
 
 bilk_val_t bilk_fixnum(bilk_inst_t inst, long n) {
     ensure_cached();
-    value r = caml_callback2(*cb_make_fixnum, Val_int(inst), Val_int((int)n));
+    value r = caml_callback2(*cb_make_fixnum, Val_int(inst), Val_long(n));
     return (bilk_val_t)Int_val(r);
 }
 
@@ -387,7 +386,7 @@ int bilk_bool_value(bilk_inst_t inst, bilk_val_t v) {
 long bilk_fixnum_value(bilk_inst_t inst, bilk_val_t v) {
     ensure_cached();
     value r = caml_callback2(*cb_get_fixnum, Val_int(inst), Val_int(v));
-    return (long)Int_val(r);
+    return Long_val(r);
 }
 
 char *bilk_integer_string(bilk_inst_t inst, bilk_val_t v) {

@@ -79,10 +79,10 @@ void bilk_destroy(bilk_inst_t inst);
 
 /** Retrieve the last error message for an instance.
     Returns an empty string if no error is pending.
-    The returned pointer is valid until the next bilk_* call on this instance.
+    Caller must free() the returned string.
     @param inst Instance handle
-    @return Error message string (do NOT free) */
-const char *bilk_error_message(bilk_inst_t inst);
+    @return Error message string (caller must free) */
+char *bilk_error_message(bilk_inst_t inst);
 
 /* ---- Evaluation ---- */
 

@@ -357,7 +357,7 @@ Also affects:
 - Change DAP/LSP servers in ~bin/main.ml~ to use ~inet_addr_loopback~
 - Update test configs in ~test/test_repl_server.ml~ to include ~bind_address~
 
-*** TODO Issue 32: C FFI: ~bilk_error_message~ returns dangling pointer
+*** DONE Issue 32: C FFI: ~bilk_error_message~ returns dangling pointer
 :PROPERTIES:
 :PRIORITY: A
 :CATEGORY: security
@@ -367,13 +367,14 @@ Also affects:
 unregisters the GC root. Any subsequent allocation could invalidate the
 pointer.
 
-**** Plan
-- Change return type from ~const char *~ to ~char *~
-- Use ~strdup(String_val(r))~ before ~CAMLreturnT~
-- Update [[file:lib/bilk.h::85][lib/bilk.h:85]] doc to say caller must ~free()~
-- Update [[file:test/test_c_embed_impl.c::106][test/test_c_embed_impl.c:106]] to ~free(msg)~
+**** Resolution
+- Changed return type from ~const char *~ to ~char *~
+- Used ~strdup(String_val(r))~ before ~CAMLreturnT~
+- Updated [[file:lib/bilk.h::85][lib/bilk.h:85]] doc to say caller must ~free()~
+- Added ~test_error_message_freed~ in [[file:test/test_c_embed_impl.c][test_c_embed_impl.c]]
+  verifying double call + free works
 
-*** TODO Issue 33: C FFI: ~bilk_fixnum~ truncates ~long~ to ~int~
+*** DONE Issue 33: C FFI: ~bilk_fixnum~ truncates ~long~ to ~int~
 :PROPERTIES:
 :PRIORITY: A
 :CATEGORY: correctness
@@ -382,10 +383,14 @@ pointer.
 [[file:lib/bilk_stubs.c::260][lib/bilk_stubs.c:260]] — On 64-bit systems, ~long~ is 8 bytes but the cast
 to ~int~ silently truncates values exceeding ~INT_MAX~.
 
-**** Plan
-- Replace ~Val_int((int)n)~ with ~Val_long(n)~ to preserve full range
+**** Resolution
+- Replaced ~Val_int((int)n)~ with ~Val_long(n)~ in ~bilk_fixnum~ (creation)
+- Replaced ~Int_val(r)~ with ~Long_val(r)~ in ~bilk_fixnum_value~ (extraction)
+  — ~Int_val~ is defined as ~((int) Long_val(x))~ which truncates to 32-bit
+- Added ~test_fixnum_large~ in [[file:test/test_c_embed_impl.c][test_c_embed_impl.c]]
+  verifying 3000000000L round-trips correctly
 
-*** TODO Issue 34: C FFI: Missing ~malloc~ NULL check
+*** DONE Issue 34: C FFI: Missing ~malloc~ NULL check
 :PROPERTIES:
 :PRIORITY: A
 :CATEGORY: correctness
@@ -394,8 +399,8 @@ to ~int~ silently truncates values exceeding ~INT_MAX~.
 [[file:lib/bilk_stubs.c::40][lib/bilk_stubs.c:40]] — ~argv = malloc(...)~ not checked for NULL in
 ~bilk_c_dispatch_primitive~.
 
-**** Plan
-- Add ~if (argv == NULL) CAMLreturn(Val_int(0));~ after malloc
+**** Resolution
+- Added ~if (argv == NULL) CAMLreturn(Val_int(0));~ after malloc
 
 *** TODO Issue 35: R7RS: ~eq?~ is alias for ~eqv?~
 :PROPERTIES:
