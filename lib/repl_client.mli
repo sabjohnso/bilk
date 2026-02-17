@@ -76,6 +76,12 @@ val print_client_help : unit -> unit
 (** Print a formatted list of all commands (client-local and
     server-side) to stdout. *)
 
+val authenticate : connection -> Repl_crypto.key -> unit
+(** [authenticate conn key] performs the mutual authentication
+    handshake with the server.  Verifies that the server knows the
+    shared key, and proves knowledge of it in return.
+    @raise Repl_protocol.Protocol_error if authentication fails. *)
+
 val connect : config -> unit
 (** [connect config] connects to the server and runs the full
     interactive REPL with local line editing, paredit, highlighting,

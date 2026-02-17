@@ -54,6 +54,34 @@ let recv_msg conn =
   in
   try_decode ()
 
+(* --- Authentication handshake --- *)
+
+let authenticate conn key =
+  (* Step 1: read Auth_challenge from server *)
+  let msg = recv_msg conn in
+  let server_nonce = match msg with
+    | Repl_protocol.Auth_challenge n -> n
+    | _ -> raise (Repl_protocol.Protocol_error "expected Auth_challenge")
+  in
+  (* Step 2: prove we know the key *)
+  let client_hmac = Repl_crypto.auth_response key server_nonce in
+  let client_nonce = Repl_crypto.auth_challenge () in
+  let buf = Buffer.create 256 in
+  Repl_protocol.write_client_msg buf
+    (Repl_protocol.Auth_response (client_hmac, client_nonce));
+  let data = Buffer.contents buf in
+  let _ = Unix.write_substring conn.fd data 0 (String.length data) in
+  (* Step 3: verify server's proof *)
+  let resp = recv_msg conn in
+  match resp with
+  | Repl_protocol.Auth_ok server_hmac ->
+    if not (Repl_crypto.verify_auth key client_nonce server_hmac) then
+      raise (Repl_protocol.Protocol_error "server authentication failed")
+  | Repl_protocol.Auth_deny ->
+    raise (Repl_protocol.Protocol_error "authentication rejected by server")
+  | _ ->
+    raise (Repl_protocol.Protocol_error "unexpected message during auth")
+
 (* --- eval_remote --- *)
 
 let eval_remote conn ~on_output ~on_read expr =
@@ -72,7 +100,10 @@ let eval_remote conn ~on_output ~on_read expr =
       | Repl_protocol.Status _
       | Repl_protocol.Completions _
       | Repl_protocol.Session_ok
-      | Repl_protocol.Session_deny -> loop ()
+      | Repl_protocol.Session_deny
+      | Repl_protocol.Auth_challenge _
+      | Repl_protocol.Auth_ok _
+      | Repl_protocol.Auth_deny -> loop ()
     in
     loop ()
   with
@@ -91,7 +122,10 @@ let request_completions conn prefix =
       | Repl_protocol.Output _
       | Repl_protocol.Status _
       | Repl_protocol.Session_ok
-      | Repl_protocol.Session_deny -> loop ()
+      | Repl_protocol.Session_deny
+      | Repl_protocol.Auth_challenge _
+      | Repl_protocol.Auth_ok _
+      | Repl_protocol.Auth_deny -> loop ()
       | Repl_protocol.Result _
       | Repl_protocol.Error _
       | Repl_protocol.Read_request _ -> []
@@ -215,6 +249,14 @@ let connect config =
      Unix.close sock;
      raise e);
   let conn = connection_of_fd sock in
+  (match config.key with
+   | Some key_str ->
+     (match Repl_crypto.key_of_base64 key_str with
+      | Some key -> authenticate conn key
+      | None ->
+        close_connection conn;
+        failwith "invalid key")
+   | None -> ());
   let rt = Readtable.default in
   let theme = match config.theme with
     | None -> Some Highlight.dark_theme

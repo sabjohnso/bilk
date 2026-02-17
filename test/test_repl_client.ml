@@ -268,6 +268,88 @@ let test_large_frame_ok () =
   Repl_client.close_connection conn;
   Unix.close server_fd
 
+let () = Mirage_crypto_rng_unix.use_default ()
+
+(* --- Auth handshake tests --- *)
+
+let test_auth_success () =
+  let (conn, server_fd) = make_pair () in
+  let key = Repl_crypto.generate_key () in
+  (* Server side: send Auth_challenge *)
+  let server_nonce = Repl_crypto.auth_challenge () in
+  write_server_msg server_fd (Repl_protocol.Auth_challenge server_nonce);
+  (* Run authenticate in a thread since it blocks on recv *)
+  let result = ref None in
+  let thread = Thread.create (fun () ->
+    (try
+       Repl_client.authenticate conn key;
+       result := Some true
+     with _ ->
+       result := Some false)
+  ) () in
+  (* Read client's Auth_response *)
+  let msg = read_client_msg_from_fd server_fd in
+  let (client_hmac, client_nonce) = match msg with
+    | Repl_protocol.Auth_response (h, n) -> (h, n)
+    | _ -> Alcotest.fail "expected Auth_response"
+  in
+  (* Verify client's HMAC *)
+  Alcotest.(check bool) "client HMAC correct" true
+    (Repl_crypto.verify_auth key server_nonce client_hmac);
+  (* Send Auth_ok with server's proof *)
+  let server_hmac = Repl_crypto.auth_response key client_nonce in
+  write_server_msg server_fd (Repl_protocol.Auth_ok server_hmac);
+  Thread.join thread;
+  Alcotest.(check bool) "auth succeeded" true
+    (!result = Some true);
+  Repl_client.close_connection conn;
+  Unix.close server_fd
+
+let test_auth_deny () =
+  Sys.set_signal Sys.sigpipe Sys.Signal_ignore;
+  let (conn, server_fd) = make_pair () in
+  let key = Repl_crypto.generate_key () in
+  let server_nonce = Repl_crypto.auth_challenge () in
+  write_server_msg server_fd (Repl_protocol.Auth_challenge server_nonce);
+  let raised = ref false in
+  let thread = Thread.create (fun () ->
+    (try Repl_client.authenticate conn key
+     with Repl_protocol.Protocol_error _ -> raised := true)
+  ) () in
+  (* Read client's response (ignore it) *)
+  ignore (read_client_msg_from_fd server_fd);
+  (* Send Auth_deny *)
+  write_server_msg server_fd Repl_protocol.Auth_deny;
+  Thread.join thread;
+  Alcotest.(check bool) "raised Protocol_error" true !raised;
+  Repl_client.close_connection conn;
+  (try Unix.close server_fd with Unix.Unix_error _ -> ())
+
+let test_auth_fake_server () =
+  Sys.set_signal Sys.sigpipe Sys.Signal_ignore;
+  let (conn, server_fd) = make_pair () in
+  let key = Repl_crypto.generate_key () in
+  let server_nonce = Repl_crypto.auth_challenge () in
+  write_server_msg server_fd (Repl_protocol.Auth_challenge server_nonce);
+  let raised = ref false in
+  let thread = Thread.create (fun () ->
+    (try Repl_client.authenticate conn key
+     with Repl_protocol.Protocol_error _ -> raised := true)
+  ) () in
+  (* Read client's response *)
+  let msg = read_client_msg_from_fd server_fd in
+  let (_hmac, _client_nonce) = match msg with
+    | Repl_protocol.Auth_response (h, n) -> (h, n)
+    | _ -> Alcotest.fail "expected Auth_response"
+  in
+  (* Send Auth_ok with wrong HMAC (fake server doesn't know the key) *)
+  let bad_hmac = String.make 32 '\x00' in
+  write_server_msg server_fd (Repl_protocol.Auth_ok bad_hmac);
+  Thread.join thread;
+  Alcotest.(check bool) "detected fake server" true !raised;
+  Repl_client.close_connection conn;
+  (try Unix.close server_fd with Unix.Unix_error _ -> ())
+
 let () =
   Alcotest.run "Repl_client"
     [ ("send_recv",
@@ -304,5 +386,10 @@ let () =
            test_recv_buf_rejects_oversized
        ; Alcotest.test_case "large frame ok" `Quick
            test_large_frame_ok
+       ])
+    ; ("auth_handshake",
+       [ Alcotest.test_case "success" `Quick test_auth_success
+       ; Alcotest.test_case "deny" `Quick test_auth_deny
+       ; Alcotest.test_case "fake server" `Quick test_auth_fake_server
        ])
     ]

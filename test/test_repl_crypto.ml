@@ -132,6 +132,75 @@ let prop_ciphertext_has_overhead =
        let packet = Repl_crypto.encrypt enc plaintext in
        String.length packet = String.length plaintext + nonce_len + tag_len)
 
+(* --- Auth challenge/response tests --- *)
+
+let test_auth_challenge_length () =
+  let nonce = Repl_crypto.auth_challenge () in
+  Alcotest.(check int) "nonce is 32 bytes" 32 (String.length nonce)
+
+let test_auth_response_deterministic () =
+  let key = Repl_crypto.generate_key () in
+  let nonce = Repl_crypto.auth_challenge () in
+  let r1 = Repl_crypto.auth_response key nonce in
+  let r2 = Repl_crypto.auth_response key nonce in
+  Alcotest.(check string) "same key+nonce => same response" r1 r2
+
+let test_verify_auth_correct () =
+  let key = Repl_crypto.generate_key () in
+  let nonce = Repl_crypto.auth_challenge () in
+  let response = Repl_crypto.auth_response key nonce in
+  Alcotest.(check bool) "verify correct"
+    true (Repl_crypto.verify_auth key nonce response)
+
+let test_verify_auth_wrong_response () =
+  let key = Repl_crypto.generate_key () in
+  let nonce = Repl_crypto.auth_challenge () in
+  let bad_response = String.make 32 '\x00' in
+  Alcotest.(check bool) "reject wrong response"
+    false (Repl_crypto.verify_auth key nonce bad_response)
+
+let test_verify_auth_wrong_key () =
+  let k1 = Repl_crypto.generate_key () in
+  let k2 = Repl_crypto.generate_key () in
+  let nonce = Repl_crypto.auth_challenge () in
+  let response = Repl_crypto.auth_response k1 nonce in
+  Alcotest.(check bool) "reject wrong key"
+    false (Repl_crypto.verify_auth k2 nonce response)
+
+let test_key_fingerprint_format () =
+  let key = Repl_crypto.generate_key () in
+  let fp = Repl_crypto.key_fingerprint key in
+  (* SHA-256 = 32 bytes = 32 hex pairs with 31 colons = 95 chars *)
+  Alcotest.(check int) "fingerprint length" 95 (String.length fp);
+  (* All colons in right positions *)
+  let parts = String.split_on_char ':' fp in
+  Alcotest.(check int) "32 hex pairs" 32 (List.length parts);
+  List.iter (fun part ->
+    Alcotest.(check int) "each part is 2 chars" 2 (String.length part)
+  ) parts
+
+let prop_verify_auth_roundtrip =
+  QCheck2.Test.make ~count:200
+    ~name:"verify_auth(k, n, auth_response(k, n)) = true"
+    QCheck2.Gen.unit
+    (fun () ->
+       let key = Repl_crypto.generate_key () in
+       let nonce = Repl_crypto.auth_challenge () in
+       let response = Repl_crypto.auth_response key nonce in
+       Repl_crypto.verify_auth key nonce response)
+
+let prop_different_keys_different_responses =
+  QCheck2.Test.make ~count:200
+    ~name:"different keys produce different responses"
+    QCheck2.Gen.unit
+    (fun () ->
+       let k1 = Repl_crypto.generate_key () in
+       let k2 = Repl_crypto.generate_key () in
+       let nonce = Repl_crypto.auth_challenge () in
+       let r1 = Repl_crypto.auth_response k1 nonce in
+       let r2 = Repl_crypto.auth_response k2 nonce in
+       r1 <> r2)
+
 let () =
   Alcotest.run "Repl_crypto"
     [ ("encrypt_decrypt",
@@ -149,10 +218,23 @@ let () =
        [ Alcotest.test_case "verify" `Quick test_session_token_verify
        ; Alcotest.test_case "wrong key" `Quick test_session_token_wrong_key
        ])
+    ; ("auth",
+       [ Alcotest.test_case "challenge length" `Quick test_auth_challenge_length
+       ; Alcotest.test_case "response deterministic" `Quick
+           test_auth_response_deterministic
+       ; Alcotest.test_case "verify correct" `Quick test_verify_auth_correct
+       ; Alcotest.test_case "reject wrong response" `Quick
+           test_verify_auth_wrong_response
+       ; Alcotest.test_case "reject wrong key" `Quick test_verify_auth_wrong_key
+       ; Alcotest.test_case "fingerprint format" `Quick
+           test_key_fingerprint_format
+       ])
     ; ("properties",
        List.map QCheck_alcotest.to_alcotest
          [ prop_encrypt_decrypt_roundtrip
          ; prop_base64_roundtrip
          ; prop_ciphertext_has_overhead
+         ; prop_verify_auth_roundtrip
+         ; prop_different_keys_different_responses
          ])
     ]

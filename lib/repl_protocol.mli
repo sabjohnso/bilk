@@ -3,8 +3,8 @@
     Length-prefixed frames with a 1-byte tag. Frame format:
     [\[u32 payload_length\]\[u8 tag\]\[payload...\]]
 
-    Client and server message types are disjoint — tags 0x01-0x06
-    for client messages, 0x81-0x88 for server messages. *)
+    Client and server message types are disjoint — tags 0x01-0x07
+    for client messages, 0x81-0x8b for server messages. *)
 
 (** Messages sent from client to server. *)
 type client_msg =
@@ -14,6 +14,10 @@ type client_msg =
   | Input of string        (** Response to a read request. *)
   | Resume of string       (** Session token for resumption. *)
   | Disconnect             (** Clean disconnect. *)
+  | Auth_response of string * string
+      (** [Auth_response (hmac, nonce)] — client proves knowledge of the
+          key by sending HMAC of the server's nonce, plus a fresh nonce
+          for the server to prove back. Both strings are 32 bytes. *)
 
 (** Server readiness status. *)
 type status = Ready | Busy
@@ -28,6 +32,9 @@ type server_msg =
   | Status of status         (** Server readiness status. *)
   | Session_ok               (** Session resume accepted. *)
   | Session_deny             (** Session resume denied. *)
+  | Auth_challenge of string (** Server sends 32-byte nonce to client. *)
+  | Auth_ok of string        (** Server sends 32-byte HMAC proving its identity. *)
+  | Auth_deny                (** Server rejects client authentication. *)
 
 (** {1 Serialization} *)
 

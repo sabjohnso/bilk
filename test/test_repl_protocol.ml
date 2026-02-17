@@ -21,7 +21,10 @@ let client_msg_testable =
        | Repl_protocol.Resume s ->
          Format.fprintf fmt "Resume(%S)" s
        | Repl_protocol.Disconnect ->
-         Format.fprintf fmt "Disconnect")
+         Format.fprintf fmt "Disconnect"
+       | Repl_protocol.Auth_response (hmac, nonce) ->
+         Format.fprintf fmt "Auth_response(%d,%d)"
+           (String.length hmac) (String.length nonce))
     (=)
 
 let server_msg_testable =
@@ -45,7 +48,13 @@ let server_msg_testable =
        | Repl_protocol.Session_ok ->
          Format.fprintf fmt "Session_ok"
        | Repl_protocol.Session_deny ->
-         Format.fprintf fmt "Session_deny")
+         Format.fprintf fmt "Session_deny"
+       | Repl_protocol.Auth_challenge nonce ->
+         Format.fprintf fmt "Auth_challenge(%d)" (String.length nonce)
+       | Repl_protocol.Auth_ok hmac ->
+         Format.fprintf fmt "Auth_ok(%d)" (String.length hmac)
+       | Repl_protocol.Auth_deny ->
+         Format.fprintf fmt "Auth_deny")
     (=)
 
 (* --- Round-trip helpers --- *)
@@ -242,6 +251,38 @@ let prop_oversized_frame_raises =
          false  (* should have raised *)
        with Repl_protocol.Protocol_error "frame too large" -> true)
 
+(* --- Auth message round-trip tests --- *)
+
+let test_rt_auth_challenge () =
+  let nonce = String.make 32 '\xab' in
+  roundtrip_server (Repl_protocol.Auth_challenge nonce)
+
+let test_rt_auth_response () =
+  let hmac = String.make 32 '\xcd' in
+  let nonce = String.make 32 '\xef' in
+  roundtrip_client (Repl_protocol.Auth_response (hmac, nonce))
+
+let test_rt_auth_ok () =
+  let hmac = String.make 32 '\x12' in
+  roundtrip_server (Repl_protocol.Auth_ok hmac)
+
+let test_rt_auth_deny () =
+  roundtrip_server Repl_protocol.Auth_deny
+
+let test_auth_challenge_tag () =
+  let buf = Buffer.create 64 in
+  Repl_protocol.write_server_msg buf
+    (Repl_protocol.Auth_challenge (String.make 32 '\x00'));
+  let bytes = Buffer.contents buf in
+  Alcotest.(check int) "tag is 0x89" 0x89 (Char.code bytes.[4])
+
+let test_auth_response_tag () =
+  let buf = Buffer.create 64 in
+  Repl_protocol.write_client_msg buf
+    (Repl_protocol.Auth_response (String.make 32 '\x00', String.make 32 '\x00'));
+  let bytes = Buffer.contents buf in
+  Alcotest.(check int) "tag is 0x07" 0x07 (Char.code bytes.[4])
+
 let () =
   Alcotest.run "Repl_protocol"
     [ ("client_roundtrip",
@@ -264,6 +305,14 @@ let () =
        ; Alcotest.test_case "status busy" `Quick test_rt_status_busy
        ; Alcotest.test_case "session_ok" `Quick test_rt_session_ok
        ; Alcotest.test_case "session_deny" `Quick test_rt_session_deny
+       ])
+    ; ("auth_roundtrip",
+       [ Alcotest.test_case "auth_challenge" `Quick test_rt_auth_challenge
+       ; Alcotest.test_case "auth_response" `Quick test_rt_auth_response
+       ; Alcotest.test_case "auth_ok" `Quick test_rt_auth_ok
+       ; Alcotest.test_case "auth_deny" `Quick test_rt_auth_deny
+       ; Alcotest.test_case "challenge tag" `Quick test_auth_challenge_tag
+       ; Alcotest.test_case "response tag" `Quick test_auth_response_tag
        ])
     ; ("frame",
        [ Alcotest.test_case "length" `Quick test_frame_length

@@ -78,6 +78,8 @@ let validate_config config =
   else
     Ok ()
 
+let crypto_key t = t.crypto_key
+
 (* --- Client communication --- *)
 
 let accept_client t fd =
@@ -101,6 +103,60 @@ let shutdown t =
     (try Unix.close fd with Unix.Unix_error _ -> ())
   ) t.client_fd;
   t.client_fd <- None
+
+(* --- Authentication handshake --- *)
+
+let send_server_msg_to_fd fd msg =
+  let buf = Buffer.create 256 in
+  Repl_protocol.write_server_msg buf msg;
+  let data = Buffer.contents buf in
+  ignore (Unix.write_substring fd data 0 (String.length data))
+
+let read_client_msg_from_fd fd =
+  let buf = Buffer.create 256 in
+  let tmp = Bytes.create 4096 in
+  let rec loop () =
+    let data = Buffer.contents buf in
+    if Repl_protocol.frame_available data 0 then begin
+      let (msg, _) = Repl_protocol.read_client_msg data 0 in
+      Some msg
+    end else begin
+      let n = try Unix.read fd tmp 0 4096
+        with Unix.Unix_error _ -> 0 in
+      if n = 0 then None
+      else begin
+        Buffer.add_subbytes buf tmp 0 n;
+        loop ()
+      end
+    end
+  in
+  loop ()
+
+let authenticate_client t =
+  match t.crypto_key, t.client_fd with
+  | None, _ -> true  (* insecure mode *)
+  | _, None -> false  (* no client connected *)
+  | Some key, Some fd ->
+    (try
+       (* Step 1: send challenge *)
+       let server_nonce = Repl_crypto.auth_challenge () in
+       send_server_msg_to_fd fd (Repl_protocol.Auth_challenge server_nonce);
+       (* Step 2: read client response *)
+       match read_client_msg_from_fd fd with
+       | Some (Repl_protocol.Auth_response (client_hmac, client_nonce)) ->
+         if Repl_crypto.verify_auth key server_nonce client_hmac then begin
+           (* Step 3: prove server identity back *)
+           let server_hmac = Repl_crypto.auth_response key client_nonce in
+           send_server_msg_to_fd fd (Repl_protocol.Auth_ok server_hmac);
+           true
+         end else begin
+           send_server_msg_to_fd fd Repl_protocol.Auth_deny;
+           false
+         end
+       | _ ->
+         send_server_msg_to_fd fd Repl_protocol.Auth_deny;
+         false
+     with Unix.Unix_error _ | Repl_protocol.Protocol_error _ -> false)
 
 (* --- Auto-checkpoint on disconnect --- *)
 
@@ -558,6 +614,8 @@ let handle_client_msg t msg =
     () (* Input forwarding deferred to a later phase *)
   | Repl_protocol.Resume s ->
     handle_resume t s
+  | Repl_protocol.Auth_response _ ->
+    () (* Auth_response outside handshake is ignored *)
 
 (* --- Keepalive --- *)
 
@@ -606,7 +664,11 @@ let run t =
          if fd == server_sock then begin
            let (client_fd, _addr) = Unix.accept server_sock in
            accept_client t client_fd;
-           last_pong := Unix.gettimeofday ()
+           let auth_ok = authenticate_client t in
+           if not auth_ok then
+             disconnect_client t
+           else
+             last_pong := Unix.gettimeofday ()
          end else if Some fd = t.client_fd then begin
            let n = try Unix.read fd read_buf 0 4096
              with Unix.Unix_error _ -> 0

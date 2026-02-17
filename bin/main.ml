@@ -2135,6 +2135,11 @@ let run_serve port auto_checkpoint name bind insecure session_timeout =
    | Ok () -> ());
   let server = Repl_server.create config in
   Printf.printf "%s\n%!" (Repl_server.connect_line server);
+  (match Repl_server.crypto_key server with
+   | Some key ->
+     Printf.eprintf "Key fingerprint: %s\n%!"
+       (Repl_crypto.key_fingerprint key)
+   | None -> ());
   Printf.eprintf "Bilk REPL server '%s' listening on %s:%d\n%!"
     name bind port;
   (try Repl_server.run server
@@ -2203,6 +2208,14 @@ let run_attach host port theme paredit =
   let key = Sys.getenv_opt "BILK_KEY" in
   (* Clear the key from the environment so child processes don't inherit it *)
   Unix.putenv "BILK_KEY" "";
+  (match key with
+   | Some k ->
+     (match Repl_crypto.key_of_base64 k with
+      | Some raw_key ->
+        Printf.eprintf "Key fingerprint: %s\n%!"
+          (Repl_crypto.key_fingerprint raw_key)
+      | None -> ())
+   | None -> ());
   let config : Repl_client.config = {
     host; port; theme;
     history_file;

@@ -775,6 +775,109 @@ let test_eval_normal_under_input_limit () =
   Repl_server.shutdown server;
   Unix.close client_fd
 
+(* --- Auth handshake tests --- *)
+
+(* Helper: write a client message directly to a fd *)
+let write_client_msg fd msg =
+  let buf = Buffer.create 256 in
+  Repl_protocol.write_client_msg buf msg;
+  let data = Buffer.contents buf in
+  ignore (Unix.write_substring fd data 0 (String.length data))
+
+let make_secure_server () =
+  let config = {
+    Repl_server.port = 0;
+    auto_checkpoint = false;
+    name = "test";
+    bind_address = Unix.inet_addr_loopback;
+    session_timeout = 86400;
+    insecure = false;
+  } in
+  let server = Repl_server.create config in
+  let (client_fd, server_fd) = Unix.socketpair Unix.PF_UNIX Unix.SOCK_STREAM 0 in
+  Repl_server.accept_client server server_fd;
+  (server, client_fd, server_fd)
+
+let test_auth_sends_challenge () =
+  let (server, client_fd, _server_fd) = make_secure_server () in
+  let result = ref false in
+  (* Run authenticate_client in a thread since it blocks on read *)
+  let thread = Thread.create (fun () ->
+    result := Repl_server.authenticate_client server
+  ) () in
+  (* Client: read the Auth_challenge, then close without responding *)
+  let msgs = read_server_msgs client_fd in
+  let has_challenge = List.exists (function
+    | Repl_protocol.Auth_challenge n -> String.length n = 32
+    | _ -> false) msgs in
+  Unix.close client_fd;
+  Thread.join thread;
+  Alcotest.(check bool) "server sent challenge" true has_challenge;
+  Alcotest.(check bool) "auth fails without response" false !result;
+  Repl_server.shutdown server
+
+let test_auth_accepts_correct_response () =
+  let (server, client_fd, _server_fd) = make_secure_server () in
+  (* Spawn a thread to handle the client side of the handshake *)
+  let key = Repl_server.crypto_key server in
+  let result = ref false in
+  let thread = Thread.create (fun () ->
+    result := Repl_server.authenticate_client server
+  ) () in
+  (* Client side: read Auth_challenge, compute response, send Auth_response *)
+  let msgs = read_server_msgs client_fd in
+  let nonce = match msgs with
+    | [Repl_protocol.Auth_challenge n] -> n
+    | _ -> Alcotest.fail "expected Auth_challenge"
+  in
+  let key = match key with Some k -> k | None -> Alcotest.fail "expected key" in
+  let hmac = Repl_crypto.auth_response key nonce in
+  let client_nonce = Repl_crypto.auth_challenge () in
+  write_client_msg client_fd
+    (Repl_protocol.Auth_response (hmac, client_nonce));
+  (* Read server's Auth_ok *)
+  let msgs2 = read_server_msgs client_fd in
+  let has_auth_ok = List.exists (function
+    | Repl_protocol.Auth_ok _ -> true | _ -> false) msgs2 in
+  Thread.join thread;
+  Alcotest.(check bool) "server accepted auth" true !result;
+  Alcotest.(check bool) "server sent Auth_ok" true has_auth_ok;
+  Repl_server.shutdown server;
+  (try Unix.close client_fd with Unix.Unix_error _ -> ())
+
+let test_auth_rejects_wrong_response () =
+  let (server, client_fd, _server_fd) = make_secure_server () in
+  let result = ref false in
+  let thread = Thread.create (fun () ->
+    result := Repl_server.authenticate_client server
+  ) () in
+  (* Client side: read Auth_challenge, send wrong HMAC *)
+  let msgs = read_server_msgs client_fd in
+  (match msgs with
+   | [Repl_protocol.Auth_challenge _] -> ()
+   | _ -> Alcotest.fail "expected Auth_challenge");
+  let bad_hmac = String.make 32 '\x00' in
+  let client_nonce = String.make 32 '\xff' in
+  write_client_msg client_fd
+    (Repl_protocol.Auth_response (bad_hmac, client_nonce));
+  (* Read server's Auth_deny *)
+  let msgs2 = read_server_msgs client_fd in
+  let has_auth_deny = List.exists (function
+    | Repl_protocol.Auth_deny -> true | _ -> false) msgs2 in
+  Thread.join thread;
+  Alcotest.(check bool) "server rejected auth" false !result;
+  Alcotest.(check bool) "server sent Auth_deny" true has_auth_deny;
+  Repl_server.shutdown server;
+  (try Unix.close client_fd with Unix.Unix_error _ -> ())
+
+let test_insecure_server_no_auth () =
+  let (server, client_fd, _server_fd) = make_server () in
+  (* Insecure server: authenticate_client should return true immediately *)
+  let auth_ok = Repl_server.authenticate_client server in
+  Alcotest.(check bool) "insecure skips auth" true auth_ok;
+  Repl_server.shutdown server;
+  Unix.close client_fd
+
 let () =
   Alcotest.run "Repl_server"
     [ ("eval",
@@ -860,5 +963,15 @@ let () =
            test_eval_moderate_output
        ; Alcotest.test_case "normal under input limit" `Quick
            test_eval_normal_under_input_limit
+       ])
+    ; ("auth_handshake",
+       [ Alcotest.test_case "sends challenge" `Quick
+           test_auth_sends_challenge
+       ; Alcotest.test_case "accepts correct" `Quick
+           test_auth_accepts_correct_response
+       ; Alcotest.test_case "rejects wrong" `Quick
+           test_auth_rejects_wrong_response
+       ; Alcotest.test_case "insecure skips" `Quick
+           test_insecure_server_no_auth
        ])
     ]

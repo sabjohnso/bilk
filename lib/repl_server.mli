@@ -109,3 +109,15 @@ val connect_line : t -> string
 val validate_config : config -> (unit, string) result
 (** [validate_config config] checks that the configuration is valid.
     Rejects [insecure=true] with a non-loopback bind address. *)
+
+(** {1 Authentication} *)
+
+val authenticate_client : t -> bool
+(** [authenticate_client t] runs the mutual authentication handshake
+    with the connected client.  Returns [true] if the client proved
+    knowledge of the shared key.  In insecure mode, returns [true]
+    immediately without sending any messages. *)
+
+val crypto_key : t -> Repl_crypto.key option
+(** [crypto_key t] returns the server's encryption key, or [None] in
+    insecure mode.  Exposed for testing the handshake. *)

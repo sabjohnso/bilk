@@ -753,7 +753,7 @@ remote ~bilk serve~ command. A malicious ~serve_args~ value can inject
 - QCheck2 property test: output never contains ~--insecure~ or ~--bind~.
 - Tests: [[file:test/test_ssh_connect.ml][test_ssh_connect.ml]] build_serve_args group (5 tests).
 
-*** TODO Issue 66: No server authentication (MITM possible)
+*** DONE Issue 66: No server authentication (MITM possible)
 :PROPERTIES:
 :PRIORITY: A
 :CATEGORY: security
@@ -765,12 +765,27 @@ the SSH bootstrap or via other means, MITM is possible. There is no
 certificate pinning, no host key verification, and no trust-on-first-use
 mechanism.
 
-**** Plan
-- Implement server identity verification: e.g. server sends a challenge
-  signed with the shared key, or adopt a proper key exchange (Noise
-  protocol, STS) instead of pre-shared key
-- At minimum, add TOFU (trust-on-first-use): store server key fingerprint
-  on first connect, warn on mismatch
+**** Resolution
+- Implemented 3-message mutual challenge-response using HMAC-SHA256
+  with the pre-shared key.
+- After TCP connect (before any Eval/Complete messages), the server
+  sends =Auth_challenge(nonce)=, the client responds with
+  =Auth_response(HMAC, client_nonce)=, and the server verifies and
+  sends =Auth_ok(HMAC)= or =Auth_deny=. Both sides prove knowledge
+  of the key.
+- Crypto primitives: [[file:lib/repl_crypto.ml::auth_challenge][auth_challenge]], [[file:lib/repl_crypto.ml::auth_response][auth_response]],
+  [[file:lib/repl_crypto.ml::verify_auth][verify_auth]], [[file:lib/repl_crypto.ml::key_fingerprint][key_fingerprint]] in =repl_crypto.ml=.
+- Protocol messages: =Auth_challenge= (0x89), =Auth_response= (0x07),
+  =Auth_ok= (0x8a), =Auth_deny= (0x8b) in =repl_protocol.ml=.
+- Server handshake: [[file:lib/repl_server.ml::authenticate_client][authenticate_client]] integrated into =run=
+  after =accept=.
+- Client handshake: [[file:lib/repl_client.ml::authenticate][authenticate]] integrated into =connect=
+  after socket connection.
+- Key fingerprint displayed on server startup and client connect
+  for visual verification.
+- Insecure mode (=--insecure=): skips auth entirely (current behavior).
+- Tests: 8 in =test_repl_crypto.ml=, 6 in =test_repl_protocol.ml=,
+  4 in =test_repl_server.ml=, 3 in =test_repl_client.ml=.
 
 *** DONE Issue 67: Unbounded ~recv_buf~ growth in client
 :PROPERTIES:

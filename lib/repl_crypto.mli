@@ -60,3 +60,22 @@ val verify_token : key -> string -> string -> bool
 (** [verify_token k session_id token] returns [true] if [token] is a
     valid authentication token for [session_id] under [k].
     Uses constant-time comparison. *)
+
+(** {1 Mutual authentication} *)
+
+val auth_challenge : unit -> string
+(** [auth_challenge ()] generates a 32-byte random nonce. *)
+
+val auth_response : key -> string -> string
+(** [auth_response key nonce] computes [HMAC-SHA256(key, "bilk-auth:" ^ nonce)].
+    Used by the client to prove knowledge of the key, and by the server
+    to prove its identity back. *)
+
+val verify_auth : key -> string -> string -> bool
+(** [verify_auth key nonce response] returns [true] if [response] matches
+    [auth_response key nonce]. Uses constant-time comparison. *)
+
+val key_fingerprint : key -> string
+(** [key_fingerprint key] returns the SHA-256 hash of [key] formatted
+    as colon-separated hex pairs (e.g. ["ab:cd:ef:01:..."]). The result
+    is 95 characters long (32 hex pairs + 31 colons). *)

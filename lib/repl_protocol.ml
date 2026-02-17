@@ -5,6 +5,7 @@ type client_msg =
   | Input of string
   | Resume of string
   | Disconnect
+  | Auth_response of string * string
 
 type status = Ready | Busy
 
@@ -17,6 +18,9 @@ type server_msg =
   | Status of status
   | Session_ok
   | Session_deny
+  | Auth_challenge of string
+  | Auth_ok of string
+  | Auth_deny
 
 exception Protocol_error of string
 
@@ -74,6 +78,10 @@ let write_client_msg buf = function
     write_frame buf 0x05 (fun p -> write_bytes p s)
   | Disconnect ->
     write_frame buf 0x06 (fun _ -> ())
+  | Auth_response (hmac, nonce) ->
+    write_frame buf 0x07 (fun p ->
+      Buffer.add_string p hmac;
+      Buffer.add_string p nonce)
 
 let write_server_msg buf = function
   | Output s ->
@@ -95,6 +103,12 @@ let write_server_msg buf = function
     write_frame buf 0x87 (fun _ -> ())
   | Session_deny ->
     write_frame buf 0x88 (fun _ -> ())
+  | Auth_challenge nonce ->
+    write_frame buf 0x89 (fun p -> Buffer.add_string p nonce)
+  | Auth_ok hmac ->
+    write_frame buf 0x8a (fun p -> Buffer.add_string p hmac)
+  | Auth_deny ->
+    write_frame buf 0x8b (fun _ -> ())
 
 let max_frame_size = 16 * 1024 * 1024  (* 16 MiB *)
 
@@ -134,6 +148,10 @@ let read_client_msg data offset =
       let (s, _) = read_bytes data body_off in
       Resume s
     | 0x06 -> Disconnect
+    | 0x07 ->
+      let hmac = String.sub data body_off 32 in
+      let nonce = String.sub data (body_off + 32) 32 in
+      Auth_response (hmac, nonce)
     | _ -> raise (Protocol_error (Printf.sprintf "unknown client tag 0x%02x" tag))
   in
   (msg, next)
@@ -173,6 +191,13 @@ let read_server_msg data offset =
       Status (if b = 0 then Ready else Busy)
     | 0x87 -> Session_ok
     | 0x88 -> Session_deny
+    | 0x89 ->
+      let nonce = String.sub data body_off 32 in
+      Auth_challenge nonce
+    | 0x8a ->
+      let hmac = String.sub data body_off 32 in
+      Auth_ok hmac
+    | 0x8b -> Auth_deny
     | _ -> raise (Protocol_error (Printf.sprintf "unknown server tag 0x%02x" tag))
   in
   (msg, next)

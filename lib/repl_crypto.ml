@@ -190,3 +190,26 @@ let session_token key session_id =
 let verify_token key session_id token =
   let expected = session_token key session_id in
   Eqaf.equal expected token
+
+(* --- Authentication --- *)
+
+let auth_challenge () =
+  ensure_rng ();
+  Mirage_crypto_rng.generate 32
+
+let auth_response key nonce =
+  let data = "bilk-auth:" ^ nonce in
+  Digestif.SHA256.(to_raw_string (hmac_string ~key data))
+
+let verify_auth key nonce response =
+  let expected = auth_response key nonce in
+  Eqaf.equal expected response
+
+let key_fingerprint key =
+  let hash = Digestif.SHA256.(to_raw_string (digest_string key)) in
+  let buf = Buffer.create 95 in
+  String.iteri (fun i c ->
+    if i > 0 then Buffer.add_char buf ':';
+    Buffer.add_string buf (Printf.sprintf "%02x" (Char.code c))
+  ) hash;
+  Buffer.contents buf
