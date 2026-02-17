@@ -31,6 +31,10 @@ let send_msg conn msg =
   let _ = Unix.write_substring conn.fd data 0 (String.length data) in
   ()
 
+let rec read_eintr fd buf off len =
+  try Unix.read fd buf off len
+  with Unix.Unix_error (Unix.EINTR, _, _) -> read_eintr fd buf off len
+
 let recv_msg conn =
   (* Try to decode a complete frame from the buffer, reading more if needed *)
   let rec try_decode () =
@@ -44,7 +48,7 @@ let recv_msg conn =
       msg
     end else begin
       let tmp = Bytes.create 4096 in
-      let n = Unix.read conn.fd tmp 0 4096 in
+      let n = read_eintr conn.fd tmp 0 4096 in
       if n = 0 then raise End_of_file;
       Buffer.add_subbytes conn.recv_buf tmp 0 n;
       if Buffer.length conn.recv_buf > Repl_protocol.max_frame_size + 4 then
@@ -82,6 +86,33 @@ let authenticate conn key =
   | _ ->
     raise (Repl_protocol.Protocol_error "unexpected message during auth")
 
+(* --- Read_request prompt sanitization (Issue 76) --- *)
+
+let max_prompt_len = 79
+
+let sanitize_read_prompt raw =
+  (* Strip control characters and ANSI escape sequences *)
+  let buf = Buffer.create (String.length raw) in
+  let i = ref 0 in
+  let len = String.length raw in
+  while !i < len && Buffer.length buf < max_prompt_len do
+    let c = raw.[!i] in
+    if c = '\x1b' then begin
+      (* Skip ANSI escape sequence: ESC [ ... final_byte *)
+      incr i;
+      if !i < len && raw.[!i] = '[' then begin
+        incr i;
+        while !i < len && Char.code raw.[!i] < 0x40 do incr i done;
+        if !i < len then incr i  (* skip final byte *)
+      end
+    end else if Char.code c >= 0x20 || c = '\t' then begin
+      Buffer.add_char buf c;
+      incr i
+    end else
+      incr i
+  done;
+  "[remote] " ^ Buffer.contents buf
+
 (* --- eval_remote --- *)
 
 let eval_remote conn ~on_output ~on_read expr =
@@ -94,7 +125,7 @@ let eval_remote conn ~on_output ~on_read expr =
       | Repl_protocol.Error s -> `Error s
       | Repl_protocol.Output s -> on_output s; loop ()
       | Repl_protocol.Read_request prompt ->
-        let response = on_read prompt in
+        let response = on_read (sanitize_read_prompt prompt) in
         send_msg conn (Repl_protocol.Input response);
         loop ()
       | Repl_protocol.Status _
@@ -329,12 +360,15 @@ let connect config =
     read_line ()
   in
   let send_to_server trimmed =
-    (* Install SIGINT handler to send Interrupt during eval *)
+    (* Install SIGINT handler that only sets a flag (async-signal-safe).
+       The interrupt message is sent after eval_remote returns. *)
+    let interrupt_pending = ref false in
     let prev_sigint = Sys.signal Sys.sigint
-        (Sys.Signal_handle (fun _ ->
-           (try send_msg conn Repl_protocol.Interrupt with _ -> ())))
+        (Sys.Signal_handle (fun _ -> interrupt_pending := true))
     in
     let result = eval_remote conn ~on_output ~on_read trimmed in
+    if !interrupt_pending then
+      (try send_msg conn Repl_protocol.Interrupt with _ -> ());
     Sys.set_signal Sys.sigint prev_sigint;
     match result with
     | `Result s ->

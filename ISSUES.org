@@ -950,7 +950,7 @@ clause on the ~int_of_string_opt~ match rejects zero, negative, and
 >65535 values by returning ~None~.  Five new boundary tests cover zero,
 negative, >65535, and both valid endpoints (1 and 65535).
 
-*** TODO Issue 76: ~Read_request~ prompt injection
+*** DONE Issue 76: ~Read_request~ prompt injection
 :PROPERTIES:
 :PRIORITY: C
 :CATEGORY: security
@@ -960,12 +960,18 @@ negative, >65535, and both valid endpoints (1 and 65535).
 arbitrary prompt string, potentially social-engineering the user into
 entering credentials or sensitive data that gets sent back to the server.
 
-**** Plan
-- Prefix all server-originated prompts with a clear indicator (e.g.
-  ~[remote]~) so users know the prompt comes from the server
-- Optionally, allow users to deny read requests
+**** Resolution
+Added ~sanitize_read_prompt~ in [[file:lib/repl_client.ml][repl_client.ml]] that:
+1. Prefixes all server-originated prompts with ~[remote]~ so the user
+   knows the prompt comes from the server
+2. Strips control characters (bell, backspace, etc.) and ANSI escape
+   sequences to prevent terminal manipulation
+3. Truncates to 79 characters to prevent flooding
+Applied automatically in ~eval_remote~ before passing to ~on_read~.
+Seven new tests cover prefix, empty, control stripping, ANSI stripping,
+printable preservation, truncation, and integration.
 
-*** TODO Issue 77: Signal handler safety
+*** DONE Issue 77: Signal handler safety
 :PROPERTIES:
 :PRIORITY: C
 :CATEGORY: correctness
@@ -977,13 +983,18 @@ setting a flag and deferring the work. This is not async-signal-safe
 and can cause deadlocks or corruption if the signal interrupts a
 critical section.
 
-**** Plan
-- Change signal handlers to set a ~volatile~ flag
-- Check the flag in the main event loop and perform cleanup there
+**** Resolution
+- *Server*: Signal handler now only sets ~t.alive <- false~.  The
+  ~auto_checkpoint_on_disconnect~ call is deferred to after the main
+  loop exits, in normal code flow.
+- *Client*: SIGINT handler now only sets ~interrupt_pending := true~.
+  The Interrupt message is sent after ~eval_remote~ returns.
+  ~recv_msg~ retries on EINTR via ~read_eintr~ helper instead of
+  propagating EINTR as disconnection.
 
 ** LOW
 
-*** TODO Issue 78: Custom base64 codec in repl_crypto
+*** DONE Issue 78: Custom base64 codec in repl_crypto
 :PROPERTIES:
 :PRIORITY: C
 :CATEGORY: security
@@ -992,10 +1003,14 @@ critical section.
 [[file:lib/repl_crypto.ml][repl_crypto.ml]] — Uses a hand-rolled base64 encode/decode instead of
 a standard, audited library. Increases risk of subtle encoding bugs.
 
-**** Plan
-- Replace with ~Base64~ opam package or OCaml stdlib base64 if available
+**** Resolution
+Replaced ~75 lines of hand-rolled base64 encode/decode with the
+audited ~base64~ opam package (v3.5.2).  Uses ~Base64.uri_safe_alphabet~
+with ~pad:false~ to match the original URL-safe, no-padding format.
+Added dependency to ~dune-project~ and ~lib/dune~.  All existing
+base64 roundtrip tests pass unchanged.
 
-*** TODO Issue 79: No forward secrecy in crypto layer
+*** DONE Issue 79: No forward secrecy in crypto layer
 :PROPERTIES:
 :PRIORITY: C
 :CATEGORY: security
@@ -1005,7 +1020,16 @@ a standard, audited library. Increases risk of subtle encoding bugs.
 Compromise of the key exposes all past and future sessions using that
 key. No ephemeral key exchange (e.g. DH, ECDH) is performed.
 
-*** TODO Issue 80: No memory zeroization for key material
+**** Resolution
+Acknowledged limitation.  The SSH bootstrap (~bilk connect~) generates
+a fresh key per session, so key reuse across sessions does not occur
+in the primary use case.  Adding DH/ECDH ephemeral key exchange would
+require a significant protocol redesign (new handshake messages, key
+derivation, dependency on ~mirage-crypto-ec~) for a marginal threat
+model improvement — the pre-shared key is already transported over SSH.
+Documented in ~repl_crypto.mli~.
+
+*** DONE Issue 80: No memory zeroization for key material
 :PROPERTIES:
 :PRIORITY: C
 :CATEGORY: security
@@ -1018,7 +1042,15 @@ memory after use, potentially recoverable via memory dump.
 This is a fundamental OCaml limitation. Mitigation would require C stubs
 with ~explicit_bzero~ on pinned memory, which adds significant complexity.
 
-*** TODO Issue 81: No security-focused tests for remote REPL
+**** Resolution
+Acknowledged limitation.  OCaml strings are immutable and managed by
+the GC — there is no safe way to zero them without C stubs using
+pinned memory and ~explicit_bzero~.  The threat model (local memory
+dump) requires local root access, at which point the attacker can
+already read the process memory directly.  Documented in
+~repl_crypto.mli~.
+
+*** DONE Issue 81: No security-focused tests for remote REPL
 :PROPERTIES:
 :PRIORITY: B
 :CATEGORY: testing
@@ -1028,9 +1060,15 @@ Zero security-focused tests across all remote REPL modules: no tests for
 malformed frames, oversized payloads, path traversal attempts, invalid
 tokens, buffer overflow attempts, or concurrent connection abuse.
 
-**** Plan
-- Add adversarial test cases to each module's test file:
-  - ~test_repl_protocol.ml~: malformed frames, oversized headers, truncated payloads
-  - ~test_repl_server.ml~: path traversal in commands, oversized eval, invalid tokens
-  - ~test_repl_client.ml~: malicious server responses, buffer growth limits
-  - ~test_ssh_connect.ml~: flag injection, port validation edge cases
+**** Resolution
+Added 20 adversarial tests across four test files:
+- ~test_repl_protocol.ml~ (+7): unknown client/server tags, truncated
+  frames, zero-length frames, short headers, offset past end, truncated
+  auth_response payload
+- ~test_repl_server.ml~ (+4): oversized eval rejection, garbage bytes
+  handling, empty eval, null bytes in eval
+- ~test_repl_client.ml~ (+3): unexpected message types during eval,
+  rapid server disconnect, empty result strings
+- ~test_ssh_connect.ml~ (+6): flag injection in port field, flag-like
+  key accepted as opaque, extra fields rejected, empty user/host
+  rejected, invalid port in scan_for_connect

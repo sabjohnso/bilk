@@ -1,7 +1,7 @@
 (library
  (name bilk)
  (public_name bilk)
- (libraries unix dynlink yojson zarith mirage-crypto mirage-crypto-rng mirage-crypto-rng.unix digestif.ocaml eqaf)
+ (libraries unix dynlink yojson zarith mirage-crypto mirage-crypto-rng mirage-crypto-rng.unix digestif.ocaml eqaf base64)
  (foreign_stubs (language c) (names bilk_stubs ext_stubs inotify_stubs))
  (c_library_flags (-ldl))
  (install_c_headers bilk))

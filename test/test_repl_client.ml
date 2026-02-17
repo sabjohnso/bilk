@@ -104,7 +104,7 @@ let test_eval_read_request () =
   let result = Repl_client.eval_remote conn
     ~on_output:(fun _ -> ())
     ~on_read:(fun prompt ->
-      Alcotest.(check string) "prompt" "Enter: " prompt;
+      Alcotest.(check string) "prompt" "[remote] Enter: " prompt;
       read_called := true;
       "user-input")
     "(read)" in
@@ -350,6 +350,96 @@ let test_auth_fake_server () =
   Repl_client.close_connection conn;
   (try Unix.close server_fd with Unix.Unix_error _ -> ())
 
+(* --- Security: adversarial server responses --- *)
+
+let test_adversarial_unexpected_msg () =
+  (* Server sends Session_ok during eval — client should skip it *)
+  let (conn, server_fd) = make_pair () in
+  write_server_msg server_fd Repl_protocol.Session_ok;
+  write_server_msg server_fd (Repl_protocol.Result "ok");
+  let result = Repl_client.eval_remote conn
+    ~on_output:(fun _ -> ())
+    ~on_read:(fun _ -> "")
+    "(+ 1 2)" in
+  Alcotest.(check bool) "skips unexpected, gets result" true
+    (result = `Result "ok");
+  Repl_client.close_connection conn;
+  Unix.close server_fd
+
+let test_adversarial_rapid_disconnect () =
+  (* Server closes connection immediately after client sends Eval *)
+  Sys.set_signal Sys.sigpipe Sys.Signal_ignore;
+  let (conn, server_fd) = make_pair () in
+  Unix.close server_fd;
+  let result = Repl_client.eval_remote conn
+    ~on_output:(fun _ -> ())
+    ~on_read:(fun _ -> "")
+    "(loop)" in
+  Alcotest.(check bool) "returns disconnected" true
+    (result = `Disconnected);
+  Repl_client.close_connection conn
+
+let test_adversarial_empty_result () =
+  (* Server sends empty Result string *)
+  let (conn, server_fd) = make_pair () in
+  write_server_msg server_fd (Repl_protocol.Result "");
+  let result = Repl_client.eval_remote conn
+    ~on_output:(fun _ -> ())
+    ~on_read:(fun _ -> "")
+    "(void)" in
+  Alcotest.(check bool) "empty result ok" true
+    (result = `Result "");
+  Repl_client.close_connection conn;
+  Unix.close server_fd
+
+(* --- sanitize_read_prompt tests (Issue 76) --- *)
+
+let test_sanitize_prefix () =
+  Alcotest.(check string) "prefix added"
+    "[remote] Enter: " (Repl_client.sanitize_read_prompt "Enter: ")
+
+let test_sanitize_empty () =
+  Alcotest.(check string) "empty prompt"
+    "[remote] " (Repl_client.sanitize_read_prompt "")
+
+let test_sanitize_strips_control () =
+  (* Bell, backspace, escape sequences should be stripped *)
+  Alcotest.(check string) "control chars stripped"
+    "[remote] hello" (Repl_client.sanitize_read_prompt "\x07\x08hello")
+
+let test_sanitize_strips_ansi () =
+  Alcotest.(check string) "ANSI escape stripped"
+    "[remote] prompt" (Repl_client.sanitize_read_prompt "\x1b[31mprompt")
+
+let test_sanitize_preserves_printable () =
+  Alcotest.(check string) "printable preserved"
+    "[remote] Password: " (Repl_client.sanitize_read_prompt "Password: ")
+
+let test_sanitize_truncates_long () =
+  let long = String.make 200 'x' in
+  let result = Repl_client.sanitize_read_prompt long in
+  (* "[remote] " = 9 chars prefix + max 79 body chars = 88 *)
+  Alcotest.(check bool) "truncated" true (String.length result <= 88);
+  Alcotest.(check bool) "starts with prefix" true
+    (String.length result >= 9
+     && String.sub result 0 9 = "[remote] ")
+
+let test_eval_read_prompt_sanitized () =
+  let (conn, server_fd) = make_pair () in
+  write_server_msg server_fd (Repl_protocol.Read_request "Fake prompt: ");
+  write_server_msg server_fd (Repl_protocol.Result "done");
+  let received_prompt = ref "" in
+  let _result = Repl_client.eval_remote conn
+    ~on_output:(fun _ -> ())
+    ~on_read:(fun prompt ->
+      received_prompt := prompt;
+      "input")
+    "(read)" in
+  Alcotest.(check string) "prompt is sanitized"
+    "[remote] Fake prompt: " !received_prompt;
+  Repl_client.close_connection conn;
+  Unix.close server_fd
+
 (* --- Theme validation tests (Issue 72) --- *)
 
 let test_theme_builtin_dark () =
@@ -437,6 +527,25 @@ let () =
        [ Alcotest.test_case "success" `Quick test_auth_success
        ; Alcotest.test_case "deny" `Quick test_auth_deny
        ; Alcotest.test_case "fake server" `Quick test_auth_fake_server
+       ])
+    ; ("sanitize_read_prompt",
+       [ Alcotest.test_case "prefix" `Quick test_sanitize_prefix
+       ; Alcotest.test_case "empty" `Quick test_sanitize_empty
+       ; Alcotest.test_case "strips control" `Quick test_sanitize_strips_control
+       ; Alcotest.test_case "strips ANSI" `Quick test_sanitize_strips_ansi
+       ; Alcotest.test_case "preserves printable" `Quick
+           test_sanitize_preserves_printable
+       ; Alcotest.test_case "truncates long" `Quick test_sanitize_truncates_long
+       ; Alcotest.test_case "eval_remote sanitized" `Quick
+           test_eval_read_prompt_sanitized
+       ])
+    ; ("adversarial",
+       [ Alcotest.test_case "unexpected msg type" `Quick
+           test_adversarial_unexpected_msg
+       ; Alcotest.test_case "rapid disconnect" `Quick
+           test_adversarial_rapid_disconnect
+       ; Alcotest.test_case "empty result" `Quick
+           test_adversarial_empty_result
        ])
     ; ("theme_validation",
        [ Alcotest.test_case "dark" `Quick test_theme_builtin_dark

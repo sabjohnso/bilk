@@ -906,6 +906,61 @@ let test_accept_closes_previous_fd () =
   (try Unix.close c1 with Unix.Unix_error _ -> ());
   (try Unix.close c2 with Unix.Unix_error _ -> ())
 
+(* --- Security: adversarial inputs --- *)
+
+let test_adversarial_oversized_eval () =
+  let (server, client_fd, _server_fd) = make_server () in
+  (* Send an Eval exceeding the 1 MiB limit — server should reject *)
+  let huge = String.make 1_100_000 'x' in
+  Repl_server.handle_eval server huge;
+  let msgs = read_server_msgs client_fd in
+  let has_error = List.exists (function
+    | Repl_protocol.Error s -> String.length s > 0
+    | _ -> false
+  ) msgs in
+  Alcotest.(check bool) "oversized eval returns error" true has_error;
+  Repl_server.shutdown server;
+  Unix.close client_fd
+
+let test_adversarial_garbage_bytes () =
+  let (server, client_fd, server_fd) = make_server () in
+  (* Write garbage bytes to the server fd — should not crash *)
+  let garbage = String.make 50 '\xff' in
+  let _ = try Unix.write_substring server_fd garbage 0 50
+    with Unix.Unix_error _ -> 0 in
+  (* Server should still be alive *)
+  Alcotest.(check bool) "server alive after garbage" true
+    (Repl_server.is_alive server);
+  Repl_server.shutdown server;
+  (try Unix.close client_fd with Unix.Unix_error _ -> ());
+  (try Unix.close server_fd with Unix.Unix_error _ -> ())
+
+let test_adversarial_empty_eval () =
+  let (server, client_fd, _server_fd) = make_server () in
+  Repl_server.handle_eval server "";
+  let msgs = read_server_msgs client_fd in
+  (* Empty eval should produce a Result, not crash *)
+  let has_result = List.exists (function
+    | Repl_protocol.Result _ -> true
+    | _ -> false
+  ) msgs in
+  Alcotest.(check bool) "empty eval produces result" true has_result;
+  Repl_server.shutdown server;
+  Unix.close client_fd
+
+let test_adversarial_null_bytes_eval () =
+  let (server, client_fd, _server_fd) = make_server () in
+  Repl_server.handle_eval server "(+ 1\x00 2)";
+  let msgs = read_server_msgs client_fd in
+  (* Should produce some response (error or result), not crash *)
+  let has_response = List.exists (function
+    | Repl_protocol.Result _ | Repl_protocol.Error _ -> true
+    | _ -> false
+  ) msgs in
+  Alcotest.(check bool) "null bytes produce response" true has_response;
+  Repl_server.shutdown server;
+  Unix.close client_fd
+
 let () =
   Alcotest.run "Repl_server"
     [ ("eval",
@@ -1005,5 +1060,15 @@ let () =
     ; ("fd_leak",
        [ Alcotest.test_case "accept closes previous" `Quick
            test_accept_closes_previous_fd
+       ])
+    ; ("adversarial",
+       [ Alcotest.test_case "oversized eval rejected" `Quick
+           test_adversarial_oversized_eval
+       ; Alcotest.test_case "garbage bytes disconnect" `Quick
+           test_adversarial_garbage_bytes
+       ; Alcotest.test_case "empty eval ok" `Quick
+           test_adversarial_empty_eval
+       ; Alcotest.test_case "null bytes in eval" `Quick
+           test_adversarial_null_bytes_eval
        ])
     ]

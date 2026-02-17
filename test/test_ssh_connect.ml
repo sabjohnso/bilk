@@ -184,6 +184,42 @@ let prop_no_insecure_or_bind =
        let args = Ssh_connect.build_serve_args config in
        not (List.mem "--insecure" args) && not (List.mem "--bind" args))
 
+(* --- Security: adversarial inputs --- *)
+
+let test_parse_flag_injection_port () =
+  (* Port field containing shell metacharacters *)
+  let line = "BILK CONNECT --port=7890 key" in
+  Alcotest.(check bool) "flag in port rejected" true
+    (Ssh_connect.parse_connect_line line = None)
+
+let test_parse_flag_injection_key () =
+  (* Key field with flag-like content — should still parse (key is opaque) *)
+  let line = "BILK CONNECT 7890 --insecure" in
+  match Ssh_connect.parse_connect_line line with
+  | Some info ->
+    Alcotest.(check int) "port" 7890 info.port;
+    Alcotest.(check string) "key" "--insecure" info.key
+  | None -> Alcotest.fail "key --insecure should be accepted as opaque string"
+
+let test_parse_extra_fields_rejected () =
+  let line = "BILK CONNECT 7890 key extra" in
+  Alcotest.(check bool) "extra fields rejected" true
+    (Ssh_connect.parse_connect_line line = None)
+
+let test_target_empty_user () =
+  Alcotest.(check bool) "empty user rejected" true
+    (Ssh_connect.parse_target "@host" = None)
+
+let test_target_empty_host () =
+  Alcotest.(check bool) "empty host rejected" true
+    (Ssh_connect.parse_target "user@" = None)
+
+let test_scan_invalid_port_in_connect () =
+  let lines = ["BILK CONNECT 99999 mykey"] in
+  match Ssh_connect.scan_for_connect lines with
+  | Error (Ssh_connect.Invalid_connect_line _) -> ()
+  | _ -> Alcotest.fail "expected Invalid_connect_line for bad port"
+
 let () =
   Alcotest.run "Ssh_connect"
     [ ("parse_connect_line",
@@ -210,6 +246,20 @@ let () =
        ])
     ; ("property",
        [ QCheck_alcotest.to_alcotest test_roundtrip_property
+       ])
+    ; ("adversarial",
+       [ Alcotest.test_case "flag injection port" `Quick
+           test_parse_flag_injection_port
+       ; Alcotest.test_case "flag-like key accepted" `Quick
+           test_parse_flag_injection_key
+       ; Alcotest.test_case "extra fields rejected" `Quick
+           test_parse_extra_fields_rejected
+       ; Alcotest.test_case "empty user rejected" `Quick
+           test_target_empty_user
+       ; Alcotest.test_case "empty host rejected" `Quick
+           test_target_empty_host
+       ; Alcotest.test_case "invalid port in scan" `Quick
+           test_scan_invalid_port_in_connect
        ])
     ; ("build_serve_args",
        [ Alcotest.test_case "default config" `Quick test_default_config

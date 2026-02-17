@@ -29,6 +29,7 @@
   mirage-crypto-rng
   digestif
   eqaf
+  base64
   (odoc :with-doc)
   (alcotest :with-test)
   (qcheck-core :with-test)

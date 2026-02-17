@@ -82,6 +82,12 @@ val authenticate : connection -> Repl_crypto.key -> unit
     shared key, and proves knowledge of it in return.
     @raise Repl_protocol.Protocol_error if authentication fails. *)
 
+val sanitize_read_prompt : string -> string
+(** [sanitize_read_prompt raw] prepends ["[remote] "] to the prompt,
+    strips control characters and ANSI escape sequences, and truncates
+    to a reasonable length.  This prevents a malicious server from
+    social-engineering the user via crafted [Read_request] prompts. *)
+
 val validate_theme_name : string -> bool
 (** [validate_theme_name name] returns [true] if [name] is a safe
     theme name.  Built-in names (["dark"], ["light"], ["none"], ["off"])

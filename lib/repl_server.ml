@@ -643,7 +643,6 @@ let run t =
   Unix.bind server_sock (Unix.ADDR_INET (t.config.bind_address, t.config.port));
   Unix.listen server_sock 1;
   let handle_signal _ =
-    auto_checkpoint_on_disconnect t;
     t.alive <- false
   in
   Sys.set_signal Sys.sigint (Sys.Signal_handle handle_signal);
@@ -707,4 +706,6 @@ let run t =
    with e ->
      (try Unix.close server_sock with Unix.Unix_error _ -> ());
      raise e);
+  (* Deferred from signal handler — checkpoint in normal code flow *)
+  auto_checkpoint_on_disconnect t;
   (try Unix.close server_sock with Unix.Unix_error _ -> ())

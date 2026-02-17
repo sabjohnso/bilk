@@ -24,90 +24,12 @@ let generate_key () =
 
 (* --- Base64 encoding (URL-safe, no padding) --- *)
 
-let base64_alphabet =
-  "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
-
-let base64_encode s =
-  let n = String.length s in
-  let buf = Buffer.create (((n + 2) / 3) * 4) in
-  let i = ref 0 in
-  while !i + 2 < n do
-    let b0 = Char.code s.[!i] in
-    let b1 = Char.code s.[!i + 1] in
-    let b2 = Char.code s.[!i + 2] in
-    Buffer.add_char buf base64_alphabet.[(b0 lsr 2) land 0x3f];
-    Buffer.add_char buf base64_alphabet.[((b0 lsl 4) lor (b1 lsr 4)) land 0x3f];
-    Buffer.add_char buf base64_alphabet.[((b1 lsl 2) lor (b2 lsr 6)) land 0x3f];
-    Buffer.add_char buf base64_alphabet.[b2 land 0x3f];
-    i := !i + 3
-  done;
-  let rem = n - !i in
-  if rem = 1 then begin
-    let b0 = Char.code s.[!i] in
-    Buffer.add_char buf base64_alphabet.[(b0 lsr 2) land 0x3f];
-    Buffer.add_char buf base64_alphabet.[(b0 lsl 4) land 0x3f]
-  end else if rem = 2 then begin
-    let b0 = Char.code s.[!i] in
-    let b1 = Char.code s.[!i + 1] in
-    Buffer.add_char buf base64_alphabet.[(b0 lsr 2) land 0x3f];
-    Buffer.add_char buf base64_alphabet.[((b0 lsl 4) lor (b1 lsr 4)) land 0x3f];
-    Buffer.add_char buf base64_alphabet.[(b1 lsl 2) land 0x3f]
-  end;
-  Buffer.contents buf
-
-let base64_decode_char c =
-  match c with
-  | 'A' .. 'Z' -> Some (Char.code c - Char.code 'A')
-  | 'a' .. 'z' -> Some (Char.code c - Char.code 'a' + 26)
-  | '0' .. '9' -> Some (Char.code c - Char.code '0' + 52)
-  | '-' -> Some 62
-  | '_' -> Some 63
-  | _ -> None
-
-let base64_decode s =
-  let n = String.length s in
-  let buf = Buffer.create ((n * 3) / 4) in
-  let i = ref 0 in
-  let ok = ref true in
-  while !i < n && !ok do
-    let remaining = n - !i in
-    if remaining >= 4 then begin
-      match base64_decode_char s.[!i],
-            base64_decode_char s.[!i + 1],
-            base64_decode_char s.[!i + 2],
-            base64_decode_char s.[!i + 3] with
-      | Some a, Some b, Some c, Some d ->
-        Buffer.add_char buf (Char.chr (((a lsl 2) lor (b lsr 4)) land 0xff));
-        Buffer.add_char buf (Char.chr (((b lsl 4) lor (c lsr 2)) land 0xff));
-        Buffer.add_char buf (Char.chr (((c lsl 6) lor d) land 0xff));
-        i := !i + 4
-      | _ -> ok := false
-    end else if remaining = 3 then begin
-      match base64_decode_char s.[!i],
-            base64_decode_char s.[!i + 1],
-            base64_decode_char s.[!i + 2] with
-      | Some a, Some b, Some c ->
-        Buffer.add_char buf (Char.chr (((a lsl 2) lor (b lsr 4)) land 0xff));
-        Buffer.add_char buf (Char.chr (((b lsl 4) lor (c lsr 2)) land 0xff));
-        i := !i + 3
-      | _ -> ok := false
-    end else if remaining = 2 then begin
-      match base64_decode_char s.[!i],
-            base64_decode_char s.[!i + 1] with
-      | Some a, Some b ->
-        Buffer.add_char buf (Char.chr (((a lsl 2) lor (b lsr 4)) land 0xff));
-        i := !i + 2
-      | _ -> ok := false
-    end else
-      ok := false
-  done;
-  if !ok then Some (Buffer.contents buf) else None
-
-let key_to_base64 k = base64_encode k
+let key_to_base64 k =
+  Base64.encode_string ~pad:false ~alphabet:Base64.uri_safe_alphabet k
 
 let key_of_base64 s =
-  match base64_decode s with
-  | Some raw when String.length raw = key_len -> Some raw
+  match Base64.decode ~pad:false ~alphabet:Base64.uri_safe_alphabet s with
+  | Ok raw when String.length raw = key_len -> Some raw
   | _ -> None
 
 (* --- Cipher state --- *)

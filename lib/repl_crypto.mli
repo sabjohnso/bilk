@@ -5,7 +5,18 @@
     independent sequence counter encoded in the nonce, preventing
     cross-direction and replay attacks.
 
-    Session tokens use HMAC-SHA256 for reconnection authentication. *)
+    Session tokens use HMAC-SHA256 for reconnection authentication.
+
+    {b Known limitations:}
+    {ul
+      {- {b No forward secrecy.} A single pre-shared key is used per
+         session.  The SSH bootstrap generates a fresh key each time, so
+         key reuse across sessions does not occur in the primary use
+         case.  Ephemeral DH/ECDH would require a protocol redesign.}
+      {- {b No memory zeroization.} OCaml's GC-managed strings cannot
+         be reliably zeroed.  Key material may persist in memory after
+         use.  Mitigating this would require C stubs with pinned memory
+         and [explicit_bzero].}} *)
 
 (** {1 Keys} *)
 

@@ -283,6 +283,65 @@ let test_auth_response_tag () =
   let bytes = Buffer.contents buf in
   Alcotest.(check int) "tag is 0x07" 0x07 (Char.code bytes.[4])
 
+(* --- Security: adversarial inputs --- *)
+
+let test_unknown_client_tag () =
+  (* A frame with tag 0xFF should raise Protocol_error *)
+  let buf = Buffer.create 16 in
+  Buffer.add_string buf (encode_u32 1);  (* payload_len = 1 (just the tag) *)
+  Buffer.add_char buf '\xff';
+  let data = Buffer.contents buf in
+  Alcotest.check_raises "unknown client tag"
+    (Repl_protocol.Protocol_error "unknown client tag 0xff")
+    (fun () -> ignore (Repl_protocol.read_client_msg data 0))
+
+let test_unknown_server_tag () =
+  let buf = Buffer.create 16 in
+  Buffer.add_string buf (encode_u32 1);
+  Buffer.add_char buf '\x00';
+  let data = Buffer.contents buf in
+  Alcotest.check_raises "unknown server tag"
+    (Repl_protocol.Protocol_error "unknown server tag 0x00")
+    (fun () -> ignore (Repl_protocol.read_server_msg data 0))
+
+let test_truncated_frame_raises () =
+  (* A frame header claiming 100 bytes but only 5 bytes available *)
+  let data = encode_u32 100 ^ "\x01" in
+  Alcotest.check_raises "truncated frame"
+    (Repl_protocol.Protocol_error "incomplete frame")
+    (fun () -> ignore (Repl_protocol.read_client_msg data 0))
+
+let test_zero_length_frame () =
+  (* payload_len = 0 means no tag byte — should fail on read *)
+  let data = encode_u32 0 in
+  let raised = ref false in
+  (try ignore (Repl_protocol.read_client_msg data 0)
+   with _ -> raised := true);
+  Alcotest.(check bool) "zero-length frame raises" true !raised
+
+let test_frame_available_short_header () =
+  (* Less than 4 bytes — can't even read the length *)
+  Alcotest.(check bool) "short header" false
+    (Repl_protocol.frame_available "\x00\x00" 0)
+
+let test_frame_available_at_offset () =
+  (* Offset past end of data *)
+  Alcotest.(check bool) "offset past end" false
+    (Repl_protocol.frame_available "\x00\x00\x00\x01\x81" 10)
+
+let test_auth_response_truncated_payload () =
+  (* Auth_response expects 64 bytes (32 hmac + 32 nonce).
+     Send tag 0x07 with only 10 bytes of payload *)
+  let buf = Buffer.create 16 in
+  Buffer.add_string buf (encode_u32 11);  (* 1 tag + 10 bytes *)
+  Buffer.add_char buf '\x07';
+  Buffer.add_string buf (String.make 10 '\x00');
+  let data = Buffer.contents buf in
+  let raised = ref false in
+  (try ignore (Repl_protocol.read_client_msg data 0)
+   with Invalid_argument _ -> raised := true);
+  Alcotest.(check bool) "truncated auth_response raises" true !raised
+
 let () =
   Alcotest.run "Repl_protocol"
     [ ("client_roundtrip",
@@ -333,4 +392,20 @@ let () =
          ; prop_server_roundtrip
          ; prop_oversized_frame_raises
          ])
+    ; ("adversarial",
+       [ Alcotest.test_case "unknown client tag" `Quick
+           test_unknown_client_tag
+       ; Alcotest.test_case "unknown server tag" `Quick
+           test_unknown_server_tag
+       ; Alcotest.test_case "truncated frame" `Quick
+           test_truncated_frame_raises
+       ; Alcotest.test_case "zero-length frame" `Quick
+           test_zero_length_frame
+       ; Alcotest.test_case "short header" `Quick
+           test_frame_available_short_header
+       ; Alcotest.test_case "offset past end" `Quick
+           test_frame_available_at_offset
+       ; Alcotest.test_case "truncated auth_response" `Quick
+           test_auth_response_truncated_payload
+       ])
     ]
