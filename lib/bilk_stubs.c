@@ -470,3 +470,11 @@ void bilk_release(bilk_inst_t inst, bilk_val_t v) {
     ensure_cached();
     caml_callback2(*cb_release, Val_int(inst), Val_int(v));
 }
+
+/* ---- Environment ---- */
+
+CAMLprim value bilk_unsetenv(value name_v) {
+    CAMLparam1(name_v);
+    unsetenv(String_val(name_v));
+    CAMLreturn(Val_unit);
+}

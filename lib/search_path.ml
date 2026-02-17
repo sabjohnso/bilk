@@ -1,3 +1,5 @@
+external unsetenv : string -> unit = "bilk_unsetenv"
+
 let bilk_home () =
   match Sys.getenv_opt "BILK_HOME" with
   | Some dir when dir <> "" -> dir

@@ -16,6 +16,14 @@
     discovered via compile-time source path, binary-relative install path,
     or the [BILK_STDLIB] environment variable. *)
 
+(** {1 Environment} *)
+
+val unsetenv : string -> unit
+(** [unsetenv name] removes the environment variable [name] from the
+    process environment.  Unlike [Unix.putenv name ""], this truly
+    removes the variable so that [Sys.getenv_opt name] returns [None]
+    and the variable does not appear in [/proc/*/environ]. *)
+
 (** {1 Directory queries} *)
 
 val bilk_home : unit -> string

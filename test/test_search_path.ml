@@ -23,17 +23,13 @@ let with_env vars f =
   List.iter (fun (k, v) ->
     match v with
     | Some s -> Unix.putenv k s
-    | None ->
-      (* OCaml doesn't have unsetenv; use empty string as sentinel
-         and handle in tests, OR use a C binding.
-         For portability, set to empty which our code treats as unset. *)
-      Unix.putenv k ""
+    | None -> Search_path.unsetenv k
   ) vars;
   Fun.protect ~finally:(fun () ->
     List.iter (fun (k, v) ->
       match v with
       | Some s -> Unix.putenv k s
-      | None -> Unix.putenv k ""
+      | None -> Search_path.unsetenv k
     ) saved
   ) f
 
@@ -149,6 +145,21 @@ let test_resolve_filters_nonexistent () =
       let result = Search_path.resolve ~base_dirs:["/nonexistent/base"] in
       Alcotest.(check (list string)) "all filtered" [] result))
 
+(* --- unsetenv tests --- *)
+
+let test_unsetenv_removes_var () =
+  Unix.putenv "BILK_TEST_UNSETENV" "present";
+  Alcotest.(check (option string)) "before"
+    (Some "present") (Sys.getenv_opt "BILK_TEST_UNSETENV");
+  Search_path.unsetenv "BILK_TEST_UNSETENV";
+  Alcotest.(check (option string)) "after"
+    None (Sys.getenv_opt "BILK_TEST_UNSETENV")
+
+let test_unsetenv_absent_is_noop () =
+  Search_path.unsetenv "BILK_TEST_CERTAINLY_ABSENT";
+  Alcotest.(check (option string)) "still absent"
+    None (Sys.getenv_opt "BILK_TEST_CERTAINLY_ABSENT")
+
 (* --- Test suite --- *)
 
 let () =
@@ -175,5 +186,9 @@ let () =
       Alcotest.test_case "base only" `Quick test_resolve_base_only;
       Alcotest.test_case "order" `Quick test_resolve_order;
       Alcotest.test_case "filters nonexistent" `Quick test_resolve_filters_nonexistent;
+    ];
+    "unsetenv", [
+      Alcotest.test_case "removes var" `Quick test_unsetenv_removes_var;
+      Alcotest.test_case "absent is noop" `Quick test_unsetenv_absent_is_noop;
     ];
   ]

@@ -860,7 +860,7 @@ due to a bug or hang), the client loops forever with no timeout.
 - On timeout, return an error message rather than blocking indefinitely
 - Alternatively, use ~Unix.select~ with a deadline in the receive loop
 
-*** TODO Issue 71: ~BILK_KEY~ cleanup incomplete
+*** DONE Issue 71: ~BILK_KEY~ cleanup incomplete
 :PROPERTIES:
 :PRIORITY: B
 :CATEGORY: security
@@ -870,11 +870,17 @@ due to a bug or hang), the client loops forever with no timeout.
 empty string rather than unsetting it. The key may still appear in
 ~/proc/*/environ~ (as ~BILK_KEY=~). OCaml has no ~unsetenv~ binding.
 
-**** Plan
-- Write a C stub for ~unsetenv("BILK_KEY")~ or use ~Sys.remove~ if
-  available in newer OCaml versions
-- Alternatively, accept the limitation and document it, since the empty
-  value is not usable as a key
+**** Resolution
+- Added C stub [[file:lib/bilk_stubs.c::bilk_unsetenv][bilk_unsetenv]] calling POSIX ~unsetenv()~.
+- Exposed as [[file:lib/search_path.ml::unsetenv][Search_path.unsetenv]] (natural home alongside
+  other ~BILK_*~ env var handling).
+- [[file:bin/main.ml::run_attach][run_attach]] now calls ~Search_path.unsetenv "BILK_KEY"~
+  instead of ~Unix.putenv "BILK_KEY" ""~, fully removing the key
+  from the process environment and ~/proc/*/environ~.
+- Also updated [[file:test/test_search_path.ml::with_env][with_env]] test helper to use ~unsetenv~ for
+  proper cleanup.
+- Tests: 2 in [[file:test/test_search_path.ml][test_search_path.ml]] ~unsetenv~ group (removes
+  variable, absent is noop).
 
 *** DONE Issue 72: Theme path traversal via ~,theme~
 :PROPERTIES:

@@ -2213,8 +2213,8 @@ let make_serve_cmd () =
 
 let run_attach host port theme paredit =
   let key = Sys.getenv_opt "BILK_KEY" in
-  (* Clear the key from the environment so child processes don't inherit it *)
-  Unix.putenv "BILK_KEY" "";
+  (* Remove the key from the environment so child processes don't inherit it *)
+  Search_path.unsetenv "BILK_KEY";
   (match key with
    | Some k ->
      (match Repl_crypto.key_of_base64 k with
