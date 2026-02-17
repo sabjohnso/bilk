@@ -19,8 +19,8 @@ let parse_connect_line s =
   match split_words s with
   | ["BILK"; "CONNECT"; port_str; key] ->
     (match int_of_string_opt port_str with
-     | Some port -> Some { port; key }
-     | None -> None)
+     | Some port when port >= 1 && port <= 65535 -> Some { port; key }
+     | _ -> None)
   | _ -> None
 
 let parse_target s =

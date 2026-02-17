@@ -26,6 +26,33 @@ let test_parse_non_numeric_port () =
   Alcotest.(check bool) "non-numeric port" true
     (Ssh_connect.parse_connect_line line = None)
 
+let test_parse_port_zero () =
+  let line = "BILK CONNECT 0 key123" in
+  Alcotest.(check bool) "port zero" true
+    (Ssh_connect.parse_connect_line line = None)
+
+let test_parse_port_negative () =
+  let line = "BILK CONNECT -1 key123" in
+  Alcotest.(check bool) "negative port" true
+    (Ssh_connect.parse_connect_line line = None)
+
+let test_parse_port_too_high () =
+  let line = "BILK CONNECT 65536 key123" in
+  Alcotest.(check bool) "port > 65535" true
+    (Ssh_connect.parse_connect_line line = None)
+
+let test_parse_port_max_valid () =
+  let line = "BILK CONNECT 65535 key123" in
+  match Ssh_connect.parse_connect_line line with
+  | Some info -> Alcotest.(check int) "port" 65535 info.port
+  | None -> Alcotest.fail "expected Some for port 65535"
+
+let test_parse_port_min_valid () =
+  let line = "BILK CONNECT 1 key123" in
+  match Ssh_connect.parse_connect_line line with
+  | Some info -> Alcotest.(check int) "port" 1 info.port
+  | None -> Alcotest.fail "expected Some for port 1"
+
 let test_parse_extra_whitespace () =
   let line = "BILK CONNECT  7890  abc123" in
   match Ssh_connect.parse_connect_line line with
@@ -164,6 +191,11 @@ let () =
        ; Alcotest.test_case "wrong prefix" `Quick test_parse_wrong_prefix
        ; Alcotest.test_case "missing key" `Quick test_parse_missing_key
        ; Alcotest.test_case "non-numeric port" `Quick test_parse_non_numeric_port
+       ; Alcotest.test_case "port zero" `Quick test_parse_port_zero
+       ; Alcotest.test_case "negative port" `Quick test_parse_port_negative
+       ; Alcotest.test_case "port > 65535" `Quick test_parse_port_too_high
+       ; Alcotest.test_case "port 65535" `Quick test_parse_port_max_valid
+       ; Alcotest.test_case "port 1" `Quick test_parse_port_min_valid
        ; Alcotest.test_case "extra whitespace" `Quick test_parse_extra_whitespace
        ])
     ; ("parse_target",

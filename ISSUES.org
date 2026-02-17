@@ -935,7 +935,7 @@ information about the server's directory layout.
   replace with relative paths
 - Or catch ~Sys_error~ specifically and return a generic message
 
-*** TODO Issue 75: No port validation in SSH connect
+*** DONE Issue 75: No port validation in SSH connect
 :PROPERTIES:
 :PRIORITY: C
 :CATEGORY: correctness
@@ -944,9 +944,11 @@ information about the server's directory layout.
 [[file:lib/ssh_connect.ml][ssh_connect.ml]] — Port values are not validated: negative, zero, or
 >65535 values are accepted and passed to the remote command.
 
-**** Plan
-- Validate port range (1-65535) before constructing the SSH command
-- Return error for out-of-range values
+**** Resolution
+Added port range guard (~1..65535~) in ~parse_connect_line~: the ~when~
+clause on the ~int_of_string_opt~ match rejects zero, negative, and
+>65535 values by returning ~None~.  Five new boundary tests cover zero,
+negative, >65535, and both valid endpoints (1 and 65535).
 
 *** TODO Issue 76: ~Read_request~ prompt injection
 :PROPERTIES:
