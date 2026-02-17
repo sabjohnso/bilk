@@ -878,6 +878,34 @@ let test_insecure_server_no_auth () =
   Repl_server.shutdown server;
   Unix.close client_fd
 
+(* --- FD leak on client replacement (Issue 69) --- *)
+
+let test_accept_closes_previous_fd () =
+  let config = {
+    Repl_server.port = 0;
+    auto_checkpoint = false;
+    name = "test";
+    bind_address = Unix.inet_addr_loopback;
+    session_timeout = 86400;
+    insecure = true;
+  } in
+  let server = Repl_server.create config in
+  (* First client *)
+  let (c1, s1) = Unix.socketpair Unix.PF_UNIX Unix.SOCK_STREAM 0 in
+  Repl_server.accept_client server s1;
+  (* Second client replaces first *)
+  let (c2, s2) = Unix.socketpair Unix.PF_UNIX Unix.SOCK_STREAM 0 in
+  Repl_server.accept_client server s2;
+  (* s1 should now be closed — writing to it should raise EBADF *)
+  let s1_closed =
+    try ignore (Unix.write_substring s1 "x" 0 1); false
+    with Unix.Unix_error (Unix.EBADF, _, _) -> true
+  in
+  Alcotest.(check bool) "old server fd closed" true s1_closed;
+  Repl_server.shutdown server;
+  (try Unix.close c1 with Unix.Unix_error _ -> ());
+  (try Unix.close c2 with Unix.Unix_error _ -> ())
+
 let () =
   Alcotest.run "Repl_server"
     [ ("eval",
@@ -973,5 +1001,9 @@ let () =
            test_auth_rejects_wrong_response
        ; Alcotest.test_case "insecure skips" `Quick
            test_insecure_server_no_auth
+       ])
+    ; ("fd_leak",
+       [ Alcotest.test_case "accept closes previous" `Quick
+           test_accept_closes_previous_fd
        ])
     ]

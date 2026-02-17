@@ -83,6 +83,9 @@ let crypto_key t = t.crypto_key
 (* --- Client communication --- *)
 
 let accept_client t fd =
+  Option.iter (fun old_fd ->
+    (try Unix.close old_fd with Unix.Unix_error _ -> ())
+  ) t.client_fd;
   t.client_fd <- Some fd
 
 let send_to_client t msg =

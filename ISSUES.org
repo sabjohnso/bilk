@@ -829,7 +829,7 @@ expression or trigger output that exhausts server memory.
 - Tests: [[file:test/test_repl_server.ml][test_repl_server.ml]] ~eval_bounds~ group (3 tests:
   input too large, moderate output OK, normal under limit)
 
-*** TODO Issue 69: FD leak on client replacement in server
+*** DONE Issue 69: FD leak on client replacement in server
 :PROPERTIES:
 :PRIORITY: B
 :CATEGORY: correctness
@@ -839,9 +839,11 @@ expression or trigger output that exhausts server memory.
 closing the previous fd. If a second client connects while the first
 is still attached, the old fd is leaked.
 
-**** Plan
-- Close existing ~client_fd~ (if any) before assigning the new one
-- Write test: two successive ~accept_client~ calls don't leak fds
+**** Resolution
+- [[file:lib/repl_server.ml::accept_client][accept_client]] now closes the existing ~client_fd~ (if any)
+  before assigning the new one.
+- Test: [[file:test/test_repl_server.ml][test_repl_server.ml]] ~fd_leak~ group verifies the old
+  server-side fd is closed after replacement (write raises ~EBADF~).
 
 *** TODO Issue 70: Infinite loop in ~eval_remote~
 :PROPERTIES:
