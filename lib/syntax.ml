@@ -61,6 +61,7 @@ let rec from_datum loc (d : Datum.t) =
     | Datum.Hash_table _ -> Symbol "#<hash-table>"
     | Datum.Char_set _ -> Symbol "#<char-set>"
     | Datum.Regexp _ -> Symbol "#<regexp>"
+    | Datum.Opaque o -> Symbol (Printf.sprintf "#<%s>" o.opaque_type_name)
   in
   { loc; datum }
 

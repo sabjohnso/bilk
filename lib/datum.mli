@@ -53,6 +53,7 @@ and t =
   | Hash_table of hash_table   (** Mutable hash table (SRFI 69/125) *)
   | Char_set of char_set       (** Character set (SRFI 14) *)
   | Regexp of regexp           (** Compiled regular expression (SRFI 115) *)
+  | Opaque of opaque_val       (** Opaque native object (e.g. TCP listener, UDP socket) *)
 
 (** A lazy promise created by [delay] or [make-promise]. *)
 and promise = {
@@ -78,6 +79,15 @@ and char_set = {
 and regexp = {
   rx_compiled : Obj.t;  (** Compiled regex engine object *)
   rx_source : t;        (** Original SRE datum for display *)
+}
+
+(** An opaque native value wrapping an arbitrary OCaml object.
+    Used for types that don't fit the standard Datum model
+    (e.g. TCP listeners, UDP sockets, database handles). *)
+and opaque_val = {
+  opaque_type_name : string;   (** Type tag for display and type predicates *)
+  opaque_data : Obj.t;         (** The wrapped OCaml value *)
+  mutable opaque_open : bool;  (** Whether the resource is still open *)
 }
 
 (** A built-in primitive function. *)

@@ -233,6 +233,38 @@ let test_datum_port () =
   Alcotest.(check bool) "ports not equal" false
     (Datum.equal (Datum.Port ip) (Datum.Port ip))
 
+let test_datum_opaque () =
+  let o1 = Datum.Opaque {
+    opaque_type_name = "tcp-listener";
+    opaque_data = Obj.repr 42;
+    opaque_open = true;
+  } in
+  let o2 = Datum.Opaque {
+    opaque_type_name = "tcp-listener";
+    opaque_data = Obj.repr 42;
+    opaque_open = true;
+  } in
+  let o3 = Datum.Opaque {
+    opaque_type_name = "udp-socket";
+    opaque_data = Obj.repr 99;
+    opaque_open = true;
+  } in
+  (* Opaque values are never equal, even if identical *)
+  Alcotest.(check bool) "opaque never equal (same)" false (Datum.equal o1 o2);
+  Alcotest.(check bool) "opaque never equal (diff type)" false (Datum.equal o1 o3);
+  Alcotest.(check bool) "opaque != fixnum" false
+    (Datum.equal o1 (Datum.Fixnum 42));
+  (* pp displays as #<type-name> *)
+  Alcotest.(check string) "opaque pp tcp-listener"
+    "#<tcp-listener>" (Datum.to_string o1);
+  Alcotest.(check string) "opaque pp udp-socket"
+    "#<udp-socket>" (Datum.to_string o3);
+  (* display format same as pp *)
+  Alcotest.(check string) "opaque display"
+    "#<tcp-listener>" (Datum.to_display_string o1);
+  (* is_true: opaque values are truthy *)
+  Alcotest.(check bool) "opaque is true" true (Datum.is_true o1)
+
 let test_datum_complex () =
   (* Exact complex *)
   check_datum "3+4i exact" (Datum.Complex (Datum.Fixnum 3, Datum.Fixnum 4))
@@ -283,6 +315,7 @@ let () =
        ; Alcotest.test_case "rational" `Quick test_datum_rational
        ; Alcotest.test_case "bignum" `Quick test_datum_bignum
        ; Alcotest.test_case "port" `Quick test_datum_port
+       ; Alcotest.test_case "opaque" `Quick test_datum_opaque
        ; Alcotest.test_case "complex" `Quick test_datum_complex
        ])
     ; ("Helpers",

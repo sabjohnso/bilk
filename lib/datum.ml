@@ -38,6 +38,13 @@ and t =
   | Hash_table of hash_table
   | Char_set of char_set
   | Regexp of regexp
+  | Opaque of opaque_val
+
+and opaque_val = {
+  opaque_type_name : string;
+  opaque_data : Obj.t;
+  mutable opaque_open : bool;
+}
 
 and promise = {
   mutable promise_done : bool;
@@ -152,6 +159,7 @@ let rec equal a b =
   | Hash_table _, Hash_table _ -> false
   | Char_set a, Char_set b -> Bytes.equal a.cs_bits b.cs_bits
   | Regexp _, Regexp _ -> false
+  | Opaque _, Opaque _ -> false
   | _ -> false
 
 let pp_flonum_part f =
@@ -240,6 +248,8 @@ let rec pp fmt = function
     Format.fprintf fmt "#<char-set>"
   | Regexp _ ->
     Format.fprintf fmt "#<regexp>"
+  | Opaque o ->
+    Format.fprintf fmt "#<%s>" o.opaque_type_name
 
 and pp_tail fmt = function
   | Nil -> ()

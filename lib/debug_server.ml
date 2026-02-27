@@ -197,6 +197,7 @@ let datum_type d =
   | Datum.Continuation _ -> "continuation"
   | Datum.Values _ -> "values"
   | Datum.Error_object _ -> "error"
+  | Datum.Opaque o -> o.opaque_type_name
   | Datum.Eof -> "eof"
 
 let is_expandable d =

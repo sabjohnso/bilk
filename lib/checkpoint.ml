@@ -249,7 +249,7 @@ let rec write_ext_datum buf tbl (d : Datum.t) =
     write_u8 buf 22;
     Buffer.add_bytes buf cs.cs_bits
   (* Skipped: Continuation, Port, Regexp, Error_object → Void on restore *)
-  | Continuation _ | Port _ | Regexp _ | Error_object _ ->
+  | Continuation _ | Port _ | Regexp _ | Error_object _ | Opaque _ ->
     write_u8 buf 23
 
 (* Replicate the Scheme runtime's datum hashing for hash-table reconstruction.

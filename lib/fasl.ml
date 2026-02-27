@@ -199,6 +199,8 @@ let rec write_datum buf (d : Datum.t) =
     fasl_error "cannot serialize char-set"
   | Regexp _ ->
     fasl_error "cannot serialize regexp"
+  | Opaque o ->
+    fasl_error (Printf.sprintf "cannot serialize opaque: %s" o.opaque_type_name)
 
 let rec read_datum symbols data pos =
   let tag = read_u8 data pos in

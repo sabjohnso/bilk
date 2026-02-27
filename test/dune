@@ -11,6 +11,10 @@
  (libraries bilk alcotest yojson threads.posix))
 
 (test
+ (name test_net)
+ (libraries bilk alcotest threads.posix))
+
+(test
  (name test_c_embed)
  (libraries bilk)
  (foreign_stubs (language c) (names test_c_embed_impl test_c_embed_stub))

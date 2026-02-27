@@ -5275,6 +5275,115 @@ let create ?(readtable = Readtable.default) () =
     "regexp-match-submatch"; "regexp-match-submatch-start"; "regexp-match-submatch-end";
   ] in
   build_library inst ["srfi"; "115"] srfi_115_names [];
+  (* --- (bilk net) — networking primitives --- *)
+  register_late "tcp-connect" (fun args ->
+    match args with
+    | [Datum.Str host; Datum.Fixnum port] ->
+      let h = Bytes.to_string host in
+      (try
+         let inp, outp = Net.tcp_connect h port in
+         Datum.Pair { car = Port inp; cdr = Port outp }
+       with Failure msg -> runtime_error msg)
+    | _ -> runtime_error "tcp-connect: expected (string, integer)");
+  register_late "tcp-listen" (fun args ->
+    match args with
+    | [Datum.Fixnum port] ->
+      (try Net.tcp_listen port 5
+       with Failure msg -> runtime_error msg)
+    | [Datum.Fixnum port; Datum.Fixnum backlog] ->
+      (try Net.tcp_listen port backlog
+       with Failure msg -> runtime_error msg)
+    | _ -> runtime_error "tcp-listen: expected (integer) or (integer, integer)");
+  register_late "tcp-accept" (fun args ->
+    match args with
+    | [listener] ->
+      (try
+         let inp, outp = Net.tcp_accept listener in
+         Datum.Pair { car = Port inp; cdr = Port outp }
+       with Failure msg -> runtime_error msg)
+    | _ -> runtime_error "tcp-accept: expected (tcp-listener)");
+  register_late "tcp-listener?" (fun args ->
+    match args with
+    | [v] -> Datum.Bool (Net.is_tcp_listener v)
+    | _ -> runtime_error "tcp-listener?: expected 1 argument");
+  register_late "tcp-listener-port" (fun args ->
+    match args with
+    | [listener] ->
+      (try Datum.Fixnum (Net.tcp_listener_port listener)
+       with Failure msg -> runtime_error msg)
+    | _ -> runtime_error "tcp-listener-port: expected (tcp-listener)");
+  register_late "tcp-close" (fun args ->
+    match args with
+    | [listener] ->
+      (try Net.tcp_close listener; Datum.Void
+       with Failure msg -> runtime_error msg)
+    | _ -> runtime_error "tcp-close: expected (tcp-listener)");
+  register_late "udp-open" (fun args ->
+    match args with
+    | [] -> Net.udp_open ()
+    | _ -> runtime_error "udp-open: expected no arguments");
+  register_late "udp-socket?" (fun args ->
+    match args with
+    | [v] -> Datum.Bool (Net.is_udp_socket v)
+    | _ -> runtime_error "udp-socket?: expected 1 argument");
+  register_late "udp-bind!" (fun args ->
+    match args with
+    | [sock; Datum.Str addr; Datum.Fixnum port] ->
+      (try Net.udp_bind sock (Bytes.to_string addr) port; Datum.Void
+       with Failure msg -> runtime_error msg)
+    | _ -> runtime_error "udp-bind!: expected (udp-socket, string, integer)");
+  register_late "udp-send-to" (fun args ->
+    match args with
+    | [sock; Datum.Bytevector bv; Datum.Str addr; Datum.Fixnum port] ->
+      (try Datum.Fixnum (Net.udp_send_to sock bv (Bytes.to_string addr) port)
+       with Failure msg -> runtime_error msg)
+    | _ -> runtime_error "udp-send-to: expected (udp-socket, bytevector, string, integer)");
+  register_late "udp-receive" (fun args ->
+    match args with
+    | [sock; Datum.Fixnum max_len] ->
+      (try
+         let data, addr, port = Net.udp_receive sock max_len in
+         Datum.Pair { car = Bytevector data;
+                      cdr = Datum.Pair { car = Str (Bytes.of_string addr);
+                                         cdr = Fixnum port } }
+       with Failure msg -> runtime_error msg)
+    | _ -> runtime_error "udp-receive: expected (udp-socket, integer)");
+  register_late "udp-close" (fun args ->
+    match args with
+    | [sock] ->
+      (try Net.udp_close sock; Datum.Void
+       with Failure msg -> runtime_error msg)
+    | _ -> runtime_error "udp-close: expected (udp-socket)");
+  register_late "udp-local-address" (fun args ->
+    match args with
+    | [sock] ->
+      (try
+         let addr, port = Net.udp_local_address sock in
+         Datum.Pair { car = Str (Bytes.of_string addr); cdr = Fixnum port }
+       with Failure msg -> runtime_error msg)
+    | _ -> runtime_error "udp-local-address: expected (udp-socket)");
+  register_late "net-resolve" (fun args ->
+    match args with
+    | [Datum.Str host] ->
+      (try Datum.Str (Bytes.of_string (Net.net_resolve (Bytes.to_string host)))
+       with Failure msg -> runtime_error msg)
+    | _ -> runtime_error "net-resolve: expected (string)");
+  register_late "net-resolve-all" (fun args ->
+    match args with
+    | [Datum.Str host] ->
+      (try
+         let addrs = Net.net_resolve_all (Bytes.to_string host) in
+         Datum.list_of (List.map (fun s -> Datum.Str (Bytes.of_string s)) addrs)
+       with Failure msg -> runtime_error msg)
+    | _ -> runtime_error "net-resolve-all: expected (string)");
+  let bilk_net_names = [
+    "tcp-connect"; "tcp-listen"; "tcp-accept"; "tcp-listener?";
+    "tcp-listener-port"; "tcp-close";
+    "udp-open"; "udp-socket?"; "udp-bind!"; "udp-send-to";
+    "udp-receive"; "udp-close"; "udp-local-address";
+    "net-resolve"; "net-resolve-all";
+  ] in
+  build_library inst ["bilk"; "net"] bilk_net_names [];
   register_builtin_libraries inst;
   inst
 
